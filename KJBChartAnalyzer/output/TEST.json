@@ -1,0 +1,81 @@
+{
+  "ticker": "TEST",
+  "asof": "2026-01-23",
+  "close": 216.57312659279992,
+  "total_score": 59.5,
+  "grade": "C",
+  "action": "관찰",
+  "market_regime": "uptrend",
+  "signals": [
+    {
+      "name": "추세·이평선",
+      "score": 19,
+      "category": "trend",
+      "direction": "bullish",
+      "reason": "일봉배열=bullish_alignment, 주봉배열=bullish_alignment, 20일선 위=True, 상승구조=False, 교차=none, 20일 이격=2.9%",
+      "evidence": {}
+    },
+    {
+      "name": "지지·저항 위치",
+      "score": 0,
+      "category": "location",
+      "direction": "neutral",
+      "reason": "최근 지지=203.83143744510883, 최근 저항=None, 돌파=None, 지지이탈=None, 저항→지지=None",
+      "evidence": {}
+    },
+    {
+      "name": "캔들",
+      "score": -2,
+      "category": "candle",
+      "direction": "bearish",
+      "reason": "긴 위꼬리, 연속 3양봉, 도지, 고점권 도지",
+      "evidence": {}
+    },
+    {
+      "name": "거래량 확인",
+      "score": 0,
+      "category": "volume",
+      "direction": "neutral",
+      "reason": "중립",
+      "evidence": {
+        "relative_volume": 1.39
+      }
+    },
+    {
+      "name": "시장 구조",
+      "score": 0,
+      "category": "structure",
+      "direction": "neutral",
+      "reason": "저점 상승, 고점 하락",
+      "evidence": {}
+    },
+    {
+      "name": "패턴",
+      "score": -4,
+      "category": "pattern",
+      "direction": "bearish",
+      "reason": "쌍봉",
+      "evidence": {}
+    },
+    {
+      "name": "볼린저밴드",
+      "score": 6,
+      "category": "bollinger",
+      "direction": "bullish",
+      "reason": "상단 밴드워킹",
+      "evidence": {}
+    }
+  ],
+  "support_levels": [
+    173.35809460729288,
+    194.92158446241885,
+    199.29769496055405
+  ],
+  "resistance_levels": [
+    179.98568609887232,
+    203.83143744510883
+  ],
+  "stop_price": 199.2473,
+  "trailing_stop_price": 190.5844,
+  "notes": []
+}

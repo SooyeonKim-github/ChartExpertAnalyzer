@@ -1,0 +1,150 @@
+{
+  "ticker": "TEST",
+  "asof": "2026-01-23",
+  "close": 216.57312659279992,
+  "total_score": 68.9,
+  "grade": "B",
+  "action": "좋은 종목 · 관심 진입",
+  "market_regime": "uptrend",
+  "confluence_score": 59.5,
+  "technical_score": 72.5,
+  "technical_grade": "A",
+  "timing_score": 64.5,
+  "timing_grade": "B",
+  "risk_score": 26.0,
+  "risk_level": "낮음",
+  "chase_risk": "보통",
+  "entry_status": "좋은 종목 · 관심 진입",
+  "technical_components": {
+    "일봉 추세": 30,
+    "주봉 교차검증": 15,
+    "고저점 구조": 13.5,
+    "지지·저항 구조": 10.0,
+    "패턴·밴드 추세": 4.0
+  },
+  "timing_components": {
+    "가격 위치": 15.0,
+    "이평선·추격 위험": 21.0,
+    "캔들·거래량": 10.5,
+    "볼린저·시장": 18.0
+  },
+  "strengths": [
+    "일봉 이동평균선 정배열",
+    "주봉 정배열로 장기 추세 확인",
+    "저점 상승(Higher Low)",
+    "상승추세 상단 밴드워킹",
+    "20일선과 이격이 안정적",
+    "3연속 양봉",
+    "정배열 상단 밴드워킹",
+    "시장 상승추세"
+  ],
+  "risks": [
+    "고점 하락(Lower High)",
+    "쌍봉/더블탑 경계",
+    "고점권 긴 위꼬리"
+  ],
+  "signals": [
+    {
+      "name": "추세·이평선",
+      "score": 19,
+      "category": "trend",
+      "direction": "bullish",
+      "reason": "일봉배열=bullish_alignment, 주봉배열=bullish_alignment, 20일선 위=True, 상승구조=False, 교차=none, 20일 이격=2.9%",
+      "evidence": {}
+    },
+    {
+      "name": "지지·저항 위치",
+      "score": 0,
+      "category": "location",
+      "direction": "neutral",
+      "reason": "최근 지지=203.83143744510883, 최근 저항=None, 돌파=None, 지지이탈=None, 저항→지지=None",
+      "evidence": {}
+    },
+    {
+      "name": "캔들",
+      "score": -2,
+      "category": "candle",
+      "direction": "bearish",
+      "reason": "긴 위꼬리, 연속 3양봉, 도지, 고점권 도지",
+      "evidence": {}
+    },
+    {
+      "name": "거래량 확인",
+      "score": 0,
+      "category": "volume",
+      "direction": "neutral",
+      "reason": "중립",
+      "evidence": {
+        "relative_volume": 1.39
+      }
+    },
+    {
+      "name": "시장 구조",
+      "score": 0,
+      "category": "structure",
+      "direction": "neutral",
+      "reason": "저점 상승, 고점 하락",
+      "evidence": {}
+    },
+    {
+      "name": "패턴",
+      "score": -4,
+      "category": "pattern",
+      "direction": "bearish",
+      "reason": "쌍봉",
+      "evidence": {}
+    },
+    {
+      "name": "볼린저밴드",
+      "score": 6,
+      "category": "bollinger",
+      "direction": "bullish",
+      "reason": "상단 밴드워킹",
+      "evidence": {}
+    }
+  ],
+  "support_levels": [
+    173.35809460729288,
+    194.92158446241885,
+    199.29769496055405
+  ],
+  "resistance_levels": [
+    179.98568609887232,
+    203.83143744510883
+  ],
+  "stop_price": 199.2473,
+  "trailing_stop_price": 190.5844,
+  "entry_plan": [
+    {
+      "step": 1,
+      "fraction": 0.3,
+      "trigger": "초기 구조·타이밍 확인",
+      "status": "충족"
+    },
+    {
+      "step": 2,
+      "fraction": 0.2,
+      "trigger": "골든크로스 또는 정배열 강화",
+      "status": "충족"
+    },
+    {
+      "step": 3,
+      "fraction": 0.15,
+      "trigger": "저항·넥라인 거래량 돌파",
+      "status": "대기"
+    },
+    {
+      "step": 4,
+      "fraction": 0.1,
+      "trigger": "돌파 후 눌림목 지지 확인",
+      "status": "대기"
+    },
+    {
+      "step": 5,
+      "fraction": 0.1,
+      "trigger": "재돌파/상승추세 지속 확인",
+      "status": "충족"
+    }
+  ],
+  "notes": []
+}

@@ -1,0 +1,13 @@
+﻿ticker,name,date,stage,error
+000880,한화,2026-08-05,analyze,float division by zero
+000880,한화,2026-08-06,analyze,float division by zero
+000880,한화,2026-08-07,analyze,float division by zero
+000880,한화,2026-08-10,analyze,float division by zero
+000880,한화,2026-08-11,analyze,float division by zero
+000880,한화,2026-08-12,analyze,float division by zero
+000880,한화,2026-08-13,analyze,float division by zero
+000880,한화,2026-08-14,analyze,float division by zero
+000880,한화,2026-08-18,analyze,float division by zero
+000880,한화,2026-08-19,analyze,float division by zero
+000880,한화,2026-08-20,analyze,float division by zero
+000880,한화,2026-08-21,analyze,float division by zero

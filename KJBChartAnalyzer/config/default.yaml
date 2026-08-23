@@ -1,0 +1,69 @@
+market:
+  benchmark: '^KS11'
+  timeframe: '1d'
+
+moving_average:
+  short: 5
+  life: 20
+  mid: 60
+  long: 120
+  slope_lookback: 5
+  distance_warn_life_pct: 0.12
+  distance_warn_long_pct: 0.25
+
+volume:
+  avg_window: 20
+  confirm_ratio: 1.5
+  strong_ratio: 2.0
+  dry_ratio: 0.7
+
+bollinger:
+  window: 21
+  std_mult: 2.0
+  squeeze_lookback: 120
+  squeeze_percentile: 0.20
+
+candlestick:
+  doji_body_ratio: 0.12
+  long_wick_ratio: 0.45
+  long_body_ratio: 0.60
+
+structure:
+  pivot_left: 3
+  pivot_right: 3
+  level_tolerance_pct: 0.02
+  min_level_touches: 2
+  breakout_buffer_pct: 0.005
+  pattern_lookback: 180
+
+selection:
+  min_score: 62
+  watch_score: 52
+  max_candidates: 30
+  reject_if_below_long_ma: false
+  require_market_uptrend_for_pyramiding: true
+
+
+timing:
+  chase_recent_5d_return: 0.10
+  timing_good: 70
+  timing_excellent: 80
+  technical_good: 72
+  technical_strong: 80
+  risk_high: 65
+
+risk:
+  initial_stop_pct: 0.08
+  max_stop_pct: 0.20
+  trailing_stop_pct: 0.12
+  initial_entry_pct: 0.30
+  add_entry_pcts: [0.20, 0.15, 0.10, 0.10]
+
+weights:
+  trend: 24
+  location: 16
+  candle: 10
+  volume: 14
+  structure: 16
+  pattern: 10
+  bollinger: 10

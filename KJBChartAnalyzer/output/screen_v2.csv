@@ -1,0 +1,2 @@
+﻿ticker,asof,close,score,grade,technical_score,technical_grade,timing_score,timing_grade,risk_score,risk_level,confluence_score,chase_risk,action,market_regime,stop_price,trailing_stop,bullish_signals,bearish_signals,top_strengths,top_risks
+TEST,2026-01-23,216.57312659279992,68.9,B,72.5,A,64.5,B,26.0,낮음,59.5,보통,좋은 종목 · 관심 진입,uptrend,199.2473,190.5844,2,2,일봉 이동평균선 정배열 | 주봉 정배열로 장기 추세 확인 | 저점 상승(Higher Low),고점 하락(Lower High) | 쌍봉/더블탑 경계 | 고점권 긴 위꼬리
