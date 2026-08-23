@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 from pathlib import Path
 
+import numpy as np
 import pandas as pd
 
 from chartsel.config import load_config
@@ -37,6 +38,22 @@ def build_parser():
     return p
 
 
+def _fetch_bounds(start: pd.Timestamp, end: pd.Timestamp, history_days: int, forward_bars: int) -> tuple[str, str]:
+    fetch_start = (start - pd.Timedelta(days=int(history_days))).strftime('%Y-%m-%d')
+    forward_calendar_days = max(120, int(int(forward_bars) * 2.0))
+    fetch_end = (end + pd.Timedelta(days=forward_calendar_days)).strftime('%Y-%m-%d')
+    return fetch_start, fetch_end
+
+
+def _normalize_market(value) -> str:
+    text = str(value or '').strip().upper()
+    if 'KOSDAQ' in text or text in {'KQ', '^KQ11', '2001'}:
+        return 'KOSDAQ'
+    if 'KOSPI' in text or text in {'KS', '^KS11', '1001'}:
+        return 'KOSPI'
+    return ''
+
+
 def _build_market_regime_daily(
     provider: PykrxDataProvider,
     analyzer: ChartAnalyzer,
@@ -45,16 +62,9 @@ def _build_market_regime_daily(
     history_days: int,
     forward_bars: int,
 ) -> pd.DataFrame:
-    """각 거래일 시점까지의 지수 데이터만 사용해 KOSPI/KOSDAQ Regime을 계산한다.
-
-    RangeBacktester가 이미 조회한 benchmark와 동일한 조회구간을 사용해 provider의
-    memory/file cache를 재사용한다. 미래 구간을 함께 받아도 Regime 판정 시에는
-    signal_date 이하 prefix만 사용하므로 look-ahead는 발생하지 않는다.
-    """
+    """각 거래일 시점까지의 지수 데이터만 사용해 시장 Regime/Stretch를 계산한다."""
     rows: list[dict] = []
-    fetch_start = (start - pd.Timedelta(days=int(history_days))).strftime('%Y-%m-%d')
-    forward_calendar_days = max(120, int(int(forward_bars) * 2.0))
-    fetch_end = (end + pd.Timedelta(days=forward_calendar_days)).strftime('%Y-%m-%d')
+    fetch_start, fetch_end = _fetch_bounds(start, end, history_days, forward_bars)
     min_hist = max(int(analyzer.cfg['moving_average']['long']) + 10, 140)
 
     for market, benchmark in [('KOSPI', '^KS11'), ('KOSDAQ', '^KQ11')]:
@@ -65,34 +75,50 @@ def _build_market_regime_daily(
             raw = raw.copy()
             raw.index = pd.to_datetime(raw.index).normalize()
             raw = raw[~raw.index.duplicated(keep='last')].sort_index()
+            close = pd.to_numeric(raw['Close'], errors='coerce')
 
             target_dates = raw.index[(raw.index >= start) & (raw.index <= end)]
             for signal_date in target_dates:
                 hist = raw.loc[raw.index <= signal_date].copy()
+                hclose = pd.to_numeric(hist['Close'], errors='coerce').dropna()
+                current = float(hclose.iloc[-1]) if not hclose.empty else float('nan')
+                ret5 = float(current / hclose.iloc[-6] - 1.0) if len(hclose) >= 6 else np.nan
+                ret20 = float(current / hclose.iloc[-21] - 1.0) if len(hclose) >= 21 else np.nan
+                high20 = float(hclose.tail(20).max()) if len(hclose) >= 1 else np.nan
+                drawdown20 = float(current / high20 - 1.0) if np.isfinite(high20) and high20 else np.nan
+                ma20 = float(hclose.tail(20).mean()) if len(hclose) >= 20 else np.nan
+                ma60 = float(hclose.tail(60).mean()) if len(hclose) >= 60 else np.nan
+                gap20 = float(current / ma20 - 1.0) if np.isfinite(ma20) and ma20 else np.nan
+                gap60 = float(current / ma60 - 1.0) if np.isfinite(ma60) and ma60 else np.nan
+                returns = hclose.pct_change().dropna()
+                vol20 = float(returns.tail(20).std()) if len(returns) >= 20 else np.nan
+                vol120 = float(returns.tail(120).std()) if len(returns) >= 120 else np.nan
+
                 if len(hist) < min_hist:
-                    rows.append({
-                        'date': pd.Timestamp(signal_date).normalize(),
-                        'market': market,
-                        'benchmark': benchmark,
-                        'market_regime': 'unknown',
-                        'index_close': float(hist['Close'].iloc[-1]) if not hist.empty else float('nan'),
-                        'history_bars': int(len(hist)),
-                        'regime_warning': f'히스토리 부족({len(hist)}<{min_hist})',
-                    })
-                    continue
-                try:
-                    prepared = analyzer.prepare(hist)
-                    regime = classify_market_regime(prepared, analyzer.cfg['moving_average'])
-                    warning = ''
-                except Exception as exc:
                     regime = 'unknown'
-                    warning = str(exc)
+                    warning = f'히스토리 부족({len(hist)}<{min_hist})'
+                else:
+                    try:
+                        prepared = analyzer.prepare(hist)
+                        regime = classify_market_regime(prepared, analyzer.cfg['moving_average'])
+                        warning = ''
+                    except Exception as exc:
+                        regime = 'unknown'
+                        warning = str(exc)
+
                 rows.append({
                     'date': pd.Timestamp(signal_date).normalize(),
                     'market': market,
                     'benchmark': benchmark,
                     'market_regime': regime,
-                    'index_close': float(hist['Close'].iloc[-1]),
+                    'index_close': current,
+                    'index_return_5d': ret5,
+                    'index_return_20d': ret20,
+                    'index_drawdown_20d': drawdown20,
+                    'index_ma20_gap': gap20,
+                    'index_ma60_gap': gap60,
+                    'index_volatility_20d': vol20,
+                    'index_volatility_120d': vol120,
                     'history_bars': int(len(hist)),
                     'regime_warning': warning,
                 })
@@ -103,6 +129,13 @@ def _build_market_regime_daily(
                 'benchmark': benchmark,
                 'market_regime': 'unknown',
                 'index_close': float('nan'),
+                'index_return_5d': np.nan,
+                'index_return_20d': np.nan,
+                'index_drawdown_20d': np.nan,
+                'index_ma20_gap': np.nan,
+                'index_ma60_gap': np.nan,
+                'index_volatility_20d': np.nan,
+                'index_volatility_120d': np.nan,
                 'history_bars': 0,
                 'regime_warning': f'시장지수 조회 실패: {exc}',
             })
@@ -111,6 +144,74 @@ def _build_market_regime_daily(
     if not out.empty:
         out = out.sort_values(['date', 'market'], na_position='last').reset_index(drop=True)
     return out
+
+
+def _build_market_breadth_daily(
+    provider: PykrxDataProvider,
+    universe: pd.DataFrame,
+    start: pd.Timestamp,
+    end: pd.Timestamp,
+    history_days: int,
+    forward_bars: int,
+) -> pd.DataFrame:
+    """Range Universe 내부 종목으로 point-in-time breadth를 계산한다.
+
+    RangeBacktester와 동일 provider/조회구간을 사용하므로 이미 받은 종목 데이터는
+    memory cache를 재사용한다. 신호일 이후 데이터는 각 지표 계산에 사용하지 않는다.
+    """
+    if universe is None or universe.empty:
+        return pd.DataFrame()
+
+    fetch_start, fetch_end = _fetch_bounds(start, end, history_days, forward_bars)
+    records: list[pd.DataFrame] = []
+
+    for row in universe.itertuples(index=False):
+        ticker = str(getattr(row, 'ticker', '')).strip().zfill(6)
+        market = _normalize_market(getattr(row, 'market', ''))
+        if not ticker or not market:
+            continue
+        try:
+            raw = provider.get_ohlcv_by_date(ticker, fetch_start, fetch_end)
+            if raw is None or raw.empty:
+                continue
+            x = raw.copy()
+            x.index = pd.to_datetime(x.index).normalize()
+            x = x[~x.index.duplicated(keep='last')].sort_index()
+            close = pd.to_numeric(x['Close'], errors='coerce')
+            ma20 = close.rolling(20, min_periods=20).mean()
+            ma60 = close.rolling(60, min_periods=60).mean()
+            ret5 = close.pct_change(5)
+            ret20 = close.pct_change(20)
+
+            target = pd.DataFrame(index=x.index)
+            target['ticker'] = ticker
+            target['market'] = market
+            target['above_ma20'] = np.where(ma20.notna(), (close > ma20).astype(float), np.nan)
+            target['above_ma60'] = np.where(ma60.notna(), (close > ma60).astype(float), np.nan)
+            target['positive_5d'] = np.where(ret5.notna(), (ret5 > 0).astype(float), np.nan)
+            target['positive_20d'] = np.where(ret20.notna(), (ret20 > 0).astype(float), np.nan)
+            target = target[(target.index >= start) & (target.index <= end)]
+            if target.empty:
+                continue
+            target = target.reset_index().rename(columns={'index': 'date'})
+            records.append(target)
+        except Exception:
+            continue
+
+    if not records:
+        return pd.DataFrame()
+
+    detail = pd.concat(records, ignore_index=True)
+    grouped = detail.groupby(['date', 'market'], as_index=False).agg(
+        breadth_stock_count=('ticker', 'nunique'),
+        breadth_valid_ma20=('above_ma20', 'count'),
+        breadth_valid_ma60=('above_ma60', 'count'),
+        breadth_above_ma20_ratio=('above_ma20', 'mean'),
+        breadth_above_ma60_ratio=('above_ma60', 'mean'),
+        breadth_positive_5d_ratio=('positive_5d', 'mean'),
+        breadth_positive_20d_ratio=('positive_20d', 'mean'),
+    )
+    return grouped.sort_values(['date', 'market']).reset_index(drop=True)
 
 
 def main():
@@ -147,6 +248,13 @@ def main():
     market_regime_daily = _build_market_regime_daily(
         provider, analyzer, start, end, args.history_days, args.forward_bars
     )
+    market_breadth_daily = _build_market_breadth_daily(
+        provider, universe, start, end, args.history_days, args.forward_bars
+    )
+    if not market_breadth_daily.empty:
+        market_regime_daily = market_regime_daily.merge(
+            market_breadth_daily, on=['date', 'market'], how='left'
+        )
 
     out_dir = Path(args.output_root) / f'range_{start:%Y%m%d}_{end:%Y%m%d}'
     out_dir.mkdir(parents=True, exist_ok=True)
@@ -156,12 +264,14 @@ def main():
     universe_csv = out_dir / 'universe.csv'
     error_csv = out_dir / 'errors.csv'
     regime_csv = out_dir / 'market_regime_daily.csv'
+    breadth_csv = out_dir / 'market_breadth_daily.csv'
     report = out_dir / 'chart_range_backtest.html'
 
     events.to_csv(csv, index=False, encoding='utf-8-sig')
     summary.to_csv(summary_csv, index=False, encoding='utf-8-sig')
     universe.to_csv(universe_csv, index=False, encoding='utf-8-sig')
     market_regime_daily.to_csv(regime_csv, index=False, encoding='utf-8-sig')
+    market_breadth_daily.to_csv(breadth_csv, index=False, encoding='utf-8-sig')
     if not errors.empty:
         errors.to_csv(error_csv, index=False, encoding='utf-8-sig')
 
@@ -178,6 +288,7 @@ def main():
         'D+60 완전표본': int(events['forward_complete'].sum()) if not events.empty else 0,
         'Universe 주의': 'KOSPI_Info.xlsx 현재 스냅샷 고정 Universe',
         '시장 Regime': 'KOSPI/KOSDAQ별 일별 point-in-time 판정; 미래 데이터 미사용',
+        '시장 Breadth': 'Range Universe 내부 MA20/MA60/5D/20D breadth; 미래 데이터 미사용',
     }
     save_range_backtest_excel(events, summary, universe, errors, xlsx, meta)
     save_range_backtest_html(events, summary, report, meta)
@@ -197,6 +308,7 @@ def main():
     print('상세 CSV   :', csv)
     print('통계 CSV   :', summary_csv)
     print('시장 Regime:', regime_csv)
+    print('시장 Breadth:', breadth_csv)
     print('HTML Report:', report)
     if not events.empty and not events['forward_complete'].all():
         missing = int((~events['forward_complete']).sum())
