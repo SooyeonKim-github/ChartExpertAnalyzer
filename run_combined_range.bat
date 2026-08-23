@@ -31,6 +31,7 @@ echo Universe TOP N: %TOP_N%
 echo Sort by       : %SORT_BY%
 echo Combined TOP N: %DAILY_TOP_N% per day
 echo Forward bars  : 60
+echo Market regime : KOSPI/KOSDAQ point-in-time
 echo ============================================
 echo.
 
@@ -104,8 +105,12 @@ echo.
 echo Main files:
 echo   combined_range_backtest.xlsx
 echo   combined_range_summary.md
+echo   combined_events.csv
 echo   performance_event_weighted.csv
 echo   performance_date_equal.csv
+echo   performance_by_regime_event.csv
+echo   performance_by_regime_date_equal.csv
+echo   market_regime_daily.csv
 echo   combined_daily_top%DAILY_TOP_N%.csv
 echo ============================================
 pause
