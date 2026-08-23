@@ -59,15 +59,20 @@ Risk:
 
 Strategy:
 - ticker
-- consensus_quality
-- consensus_multiplier
+- evidence_relation
 - duplication_penalty
+- conflicts
 
 Chief:
 - final_decision
 - final_score/confidence
+- evidence_relation
 - why_selected
 - key_risks
+
+중요:
+- 동일 종목이 두 Expert에 동시에 존재한다는 사실 자체는 별도 점수 필드나 보너스 계약으로 사용하지 않는다.
+- `consensus_multiplier`, `consensus_quality` 같은 과거 합의 우대 필드를 필수 계약으로 요구하지 않는다.
 
 ### 4. Naming Consistency
 
@@ -75,6 +80,7 @@ Chief:
 - risk_score vs risk_penalty 혼동
 - rank 자료형 불일치
 - confidence 0~1 vs 0~100 혼용
+- evidence_relation 필드명 일관성
 
 ### 5. Workflow Order
 
