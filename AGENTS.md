@@ -4,11 +4,14 @@
 
 ## 핵심 목표
 
-단순히 Analyzer 점수가 높은 종목을 고르는 것이 아니라 다음을 구분한다.
+단순히 Analyzer 점수가 높은 종목이나 두 Analyzer가 동시에 고른 종목을 우대하지 않는다.
+
+다음을 구분한다.
 
 - 좋은 종목인가
 - 지금 진입하기 좋은 위치인가
-- 두 Expert의 추천 근거가 실제로 독립적인가
+- 각 Expert의 근거가 실제로 강한가
+- 근거가 서로 중복되거나 충돌하지 않는가
 - 현재 하방 위험과 데이터 신뢰도는 관리 가능한가
 
 최종 TOP5는 강제로 채우지 않는다.
@@ -49,7 +52,6 @@ Codex skills:
 - `.agents/skills/backtest-robustness/SKILL.md`
 - `.agents/skills/candidate-data-quality/SKILL.md`
 - `.agents/skills/position-sizing/SKILL.md`
-- `.agents/skills/consensus-ranking/SKILL.md`
 - `.agents/skills/workflow-integration-test/SKILL.md`
 - `.agents/skills/dual-axis-quality-review/SKILL.md`
 - `.agents/skills/self-improvement-loop/SKILL.md`
@@ -81,14 +83,6 @@ SwingChartProbabilityAnalyzer/
 
 ## 멀티에이전트 Workflow
 
-사용자가 다음처럼 요청하면 Codex subagents를 사용한다.
-
-- 오늘 종목 분석해줘
-- 멀티에이전트로 분석해줘
-- 두 Analyzer 결과 종합해줘
-- 최종 TOP5 뽑아줘
-- 시윤과 김종봉 관점으로 같이 봐줘
-
 실행 순서:
 
 ```text
@@ -103,6 +97,8 @@ siyoon-    kimjongbong-
 analyst     analyst
    │         │
    └────┬────┘
+        ▼
+  candidate union
         ▼
   risk-reviewer
         ▼
@@ -169,9 +165,13 @@ FAIL 수준의 데이터 오류가 있으면 잘못된 행을 제외하거나 �
 
 ### 3. 후보 합집합
 
-두 Expert의 추천 종목 합집합만 Reviewer에 전달한다.
+두 Expert가 추천한 종목의 합집합만 Reviewer에 전달한다.
 
-새 종목을 Reviewer가 추가로 발굴하게 하지 않는다.
+중요:
+
+- 동일 종목이 두 Expert에 모두 존재해도 자동 보너스를 주지 않는다.
+- 한 Expert만 추천한 종목도 동일하게 검토 대상이다.
+- Reviewer가 새 종목을 추가 발굴하지 않는다.
 
 ### 4. Risk Review
 
@@ -191,11 +191,11 @@ Risk Reviewer는 새로운 매수 후보를 추천하지 않는다.
 
 ### 5. Strategy Review
 
-`strategy-reviewer`가 Expert 추천의 독립성을 검토한다.
+`strategy-reviewer`는 추천 횟수가 아니라 근거의 품질과 관계를 검토한다.
 
 중요:
 
-두 Expert가 같은 종목을 추천했다고 자동으로 2표로 계산하지 않는다.
+두 Expert가 같은 종목을 추천했다고 자동으로 가점을 주지 않는다.
 
 다음은 상관된 신호일 수 있다.
 
@@ -204,13 +204,15 @@ Risk Reviewer는 새로운 매수 후보를 추천하지 않는다.
 - 돌파 강도 ↔ Leader Score
 - 눌림 후 재상승 ↔ Timing
 
-분류:
+검토 결과:
 
-- `STRONG_INDEPENDENT`
-- `MODERATE`
-- `CORRELATED`
-- `CONFLICTED`
-- `SINGLE_EXPERT`
+- `COMPLEMENTARY`: 서로 다른 강한 근거가 보완됨
+- `OVERLAPPING`: 원천 신호가 상당 부분 중복됨
+- `CONFLICTED`: 핵심 판단이 충돌함
+- `SINGLE_SOURCE`: 한 Expert만 추천
+
+`COMPLEMENTARY`라도 동시 추천 자체에 보너스를 주지 않는다.
+`SINGLE_SOURCE`도 그 이유만으로 감점하지 않는다.
 
 ### 6. Investment Chief
 
@@ -220,11 +222,10 @@ Risk Reviewer는 새로운 매수 후보를 추천하지 않는다.
 
 ```text
 Expert Strength
-+ Independent Consensus
 + Entry Quality
 + Data Confidence
 - Risk Penalty
-- Strategy Duplication Penalty
+- Duplication/Conflict Penalty
 ```
 
 최종 판단:
@@ -235,7 +236,17 @@ Expert Strength
 - `OVERHEATED`
 - `AVOID`
 
-단순 수학식만으로 결정하지 않는다.
+단순 추천 횟수나 동시 추천 여부로 결정하지 않는다.
+
+## Combined Range Backtest 원칙
+
+`scripts/run_combined_range_backtest.py`는 두 Analyzer 후보를 같은 날짜+티커 기준으로 하나의 후보 Pool로 합친다.
+
+- 동일 종목이 두 Analyzer에 동시에 존재해도 별도 합의 보너스를 주지 않는다.
+- 두 점수가 있으면 `base_strength`는 available score의 단순 평균을 사용한다.
+- 한 점수만 있으면 해당 점수를 사용한다.
+- `combined_score`는 현재 `base_strength - KJB risk_penalty`의 재현 가능한 proxy다.
+- 시장 Regime/Breadth는 분석 축 또는 후단 Market Filter에서 사용하며 동시 추천 여부와 결합하지 않는다.
 
 ## 입력 데이터 원칙
 
