@@ -10,6 +10,7 @@ from chartsel.data.pykrx_provider import PykrxDataProvider
 from chartsel.analysis.analyzer import ChartAnalyzer
 from chartsel.selection.selector import StockSelector
 from chartsel.reporting.report import print_result, save_result_json, save_screen_csv
+from chartsel.reporting.agent_exporter import export_agent_candidates
 from chartsel.reporting.html_report import save_analysis_html, save_screen_html
 from chartsel.backtest.engine import SimpleBacktester
 from chartsel.reporting.plot import plot_analysis
@@ -32,6 +33,12 @@ def provider_from_args(args):
             end_date=getattr(args, 'end_date', None),
         )
     return YFinanceProvider()
+
+
+def _agent_output_dir(args) -> Path:
+    if getattr(args, 'out', None):
+        return Path(args.out).parent
+    return ROOT / 'output'
 
 
 def cmd_analyze(args):
@@ -73,6 +80,9 @@ def cmd_screen(args):
     if args.report:
         save_screen_html(table, args.report)
         print(f'\nHTML 랭킹 리포트: {args.report}')
+    agent_json, agent_md = export_agent_candidates(table, _agent_output_dir(args), args.agent_top_n)
+    print(f'Agent JSON: {agent_json}')
+    print(f'Agent MD  : {agent_md}')
     _print_errors(errors)
 
 
@@ -105,6 +115,9 @@ def cmd_screen_top(args):
     if args.report:
         save_screen_html(table, args.report)
         print(f'\nHTML TOP{args.top_n} 랭킹 리포트: {args.report}')
+    agent_json, agent_md = export_agent_candidates(table, _agent_output_dir(args), args.agent_top_n)
+    print(f'Agent JSON: {agent_json}')
+    print(f'Agent MD  : {agent_md}')
     _print_errors(errors)
 
 
@@ -196,6 +209,7 @@ def build_parser():
     s.add_argument('--tickers', required=True, help='한 줄에 한 종목인 txt')
     s.add_argument('--market', default='^KS11')
     s.add_argument('--max-results', type=int, default=None, help='결과 상위 N개. 미지정 시 config max_candidates')
+    s.add_argument('--agent-top-n', type=int, default=30, help='서브에이전트 입력 후보 최대 개수')
     s.add_argument('--report', default=None, help='HTML 종목 랭킹 리포트 경로')
     s.set_defaults(func=cmd_screen)
 
@@ -206,6 +220,7 @@ def build_parser():
     st.add_argument('--sort-by', choices=['market_cap', 'trading_value', 'volume'], default='market_cap')
     st.add_argument('--include-etf', action='store_true')
     st.add_argument('--max-results', type=int, default=0, help='0이면 분석 성공 종목 전체 출력/저장')
+    st.add_argument('--agent-top-n', type=int, default=30, help='서브에이전트 입력 후보 최대 개수')
     st.add_argument('--universe-out', default='output/top100_universe.csv')
     st.add_argument('--report', default='output/top100_screen.html')
     st.set_defaults(func=cmd_screen_top)
