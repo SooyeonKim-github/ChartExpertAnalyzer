@@ -3,8 +3,11 @@ from __future__ import annotations
 import argparse
 from pathlib import Path
 
+import pandas as pd
+
 from chartsel.config import load_config
 from chartsel.analysis.analyzer import ChartAnalyzer
+from chartsel.analysis.market_regime import classify_market_regime
 from chartsel.data.pykrx_provider import PykrxDataProvider
 from chartsel.universe.ticker_universe_service import TickerUniverseService
 from chartsel.backtest.range_engine import RangeBacktester, RangeBacktestParams, parse_date_range, key_horizon_summary
@@ -32,6 +35,79 @@ def build_parser():
     p.add_argument('--config', default=None)
     p.add_argument('--output-root', default=str(ROOT/'results'))
     return p
+
+
+def _build_market_regime_daily(
+    provider: PykrxDataProvider,
+    analyzer: ChartAnalyzer,
+    start: pd.Timestamp,
+    end: pd.Timestamp,
+    history_days: int,
+) -> pd.DataFrame:
+    """각 거래일 시점까지의 지수 데이터만 사용해 KOSPI/KOSDAQ Regime을 계산한다.
+
+    미래 데이터가 과거 Regime 판정에 섞이지 않도록 매 날짜별 prefix를 잘라서
+    analyzer.prepare -> classify_market_regime 순서로 계산한다.
+    """
+    rows: list[dict] = []
+    fetch_start = (start - pd.Timedelta(days=max(int(history_days), 500))).strftime('%Y-%m-%d')
+    fetch_end = end.strftime('%Y-%m-%d')
+    min_hist = max(int(analyzer.cfg['moving_average']['long']) + 10, 140)
+
+    for market, benchmark in [('KOSPI', '^KS11'), ('KOSDAQ', '^KQ11')]:
+        try:
+            raw = provider.get_ohlcv_by_date(benchmark, fetch_start, fetch_end)
+            if raw is None or raw.empty:
+                raise ValueError('시장지수 데이터 없음')
+            raw = raw.copy()
+            raw.index = pd.to_datetime(raw.index).normalize()
+            raw = raw[~raw.index.duplicated(keep='last')].sort_index()
+
+            target_dates = raw.index[(raw.index >= start) & (raw.index <= end)]
+            for signal_date in target_dates:
+                hist = raw.loc[raw.index <= signal_date].copy()
+                if len(hist) < min_hist:
+                    rows.append({
+                        'date': pd.Timestamp(signal_date).normalize(),
+                        'market': market,
+                        'benchmark': benchmark,
+                        'market_regime': 'unknown',
+                        'index_close': float(hist['Close'].iloc[-1]) if not hist.empty else float('nan'),
+                        'history_bars': int(len(hist)),
+                        'regime_warning': f'히스토리 부족({len(hist)}<{min_hist})',
+                    })
+                    continue
+                try:
+                    prepared = analyzer.prepare(hist)
+                    regime = classify_market_regime(prepared, analyzer.cfg['moving_average'])
+                    warning = ''
+                except Exception as exc:
+                    regime = 'unknown'
+                    warning = str(exc)
+                rows.append({
+                    'date': pd.Timestamp(signal_date).normalize(),
+                    'market': market,
+                    'benchmark': benchmark,
+                    'market_regime': regime,
+                    'index_close': float(hist['Close'].iloc[-1]),
+                    'history_bars': int(len(hist)),
+                    'regime_warning': warning,
+                })
+        except Exception as exc:
+            rows.append({
+                'date': pd.NaT,
+                'market': market,
+                'benchmark': benchmark,
+                'market_regime': 'unknown',
+                'index_close': float('nan'),
+                'history_bars': 0,
+                'regime_warning': f'시장지수 조회 실패: {exc}',
+            })
+
+    out = pd.DataFrame(rows)
+    if not out.empty:
+        out = out.sort_values(['date', 'market'], na_position='last').reset_index(drop=True)
+    return out
 
 
 def main():
@@ -65,6 +141,9 @@ def main():
     print()
 
     events, summary, universe, errors = runner.run(params, include_etf=args.include_etf)
+    market_regime_daily = _build_market_regime_daily(
+        provider, analyzer, start, end, args.history_days
+    )
 
     out_dir = Path(args.output_root) / f'range_{start:%Y%m%d}_{end:%Y%m%d}'
     out_dir.mkdir(parents=True, exist_ok=True)
@@ -73,11 +152,13 @@ def main():
     summary_csv = out_dir / 'chart_range_summary_D1_D60.csv'
     universe_csv = out_dir / 'universe.csv'
     error_csv = out_dir / 'errors.csv'
+    regime_csv = out_dir / 'market_regime_daily.csv'
     report = out_dir / 'chart_range_backtest.html'
 
     events.to_csv(csv, index=False, encoding='utf-8-sig')
     summary.to_csv(summary_csv, index=False, encoding='utf-8-sig')
     universe.to_csv(universe_csv, index=False, encoding='utf-8-sig')
+    market_regime_daily.to_csv(regime_csv, index=False, encoding='utf-8-sig')
     if not errors.empty:
         errors.to_csv(error_csv, index=False, encoding='utf-8-sig')
 
@@ -93,6 +174,7 @@ def main():
         '신호수': len(events),
         'D+60 완전표본': int(events['forward_complete'].sum()) if not events.empty else 0,
         'Universe 주의': 'KOSPI_Info.xlsx 현재 스냅샷 고정 Universe',
+        '시장 Regime': 'KOSPI/KOSDAQ별 일별 point-in-time 판정; 미래 데이터 미사용',
     }
     save_range_backtest_excel(events, summary, universe, errors, xlsx, meta)
     save_range_backtest_html(events, summary, report, meta)
@@ -111,6 +193,7 @@ def main():
     print('상세 Excel :', xlsx)
     print('상세 CSV   :', csv)
     print('통계 CSV   :', summary_csv)
+    print('시장 Regime:', regime_csv)
     print('HTML Report:', report)
     if not events.empty and not events['forward_complete'].all():
         missing = int((~events['forward_complete']).sum())
