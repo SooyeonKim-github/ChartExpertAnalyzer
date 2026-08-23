@@ -15,12 +15,13 @@ Adapted concepts currently include:
 
 - Technical Analyst → `technical-chart-analysis`
 - Sector Analyst → `kr-sector-leadership`
+- Institutional Flow Tracker → `kr-investor-flow`
 - Market Breadth Analyzer → `kr-market-breadth`
 - Backtest Expert → `backtest-robustness`
 - Data Quality Checker → `candidate-data-quality`
 - Position Sizer → `position-sizing`
 - Skill Integration Tester → `workflow-integration-test`
-- Dual-Axis Skill Reviewer / Self-Improvement Loop → `dual-axis-quality-review` and `scripts/run_self_improvement.py`
+- Dual-Axis Skill Reviewer / Self-Improvement Loop → `dual-axis-quality-review`, `self-improvement-loop`, and `scripts/run_self_improvement.py`
 
 ### MIT License Notice
 
