@@ -107,7 +107,8 @@ class PykrxDataProvider(DataProvider):
 
     def get_ohlcv_by_date(self, ticker: str, start_date: str, end_date: str) -> pd.DataFrame:
         alias = str(ticker).strip().upper()
-        kind = 'index' if alias in _INDEX_ALIASES else 'stock'
+        # 예전 pykrx/yfinance 지수 캐시와 네이버 지수 캐시가 섞이지 않도록 cache kind를 분리한다.
+        kind = 'naver_index' if alias in _INDEX_ALIASES else 'stock'
         key = f'{kind}:{alias}:{start_date}:{end_date}'
         if key in self._memory_cache:
             return self._memory_cache[key].copy()
