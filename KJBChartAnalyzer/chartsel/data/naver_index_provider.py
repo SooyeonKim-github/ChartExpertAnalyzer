@@ -1,11 +1,11 @@
 from __future__ import annotations
 
 import time
-from pathlib import Path
+from html.parser import HTMLParser
+from urllib.parse import urlencode
+from urllib.request import Request, urlopen
 
 import pandas as pd
-import requests
-from bs4 import BeautifulSoup
 
 
 _INDEX_CODES = {
@@ -28,6 +28,46 @@ _HEADERS = {
 }
 
 
+class _NaverTableParser(HTMLParser):
+    """네이버 지수 일별시세의 tr/td 텍스트만 가볍게 추출한다."""
+
+    def __init__(self) -> None:
+        super().__init__(convert_charrefs=True)
+        self.rows: list[list[str]] = []
+        self._in_tr = False
+        self._in_td = False
+        self._cells: list[str] = []
+        self._chunks: list[str] = []
+
+    def handle_starttag(self, tag: str, attrs) -> None:
+        tag = tag.lower()
+        if tag == "tr":
+            self._in_tr = True
+            self._cells = []
+        elif tag == "td" and self._in_tr:
+            self._in_td = True
+            self._chunks = []
+
+    def handle_data(self, data: str) -> None:
+        if self._in_td:
+            text = str(data or "").strip()
+            if text:
+                self._chunks.append(text)
+
+    def handle_endtag(self, tag: str) -> None:
+        tag = tag.lower()
+        if tag == "td" and self._in_td:
+            self._cells.append(" ".join(self._chunks).strip())
+            self._chunks = []
+            self._in_td = False
+        elif tag == "tr" and self._in_tr:
+            if self._cells:
+                self.rows.append(self._cells)
+            self._cells = []
+            self._in_tr = False
+            self._in_td = False
+
+
 def normalize_index_code(value: str) -> str:
     key = str(value or "").strip().upper()
     if key not in _INDEX_CODES:
@@ -41,11 +81,11 @@ def _number(text: str) -> float:
 
 
 def _parse_page(html: str) -> pd.DataFrame:
-    soup = BeautifulSoup(html, "html.parser")
+    parser = _NaverTableParser()
+    parser.feed(html)
     rows: list[dict[str, object]] = []
 
-    for tr in soup.find_all("tr"):
-        cells = [td.get_text(" ", strip=True) for td in tr.find_all("td")]
+    for cells in parser.rows:
         if len(cells) < 6:
             continue
         date_text = cells[0]
@@ -77,13 +117,25 @@ def _parse_page(html: str) -> pd.DataFrame:
     out = pd.DataFrame(rows).set_index("Date").sort_index()
     out = out[~out.index.duplicated(keep="last")]
 
-    # Naver의 index day 표는 일별 종가 중심 데이터다. KJB의 시장 레짐/상대강도는
+    # 네이버의 index day 표는 일별 종가 중심 데이터다. KJB의 시장 레짐/상대강도는
     # Close 이동평균과 수익률을 사용하므로 지수에 한해 OHLC를 Close로 채운다.
     # 이 데이터는 개별 종목 캔들/고저가 분석에는 사용하지 않는다.
     out["Open"] = out["Close"]
     out["High"] = out["Close"]
     out["Low"] = out["Close"]
     return out[["Open", "High", "Low", "Close", "Volume", "Trading_Value", "Change_Rate"]]
+
+
+def _fetch_html(code: str, page: int, timeout: float) -> str:
+    query = urlencode({"code": code, "page": int(page)})
+    req = Request(f"{_BASE_URL}?{query}", headers=_HEADERS)
+    with urlopen(req, timeout=timeout) as response:
+        raw = response.read()
+        charset = response.headers.get_content_charset() or "euc-kr"
+    try:
+        return raw.decode(charset, errors="replace")
+    except LookupError:
+        return raw.decode("euc-kr", errors="replace")
 
 
 def fetch_naver_index_ohlcv(
@@ -98,7 +150,8 @@ def fetch_naver_index_ohlcv(
     """네이버 금융 일별시세에서 KOSPI/KOSDAQ 종가 기반 시장 데이터를 조회한다.
 
     페이지는 최신일에서 과거 방향으로 내려간다. 요청 시작일보다 오래된 행이
-    확인되면 추가 페이지 요청을 중단한다.
+    확인되면 추가 페이지 요청을 중단한다. 외부 크롤링 패키지 없이 Python
+    표준 라이브러리만 사용한다.
     """
     code = normalize_index_code(index_code)
     start_ts = pd.Timestamp(start_date).normalize()
@@ -106,19 +159,10 @@ def fetch_naver_index_ohlcv(
     if start_ts > end_ts:
         raise ValueError(f"start_date > end_date: {start_date} > {end_date}")
 
-    session = requests.Session()
-    session.headers.update(_HEADERS)
     frames: list[pd.DataFrame] = []
 
     for page in range(1, max_pages + 1):
-        resp = session.get(
-            _BASE_URL,
-            params={"code": code, "page": page},
-            timeout=timeout,
-        )
-        resp.raise_for_status()
-        resp.encoding = resp.apparent_encoding or "euc-kr"
-        frame = _parse_page(resp.text)
+        frame = _parse_page(_fetch_html(code, page, timeout))
         if frame.empty:
             break
 
