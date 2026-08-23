@@ -8,7 +8,7 @@ set "TOP_N=%~2"
 set "SORT_BY=%~3"
 
 if "%DATE_RANGE%"=="" (
-    echo Example: 20260701~20260724
+    echo Example: 20260401~20260531
     set /p "DATE_RANGE=Date range YYYYMMDD~YYYYMMDD: "
 )
 
@@ -44,28 +44,32 @@ if "%PYTHON_EXE%"=="" (
     exit /b 1
 )
 
-echo [INFO] Project folder: %CD%
-echo [INFO] Date range: %DATE_RANGE%
-echo [INFO] Top N: %TOP_N%
-echo [INFO] Sort by: %SORT_BY%
-echo [INFO] Forward performance: D+1 ~ D+20 trading bars
+
+echo [INFO] Swing range backtest
+echo [INFO] Project folder     : %CD%
+echo [INFO] Date range         : %DATE_RANGE%
+echo [INFO] Top N              : %TOP_N%
+echo [INFO] Sort by            : %SORT_BY%
+echo [INFO] Forward performance: D+1 ~ D+60 trading bars
 echo.
 
 "%PYTHON_EXE%" %PYTHON_PREFIX% main_range.py ^
     --date-range "%DATE_RANGE%" ^
     --top-n "%TOP_N%" ^
     --sort-by "%SORT_BY%" ^
-    --forward-bars 20
+    --forward-bars 60
 
 if errorlevel 1 (
     echo.
-    echo [ERROR] Swing range analysis failed.
+    echo [ERROR] Range backtest failed.
     pause
     exit /b 1
 )
 
 echo.
-echo [DONE] Swing range analysis finished.
-echo [DONE] Check results\range_YYYYMMDD_YYYYMMDD\swing_range_backtest.xlsx
+echo [DONE] Range backtest finished.
+echo [DONE] Excel : results\range_YYYYMMDD_YYYYMMDD\swing_range_backtest.xlsx
+echo [DONE] Agent : results\range_YYYYMMDD_YYYYMMDD\agent\range_summary.json
+echo [DONE] Agent : results\range_YYYYMMDD_YYYYMMDD\agent\range_summary.md
 pause
 exit /b 0
