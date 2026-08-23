@@ -31,5 +31,13 @@ echo.
 echo ============================================
 echo [DONE] All analyzer screenings finished.
 echo ============================================
+echo [KJB Agent]
+echo   KJBChartAnalyzer\output\agent\candidates.json
+echo   KJBChartAnalyzer\output\agent\candidates.md
+echo.
+echo [Siyoon Agent]
+echo   SwingChartProbabilityAnalyzer\results\YYYYMMDD\agent\candidates.json
+echo   SwingChartProbabilityAnalyzer\results\YYYYMMDD\agent\candidates.md
+echo ============================================
 pause
 exit /b 0
