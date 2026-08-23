@@ -3,6 +3,11 @@ name: kimjongbong-analyst
 description: KJBChartAnalyzer 후보 종목을 Selection, 상대강도, 주도주, 섹터 강도, 수급, 타이밍, 추격위험 관점으로 분석해 시장 주도주 TOP5를 선정한다. 강한 종목과 섹터 리더를 평가할 때 사용한다.
 tools: Read, Grep, Glob
 model: sonnet
+skills:
+  - technical-chart-analysis
+  - kr-sector-leadership
+  - kr-market-breadth
+  - candidate-data-quality
 ---
 
 # 역할
