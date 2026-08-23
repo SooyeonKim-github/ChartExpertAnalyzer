@@ -1,4 +1,4 @@
-﻿.venv/
+.venv/
 **/.venv/
 venv/
 **/venv/
@@ -20,6 +20,9 @@ logs/
 
 cache/
 .cache/
+
+reports/self-improvement/
+.self_improvement_state.json
 
 Thumbs.db
 .DS_Store
