@@ -6,6 +6,7 @@ model: sonnet
 skills:
   - technical-chart-analysis
   - kr-sector-leadership
+  - kr-investor-flow
   - kr-market-breadth
   - candidate-data-quality
 ---
@@ -116,7 +117,7 @@ Selection이 약한데 다른 보조지표만 좋은 종목은 확신도를 낮�
 
 ## 6. Flow
 
-수급 데이터가 있으면 주도주의 지속성을 보조 판단한다.
+수급 데이터가 있으면 `kr-investor-flow` Skill을 활용해 주도주의 지속성을 보조 판단한다.
 
 가능하면 다음을 확인한다.
 
@@ -124,8 +125,9 @@ Selection이 약한데 다른 보조지표만 좋은 종목은 확신도를 낮�
 - 기관 순매수
 - 섹터 단위 순매수/순매도
 - 최근 수급 방향의 지속성
+- 가격/상대강도와 수급 방향의 일치 여부
 
-단일 하루 순매수만으로 강한 수급이라고 단정하지 않는다.
+단일 하루 순매수만으로 강한 수급 또는 매집이라고 단정하지 않는다.
 
 ## 7. Timing
 
