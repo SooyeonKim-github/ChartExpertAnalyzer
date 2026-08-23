@@ -12,6 +12,7 @@ from core.signal_analyzer import SwingSignalAnalyzer
 from data.data_provider import PykrxDataProvider
 from reporting.chart_renderer import render_chart
 from reporting.excel_writer import write_result_workbook
+from reporting.agent_exporter import export_agent_candidates
 from services.ticker_universe_service import TickerUniverseService
 from utils.date_utils import calendar_start_for_history, calendar_end_for_backtest
 from utils.logger import get_logger
@@ -59,6 +60,7 @@ def scan(args) -> int:
     signals.to_csv(out_dir/"scan_results.csv", index=False, encoding="utf-8-sig")
     cand = signals[signals["Status"].isin(["CONFIRMED","WATCH"])]
     cand.to_csv(out_dir/"candidates.csv", index=False, encoding="utf-8-sig")
+    agent_json, agent_md = export_agent_candidates(signals, out_dir, top_n=args.agent_top_n)
     calibration_summary = pd.DataFrame()
     if not pmodel.table.empty:
         numeric_cols=["Hit_Mid_Before_Stop","Hit_PriorHigh_Before_Stop","Hit_Upper_Before_Stop"]
@@ -72,6 +74,8 @@ def scan(args) -> int:
     for r in selected[:args.charts]:
         render_chart(data_map[r.ticker], r, cfg, out_dir/"charts")
     log.info("완료: %s", out_dir)
+    log.info("Agent JSON: %s", agent_json)
+    log.info("Agent MD  : %s", agent_md)
     if not cand.empty:
         cols=[c for c in ["Ticker","Name","Status","Score","Prob_Mid_Before_Stop","Prob_PriorHigh_Before_Stop","Prob_Upper_Before_Stop","Channel_Position","Room_To_Upper_Pct"] if c in cand.columns]
         print(cand[cols].head(args.print_top).to_string(index=False))
@@ -151,6 +155,7 @@ def build_parser():
     s.add_argument("--calibration",default="")
     s.add_argument("--charts",type=int,default=20)
     s.add_argument("--print-top",type=int,default=30)
+    s.add_argument("--agent-top-n",type=int,default=30,help="서브에이전트 입력 후보 최대 개수")
     s.set_defaults(func=scan)
     c=sub.add_parser("calibrate",parents=[common])
     c.add_argument("--start",required=True); c.add_argument("--end",required=True)
