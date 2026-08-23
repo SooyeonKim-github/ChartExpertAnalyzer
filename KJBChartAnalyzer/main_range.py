@@ -193,7 +193,8 @@ def _build_market_breadth_daily(
             target = target[(target.index >= start) & (target.index <= end)]
             if target.empty:
                 continue
-            target = target.reset_index().rename(columns={'index': 'date'})
+            target.index.name = 'date'
+            target = target.reset_index()
             records.append(target)
         except Exception:
             continue
