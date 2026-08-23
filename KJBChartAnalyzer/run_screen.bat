@@ -40,7 +40,6 @@ if "%PYTHON_EXE%"=="" (
     exit /b 1
 )
 
-
 if /I "%MODE%"=="1" goto TOP100
 if /I "%MODE%"=="top100" goto TOP100
 if /I "%MODE%"=="2" goto LIST
@@ -60,6 +59,7 @@ echo [INFO] Screening KOSPI market-cap TOP100...
     --top-n 100 ^
     --sort-by market_cap ^
     --period 5y ^
+    --agent-top-n 30 ^
     --out output\top100_screen.csv ^
     --universe-out output\top100_universe.csv ^
     --report output\top100_screen.html
@@ -77,6 +77,7 @@ echo [INFO] Screening tickers_example.txt...
     --tickers tickers_example.txt ^
     --market ^KS11 ^
     --period 5y ^
+    --agent-top-n 30 ^
     --out output\screen.csv ^
     --report output\screen.html
 goto CHECK_RESULT
@@ -91,6 +92,7 @@ if errorlevel 1 (
 
 echo.
 echo [DONE] Screening finished.
-echo [DONE] Check the output folder.
+echo [DONE] Check output\
+echo [DONE] Agent files: output\agent\candidates.json / candidates.md
 pause
 exit /b 0
