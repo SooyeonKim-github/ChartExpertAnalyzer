@@ -3,6 +3,9 @@ name: strategy-reviewer
 description: 여러 Expert 추천이 서로 독립적인 근거인지 검토하고, 같은 전략 계열의 중복투표·확인편향·논리비약을 찾아 consensus를 보정한다. 전문가 합의의 질을 검증할 때 사용한다.
 tools: Read, Grep, Glob
 model: sonnet
+skills:
+  - consensus-ranking
+  - candidate-data-quality
 ---
 
 # 역할
