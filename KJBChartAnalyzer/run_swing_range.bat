@@ -1,4 +1,4 @@
-﻿@echo off
+@echo off
 setlocal EnableExtensions
 chcp 65001 > nul
 cd /d "%~dp0"
@@ -14,7 +14,7 @@ if "%DATE_RANGE%"=="" (
 
 if "%DATE_RANGE%"=="" (
     echo [ERROR] Date range is required.
-    pause
+    if /I not "%NO_PAUSE%"=="1" pause
     exit /b 1
 )
 
@@ -40,12 +40,11 @@ if exist "%CD%\.venv\Scripts\python.exe" (
 if "%PYTHON_EXE%"=="" (
     echo [ERROR] Python was not found.
     echo Install Python or create .venv in this project folder.
-    pause
+    if /I not "%NO_PAUSE%"=="1" pause
     exit /b 1
 )
 
-
-echo [INFO] Swing range backtest
+echo [INFO] KJB range backtest
 echo [INFO] Project folder     : %CD%
 echo [INFO] Date range         : %DATE_RANGE%
 echo [INFO] Top N              : %TOP_N%
@@ -61,13 +60,13 @@ echo.
 
 if errorlevel 1 (
     echo.
-    echo [ERROR] Range backtest failed.
-    pause
+    echo [ERROR] KJB range backtest failed.
+    if /I not "%NO_PAUSE%"=="1" pause
     exit /b 1
 )
 
 echo.
-echo [DONE] Range backtest finished.
+echo [DONE] KJB range backtest finished.
 echo [DONE] Check results\range_YYYYMMDD_YYYYMMDD\chart_range_backtest.xlsx
-pause
+if /I not "%NO_PAUSE%"=="1" pause
 exit /b 0
