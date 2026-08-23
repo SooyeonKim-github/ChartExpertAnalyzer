@@ -17,19 +17,29 @@ STATUS_FILLS = {
 }
 
 
-def _performance_summary(frame: pd.DataFrame, group_cols: list[str]) -> pd.DataFrame:
-    if frame.empty or "D+20_Close_Return_Pct" not in frame.columns:
+def _performance_summary(frame: pd.DataFrame, group_cols: list[str], horizon: int) -> pd.DataFrame:
+    ret_col = f"D+{horizon}_Close_Return_Pct"
+    mfe_col = f"MFE_{horizon}D_Pct"
+    mae_col = f"MAE_{horizon}D_Pct"
+    complete_col = f"Forward_Complete_{horizon}D"
+
+    if frame.empty or ret_col not in frame.columns:
         return pd.DataFrame()
 
     src = frame.copy()
-    src["D+20_Close_Return_Pct"] = pd.to_numeric(src["D+20_Close_Return_Pct"], errors="coerce")
-    src["MFE_20D_Pct"] = pd.to_numeric(src.get("MFE_20D_Pct"), errors="coerce")
-    src["MAE_20D_Pct"] = pd.to_numeric(src.get("MAE_20D_Pct"), errors="coerce")
+    src[ret_col] = pd.to_numeric(src[ret_col], errors="coerce")
+    if mfe_col in src.columns:
+        src[mfe_col] = pd.to_numeric(src[mfe_col], errors="coerce")
+    if mae_col in src.columns:
+        src[mae_col] = pd.to_numeric(src[mae_col], errors="coerce")
 
     rows = []
     grouped = src.groupby(group_cols, dropna=False) if group_cols else [((), src)]
     for key, grp in grouped:
-        valid = grp["D+20_Close_Return_Pct"].dropna()
+        valid_mask = grp[ret_col].notna()
+        if complete_col in grp.columns:
+            valid_mask &= pd.to_numeric(grp[complete_col], errors="coerce").fillna(0).eq(1)
+        valid = grp.loc[valid_mask, ret_col]
         if valid.empty:
             continue
         keys = key if isinstance(key, tuple) else (key,)
@@ -37,14 +47,18 @@ def _performance_summary(frame: pd.DataFrame, group_cols: list[str]) -> pd.DataF
         row.update(
             {
                 "Signal_Count": int(len(grp)),
-                "Complete_20D_Count": int(len(valid)),
-                "D20_Win_Rate": round(float((valid > 0).mean()), 4),
-                "D20_Avg_Return_Pct": round(float(valid.mean()), 3),
-                "D20_Median_Return_Pct": round(float(valid.median()), 3),
-                "D20_Max_Return_Pct": round(float(valid.max()), 3),
-                "D20_Min_Return_Pct": round(float(valid.min()), 3),
-                "Avg_MFE_20D_Pct": round(float(grp.loc[valid.index, "MFE_20D_Pct"].mean()), 3),
-                "Avg_MAE_20D_Pct": round(float(grp.loc[valid.index, "MAE_20D_Pct"].mean()), 3),
+                f"Complete_{horizon}D_Count": int(len(valid)),
+                f"D{horizon}_Win_Rate": round(float((valid > 0).mean()), 4),
+                f"D{horizon}_Avg_Return_Pct": round(float(valid.mean()), 3),
+                f"D{horizon}_Median_Return_Pct": round(float(valid.median()), 3),
+                f"D{horizon}_Max_Return_Pct": round(float(valid.max()), 3),
+                f"D{horizon}_Min_Return_Pct": round(float(valid.min()), 3),
+                f"Avg_MFE_{horizon}D_Pct": (
+                    round(float(grp.loc[valid.index, mfe_col].mean()), 3) if mfe_col in grp.columns else None
+                ),
+                f"Avg_MAE_{horizon}D_Pct": (
+                    round(float(grp.loc[valid.index, mae_col].mean()), 3) if mae_col in grp.columns else None
+                ),
             }
         )
         rows.append(row)
@@ -55,6 +69,7 @@ def write_range_workbook(
     path: Path,
     all_results: pd.DataFrame,
     config_rows: Sequence[Mapping[str, object]],
+    forward_bars: int = 20,
 ) -> Path:
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -74,13 +89,18 @@ def write_range_workbook(
         confirmed = ordered[ordered["Status"] == "CONFIRMED"].copy()
         watch = ordered[ordered["Status"] == "WATCH"].copy()
 
-    perf_by_date = _performance_summary(candidates, ["Actual_Date", "Status"])
-    perf_by_status = _performance_summary(candidates, ["Status"])
+    horizon = max(1, int(forward_bars))
+    perf_by_date = _performance_summary(candidates, ["Actual_Date", "Status"], horizon)
+    perf_by_status = _performance_summary(candidates, ["Status"], horizon)
 
     if not candidates.empty:
         candidates = candidates.copy()
         candidates["Score_Band"] = (pd.to_numeric(candidates["Score"], errors="coerce") // 5 * 5).astype("Int64")
-    perf_by_score = _performance_summary(candidates, ["Status", "Score_Band"]) if not candidates.empty else pd.DataFrame()
+    perf_by_score = (
+        _performance_summary(candidates, ["Status", "Score_Band"], horizon)
+        if not candidates.empty
+        else pd.DataFrame()
+    )
 
     sheets = {
         "range_candidates": candidates,
@@ -116,7 +136,13 @@ def write_range_workbook(
                     ws.cell(r, status_col).font = Font(bold=True)
 
         for idx, cells in enumerate(ws.columns, 1):
-            width = min(45, max(10, max((len(str(c.value)) if c.value is not None else 0 for c in cells), default=0) + 2))
+            width = min(
+                45,
+                max(
+                    10,
+                    max((len(str(c.value)) if c.value is not None else 0 for c in cells), default=0) + 2,
+                ),
+            )
             ws.column_dimensions[get_column_letter(idx)].width = width
 
     wb.save(path)
