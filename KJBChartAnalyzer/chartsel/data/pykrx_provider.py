@@ -7,12 +7,13 @@ from typing import Dict
 import pandas as pd
 
 from .base import DataProvider, normalize_ohlcv as normalize_base
+from .naver_index_provider import fetch_naver_index_ohlcv
 from ..utils.date_utils import period_to_date_range
 
 
 _INDEX_ALIASES = {
-    '^KS11': '1001', 'KOSPI': '1001', '1001': '1001',
-    '^KQ11': '2001', 'KOSDAQ': '2001', '2001': '2001',
+    '^KS11': 'KOSPI', 'KOSPI': 'KOSPI', '1001': 'KOSPI',
+    '^KQ11': 'KOSDAQ', 'KOSDAQ': 'KOSDAQ', '2001': 'KOSDAQ',
 }
 
 
@@ -50,9 +51,8 @@ def normalize_ohlcv(df: pd.DataFrame) -> pd.DataFrame:
     return out
 
 
-
 class PykrxDataProvider(DataProvider):
-    """pykrx OHLCV 제공자. 사용자 제공 코드의 메모리/파일 캐시 방식을 유지한다."""
+    """개별 종목은 pykrx, KOSPI/KOSDAQ 지수는 네이버 금융을 사용하는 OHLCV 제공자."""
 
     def __init__(self, cache_dir: str | Path | None = None, use_cache: bool = True, end_date: str | None = None) -> None:
         root = Path(__file__).resolve().parents[2]
@@ -84,27 +84,23 @@ class PykrxDataProvider(DataProvider):
         return self.cache_dir / f'{safe}_{digest}.csv'
 
     def _fetch_range(self, ticker: str, start_date: str, end_date: str) -> pd.DataFrame:
-        stock = self._load_pykrx()
-        start = pd.Timestamp(start_date).strftime('%Y%m%d')
-        end = pd.Timestamp(end_date).strftime('%Y%m%d')
         alias = str(ticker).strip().upper()
+
+        # 시장지수는 pykrx index endpoint를 사용하지 않는다.
+        # KRX 로그인/응답 오류를 피하기 위해 네이버 금융 일별시세를 전용 소스로 사용한다.
         if alias in _INDEX_ALIASES:
             code = _INDEX_ALIASES[alias]
             try:
-                raw = stock.get_index_ohlcv_by_date(start, end, code)
-                out = normalize_ohlcv(raw)
-                if not out.empty:
-                    return out
-            except Exception:
-                pass
-            # pykrx 지수 endpoint가 일시적으로 실패할 때 시장 레짐 분석만 yfinance로 보완한다.
-            try:
-                import yfinance as yf
-                end_exclusive = (pd.Timestamp(end_date) + pd.Timedelta(days=1)).strftime('%Y-%m-%d')
-                raw = yf.download(alias, start=start_date, end=end_exclusive, interval='1d', auto_adjust=False, progress=False, threads=False)
-                return normalize_base(raw)
+                return fetch_naver_index_ohlcv(code, start_date, end_date)
             except Exception as exc:
-                raise RuntimeError(f'시장지수 조회 실패: {alias}') from exc
+                raise RuntimeError(
+                    f'네이버 시장지수 조회 실패: {code} ({start_date}~{end_date})'
+                ) from exc
+
+        # 개별 종목만 pykrx 사용.
+        stock = self._load_pykrx()
+        start = pd.Timestamp(start_date).strftime('%Y%m%d')
+        end = pd.Timestamp(end_date).strftime('%Y%m%d')
         code = self.normalize_ticker(alias)
         raw = stock.get_market_ohlcv_by_date(start, end, code, adjusted=True)
         return normalize_ohlcv(raw)
