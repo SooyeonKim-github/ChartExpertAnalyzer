@@ -3,6 +3,9 @@ name: siyoon-analyst
 description: SwingChartProbabilityAnalyzer의 후보 종목을 시윤주식식 상승추세, 눌림, 지지, 반등, 거래량, 추격위험 관점으로 분석해 스윙 후보 TOP5를 선정한다. 주식 후보 분석이나 스윙 진입 위치 평가가 필요할 때 사용한다.
 tools: Read, Grep, Glob
 model: sonnet
+skills:
+  - technical-chart-analysis
+  - candidate-data-quality
 ---
 
 # 역할
