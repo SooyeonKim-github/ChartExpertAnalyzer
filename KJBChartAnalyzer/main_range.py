@@ -43,15 +43,18 @@ def _build_market_regime_daily(
     start: pd.Timestamp,
     end: pd.Timestamp,
     history_days: int,
+    forward_bars: int,
 ) -> pd.DataFrame:
     """각 거래일 시점까지의 지수 데이터만 사용해 KOSPI/KOSDAQ Regime을 계산한다.
 
-    미래 데이터가 과거 Regime 판정에 섞이지 않도록 매 날짜별 prefix를 잘라서
-    analyzer.prepare -> classify_market_regime 순서로 계산한다.
+    RangeBacktester가 이미 조회한 benchmark와 동일한 조회구간을 사용해 provider의
+    memory/file cache를 재사용한다. 미래 구간을 함께 받아도 Regime 판정 시에는
+    signal_date 이하 prefix만 사용하므로 look-ahead는 발생하지 않는다.
     """
     rows: list[dict] = []
-    fetch_start = (start - pd.Timedelta(days=max(int(history_days), 500))).strftime('%Y-%m-%d')
-    fetch_end = end.strftime('%Y-%m-%d')
+    fetch_start = (start - pd.Timedelta(days=int(history_days))).strftime('%Y-%m-%d')
+    forward_calendar_days = max(120, int(int(forward_bars) * 2.0))
+    fetch_end = (end + pd.Timedelta(days=forward_calendar_days)).strftime('%Y-%m-%d')
     min_hist = max(int(analyzer.cfg['moving_average']['long']) + 10, 140)
 
     for market, benchmark in [('KOSPI', '^KS11'), ('KOSDAQ', '^KQ11')]:
@@ -142,7 +145,7 @@ def main():
 
     events, summary, universe, errors = runner.run(params, include_etf=args.include_etf)
     market_regime_daily = _build_market_regime_daily(
-        provider, analyzer, start, end, args.history_days
+        provider, analyzer, start, end, args.history_days, args.forward_bars
     )
 
     out_dir = Path(args.output_root) / f'range_{start:%Y%m%d}_{end:%Y%m%d}'
