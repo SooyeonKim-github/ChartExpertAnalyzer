@@ -14,6 +14,53 @@ def _safe_round(value: float, digits: int = 3) -> float:
     return round(float(value), digits)
 
 
+def _window_performance(
+    df_full: pd.DataFrame,
+    signal_end_pos: int,
+    entry: float,
+    window_bars: int,
+    available: int,
+) -> dict[str, object]:
+    """지정 거래봉 구간의 MFE/MAE/최대·최소 종가수익률을 계산한다."""
+    used = min(int(window_bars), int(available))
+    out: dict[str, object] = {
+        f"Forward_Complete_{window_bars}D": int(available >= window_bars),
+    }
+    if used <= 0:
+        out.update(
+            {
+                f"Max_Close_Return_{window_bars}D_Pct": float("nan"),
+                f"Min_Close_Return_{window_bars}D_Pct": float("nan"),
+                f"MFE_{window_bars}D_Pct": float("nan"),
+                f"MAE_{window_bars}D_Pct": float("nan"),
+                f"Positive_D{window_bars}": float("nan"),
+            }
+        )
+        return out
+
+    future = df_full.iloc[signal_end_pos + 1 : signal_end_pos + used + 1]
+    close_returns = (future["Close"] / entry - 1.0) * 100.0
+    high_returns = (future["High"] / entry - 1.0) * 100.0
+    low_returns = (future["Low"] / entry - 1.0) * 100.0
+    point_return = (
+        _safe_round((float(future["Close"].iloc[window_bars - 1]) / entry - 1.0) * 100.0)
+        if available >= window_bars
+        else float("nan")
+    )
+    out.update(
+        {
+            f"Max_Close_Return_{window_bars}D_Pct": _safe_round(float(close_returns.max())),
+            f"Min_Close_Return_{window_bars}D_Pct": _safe_round(float(close_returns.min())),
+            f"MFE_{window_bars}D_Pct": _safe_round(float(high_returns.max())),
+            f"MAE_{window_bars}D_Pct": _safe_round(float(low_returns.min())),
+            f"Positive_D{window_bars}": (
+                int(point_return > 0) if pd.notna(point_return) else float("nan")
+            ),
+        }
+    )
+    return out
+
+
 def evaluate_forward_returns(
     df_full: pd.DataFrame,
     signal_end_pos: int,
@@ -22,20 +69,23 @@ def evaluate_forward_returns(
     """신호 발생일 종가 대비 향후 N거래일의 실제 성과를 계산한다.
 
     중요:
-    - 이 함수의 미래 데이터는 *신호 판정*에는 절대 사용하지 않고 사후 성과평가에만 사용한다.
+    - 미래 데이터는 신호 판정에 절대 사용하지 않고 사후 성과평가에만 사용한다.
     - D+1 ... D+N은 달력일이 아니라 해당 종목의 다음 거래봉 기준이다.
+    - horizon이 60이어도 D+20 값은 실제 20번째 거래봉 값으로 유지한다.
     - 종목 거래정지/데이터 부족 등으로 N개 봉이 없으면 존재하는 구간만 채우고 나머지는 NaN이다.
     """
     if df_full is None or df_full.empty or signal_end_pos < 0 or signal_end_pos >= len(df_full):
         return {}
 
+    horizon_bars = max(1, int(horizon_bars))
     entry = float(df_full["Close"].iloc[signal_end_pos])
-    available = max(0, min(int(horizon_bars), len(df_full) - signal_end_pos - 1))
+    available = max(0, min(horizon_bars, len(df_full) - signal_end_pos - 1))
 
     out: dict[str, object] = {
         "Forward_Entry_Close": entry,
         "Forward_Available_Bars": available,
-        "Forward_Complete_20D": int(available >= horizon_bars),
+        "Forward_Horizon_Bars": horizon_bars,
+        f"Forward_Complete_{horizon_bars}D": int(available >= horizon_bars),
     }
 
     for d in range(1, horizon_bars + 1):
@@ -54,42 +104,23 @@ def evaluate_forward_returns(
             out[date_col] = ""
 
     if available > 0:
-        future = df_full.iloc[signal_end_pos + 1 : signal_end_pos + available + 1]
-        close_returns = (future["Close"] / entry - 1.0) * 100.0
-        high_returns = (future["High"] / entry - 1.0) * 100.0
-        low_returns = (future["Low"] / entry - 1.0) * 100.0
-
-        out.update(
-            {
-                "Forward_Last_Date": future.index[-1].strftime("%Y-%m-%d"),
-                "D+20_Close_Return_Pct": (
-                    _safe_round((float(future["Close"].iloc[horizon_bars - 1]) / entry - 1.0) * 100.0)
-                    if available >= horizon_bars
-                    else float("nan")
-                ),
-                "Max_Close_Return_20D_Pct": _safe_round(float(close_returns.max())),
-                "Min_Close_Return_20D_Pct": _safe_round(float(close_returns.min())),
-                "MFE_20D_Pct": _safe_round(float(high_returns.max())),
-                "MAE_20D_Pct": _safe_round(float(low_returns.min())),
-                "Positive_D20": (
-                    int(out["D+20_Close_Return_Pct"] > 0)
-                    if available >= horizon_bars and pd.notna(out["D+20_Close_Return_Pct"])
-                    else float("nan")
-                ),
-            }
-        )
+        out["Forward_Last_Date"] = df_full.index[signal_end_pos + available].strftime("%Y-%m-%d")
     else:
-        out.update(
-            {
-                "Forward_Last_Date": "",
-                "D+20_Close_Return_Pct": float("nan"),
-                "Max_Close_Return_20D_Pct": float("nan"),
-                "Min_Close_Return_20D_Pct": float("nan"),
-                "MFE_20D_Pct": float("nan"),
-                "MAE_20D_Pct": float("nan"),
-                "Positive_D20": float("nan"),
-            }
-        )
+        out["Forward_Last_Date"] = ""
+
+    milestones = [d for d in (5, 10, 20, 40, 60) if d <= horizon_bars]
+    if horizon_bars not in milestones:
+        milestones.append(horizon_bars)
+    for day in sorted(set(milestones)):
+        out.update(_window_performance(df_full, signal_end_pos, entry, day, available))
+
+    if "Forward_Complete_20D" not in out:
+        out["Forward_Complete_20D"] = int(available >= 20)
+        out["MFE_20D_Pct"] = float("nan")
+        out["MAE_20D_Pct"] = float("nan")
+        out["Max_Close_Return_20D_Pct"] = float("nan")
+        out["Min_Close_Return_20D_Pct"] = float("nan")
+        out["Positive_D20"] = float("nan")
 
     return out
 
@@ -124,7 +155,6 @@ def evaluate_signal(df_full: pd.DataFrame, signal_end_pos: int, result: Analysis
         high = float(df_full["High"].iloc[i])
         dynamic_channel_stop = ch.lower(i) * (1.0 - cfg.stop_buffer_pct)
         stop = max(dynamic_channel_stop, swing_stop_base)
-        # 같은 봉에서 stop과 target이 모두 발생하면 체결 순서를 알 수 없으므로 보수적으로 stop 우선.
         if low <= stop:
             stop_hit = True
             first_event = "STOP"
