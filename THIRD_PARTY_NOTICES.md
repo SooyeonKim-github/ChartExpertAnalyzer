@@ -2,14 +2,16 @@
 
 ## TraderMonty / claude-trading-skills
 
-Several methodology-oriented Claude Skills in this repository were adapted for Korean equities from ideas and workflows in:
+Several methodology-oriented trading Skills in this repository were adapted for Korean equities from ideas and workflows in:
 
 - Project: `tradermonty/claude-trading-skills`
 - Source: https://github.com/tradermonty/claude-trading-skills
 - License: MIT License
 - Copyright: Copyright (c) 2026 TraderMonty
 
-The ChartExpertAnalyzer adaptations do **not** copy US-market-specific data dependencies such as FMP, SEC 13F, FINVIZ-only workflows, or S&P-specific thresholds unless explicitly documented. They are rewritten around KOSPI/KOSDAQ Analyzer outputs.
+The original project targets Claude and primarily US-market workflows. ChartExpertAnalyzer rewrites the selected methodology for **Codex + KOSPI/KOSDAQ** and does not copy US-market-specific data dependencies such as FMP, SEC 13F, FINVIZ-only workflows, or S&P-specific thresholds unless explicitly documented.
+
+Codex-facing adapted Skills live under `.agents/skills/`.
 
 Adapted concepts currently include:
 
