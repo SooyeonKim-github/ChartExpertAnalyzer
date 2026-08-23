@@ -10,7 +10,9 @@ if errorlevel 1 (
 )
 
 set "NEED_CODEX=1"
-if /I "%~1"=="--dry-run" set "NEED_CODEX=0"
+for %%A in (%*) do (
+    if /I "%%~A"=="--dry-run" set "NEED_CODEX=0"
+)
 
 if "%NEED_CODEX%"=="1" (
     where codex >nul 2>nul
