@@ -51,6 +51,7 @@ echo [INFO] Top N              : %TOP_N%
 echo [INFO] Sort by            : %SORT_BY%
 echo [INFO] Forward performance: D+1 ~ D+60 trading bars
 echo [INFO] Market regime      : Naver KOSPI/KOSDAQ point-in-time
+echo [INFO] KJB status         : CONFIRMED / WATCH / REJECTED V1
 echo.
 
 "%PYTHON_EXE%" %PYTHON_PREFIX% main_range.py ^
@@ -69,6 +70,7 @@ if errorlevel 1 (
 echo.
 echo [DONE] KJB range backtest finished.
 echo [DONE] Excel  : results\range_YYYYMMDD_YYYYMMDD\chart_range_backtest.xlsx
+echo [DONE] Status : results\range_YYYYMMDD_YYYYMMDD\chart_range_status_summary_D1_D60.csv
 echo [DONE] Regime : results\range_YYYYMMDD_YYYYMMDD\market_regime_daily.csv
 if /I not "%NO_PAUSE%"=="1" pause
 exit /b 0
