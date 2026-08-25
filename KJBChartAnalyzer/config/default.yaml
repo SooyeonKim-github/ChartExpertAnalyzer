@@ -43,6 +43,19 @@ selection:
   reject_if_below_long_ma: false
   require_market_uptrend_for_pyramiding: true
 
+# KJB CONFIRMED V1
+# 2026-01-01~2026-08-21 range backtest의 단기(D+5/D+10) 진입 품질을 기준으로 잡은 초기 검증값.
+# 향후 별도 holdout 기간에서 재검증 후 조정한다.
+confirmation_v1:
+  selection_min: 70
+  timing_min: 72
+  leader_min: 70
+  relative_strength_min: 40
+  risk_max_exclusive: 60
+  reject_high_chase: true
+  watch_selection_min: 62
+  watch_technical_min: 62
+  watch_risk_max_exclusive: 65
 
 timing:
   chase_recent_5d_return: 0.10
