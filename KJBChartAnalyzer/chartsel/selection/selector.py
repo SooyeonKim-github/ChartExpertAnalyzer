@@ -18,11 +18,55 @@ class StockSelector:
         self.analyzer = analyzer
         self.provider = provider
         self.cfg = cfg
+        # 일일 스크린에서 CONFIRMED 차트를 다시 데이터 조회하지 않고 그리기 위한 캐시.
+        # key=ticker, value=(raw_ohlcv, analysis_result)
+        self.last_analysis: dict[str, tuple[pd.DataFrame, object]] = {}
 
-    @staticmethod
-    def _row_from_result(r, meta=None) -> dict:
+    def _status_from_result(self, r) -> str:
+        """백테스트 기반 KJB CONFIRMED V1 상태를 반환한다.
+
+        CONFIRMED:
+        - Selection >= 70
+        - Timing >= 72
+        - Leader >= 70
+        - Relative Strength >= 40
+        - Risk < 60
+        - Chase Risk != 높음
+
+        WATCH:
+        - Selection >= 62
+        - Technical >= 62
+        - Risk < 65
+
+        그 외는 REJECTED.
+        임계값은 config/default.yaml의 confirmation_v1에서 조정할 수 있다.
+        """
+        c = self.cfg.get('confirmation_v1', {}) or {}
+        confirmed = (
+            r.total_score >= float(c.get('selection_min', 70.0))
+            and r.timing_score >= float(c.get('timing_min', 72.0))
+            and r.leader_score >= float(c.get('leader_min', 70.0))
+            and r.relative_strength_score >= float(c.get('relative_strength_min', 40.0))
+            and r.risk_score < float(c.get('risk_max_exclusive', 60.0))
+            and (
+                not bool(c.get('reject_high_chase', True))
+                or str(r.chase_risk) != '높음'
+            )
+        )
+        if confirmed:
+            return 'CONFIRMED'
+
+        watch = (
+            r.total_score >= float(c.get('watch_selection_min', 62.0))
+            and r.technical_score >= float(c.get('watch_technical_min', 62.0))
+            and r.risk_score < float(c.get('watch_risk_max_exclusive', 65.0))
+        )
+        return 'WATCH' if watch else 'REJECTED'
+
+    def _row_from_result(self, r, meta=None) -> dict:
         row = {
             'ticker': r.ticker, 'asof': r.asof, 'close': r.close,
+            'Status': self._status_from_result(r),
             'score': r.total_score, 'grade': r.grade,
             'technical_score': r.technical_score, 'technical_grade': r.technical_grade,
             'timing_score': r.timing_score, 'timing_grade': r.timing_grade,
@@ -63,6 +107,7 @@ class StockSelector:
         return table.reset_index(drop=True)
 
     def screen(self, tickers: list[str], period: str = '2y', market_ticker: str | None = None, limit: int | None = None) -> tuple[pd.DataFrame, list]:
+        self.last_analysis = {}
         market_df = None
         if market_ticker:
             try:
@@ -76,12 +121,14 @@ class StockSelector:
                 df = self.provider.get_ohlcv(ticker, period=period)
                 r = self.analyzer.analyze(ticker, df, market_df)
                 rows.append(self._row_from_result(r))
+                self.last_analysis[str(ticker)] = (df, r)
             except Exception as exc:
                 errors.append((ticker, str(exc)))
         return self._finish(rows, limit), errors
 
     def screen_universe(self, universe, period: str = '5y', limit: int | None = 0) -> tuple[pd.DataFrame, list]:
         """TickerInfo 목록을 분석한다. KOSPI/KOSDAQ별 벤치마크를 각각 한 번만 조회해 재사용한다."""
+        self.last_analysis = {}
         market_cache: dict[str, pd.DataFrame | None] = {}
         rows: list[dict] = []
         errors: list[tuple[str, str]] = []
@@ -105,7 +152,11 @@ class StockSelector:
                 row['data_ticker'] = data_ticker
                 row['ticker'] = ticker
                 rows.append(row)
-                logger.info('[%d/%d] %s %s 분석 완료 | Selection %.1f', idx, len(universe), ticker, info.name, r.total_score)
+                self.last_analysis[str(ticker)] = (df, r)
+                logger.info(
+                    '[%d/%d] %s %s 분석 완료 | Selection %.1f | %s',
+                    idx, len(universe), ticker, info.name, r.total_score, row['Status']
+                )
             except Exception as exc:
                 errors.append((ticker, str(exc)))
                 logger.warning('[%d/%d] %s %s 분석 실패: %s', idx, len(universe), ticker, info.name, exc)
