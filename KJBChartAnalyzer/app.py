@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 from pathlib import Path
+import re
 
 from chartsel.config import load_config
 from chartsel.data.csv_provider import CSVProvider
@@ -41,6 +42,52 @@ def _agent_output_dir(args) -> Path:
     return ROOT / 'output'
 
 
+def _safe_filename(value: str) -> str:
+    return re.sub(r'[^0-9A-Za-z가-힣._-]+', '_', str(value or '')).strip('_')
+
+
+def _save_confirmed_charts(table, selector: StockSelector, analyzer: ChartAnalyzer, out_dir: Path) -> list[Path]:
+    """현재 스크린의 CONFIRMED 종목만 차트로 저장한다.
+
+    StockSelector가 분석 시 보관한 OHLCV/result를 재사용하므로 추가 데이터 조회는 하지 않는다.
+    이전 실행의 PNG는 삭제해 현재 CONFIRMED 결과와 섞이지 않게 한다.
+    """
+    out_dir.mkdir(parents=True, exist_ok=True)
+    for old in out_dir.glob('*.png'):
+        try:
+            old.unlink()
+        except OSError:
+            pass
+
+    if table.empty or 'Status' not in table.columns:
+        print('CONFIRMED 차트: 대상 없음')
+        return []
+
+    confirmed = table[table['Status'].eq('CONFIRMED')].copy()
+    paths: list[Path] = []
+    for _, row in confirmed.iterrows():
+        ticker = str(row.get('ticker', '')).strip()
+        cached = selector.last_analysis.get(ticker)
+        if cached is None:
+            print(f'[WARN] CONFIRMED 차트 캐시 없음: {ticker}')
+            continue
+        raw_df, result = cached
+        try:
+            prepared = analyzer.prepare(raw_df)
+            name = _safe_filename(row.get('name', ''))
+            stem = f'{ticker}_{name}_CONFIRMED' if name else f'{ticker}_CONFIRMED'
+            path = out_dir / f'{stem}.png'
+            plot_analysis(prepared, result, str(path), status='CONFIRMED')
+            paths.append(path)
+        except Exception as exc:
+            print(f'[WARN] CONFIRMED 차트 생성 실패 {ticker}: {exc}')
+
+    print(f'CONFIRMED: {len(confirmed)}종목 | 차트: {len(paths)}개')
+    if paths:
+        print(f'CONFIRMED Charts: {out_dir}')
+    return paths
+
+
 def cmd_analyze(args):
     cfg = load_config(args.config)
     provider = provider_from_args(args)
@@ -72,14 +119,20 @@ def cmd_screen(args):
     cfg = load_config(args.config)
     provider = provider_from_args(args)
     analyzer = ChartAnalyzer(cfg)
-    tickers = [x.strip() for x in Path(args.tickers).read_text(encoding='utf-8-sig').splitlines() if x.strip() and not x.startswith('#')]
-    table, errors = StockSelector(analyzer, provider, cfg).screen(tickers, args.period, args.market, args.max_results)
+    selector = StockSelector(analyzer, provider, cfg)
+    tickers = [
+        x.strip()
+        for x in Path(args.tickers).read_text(encoding='utf-8-sig').splitlines()
+        if x.strip() and not x.startswith('#')
+    ]
+    table, errors = selector.screen(tickers, args.period, args.market, args.max_results)
     _print_screen(table)
     if args.out:
         save_screen_csv(table, args.out)
     if args.report:
         save_screen_html(table, args.report)
         print(f'\nHTML 랭킹 리포트: {args.report}')
+    _save_confirmed_charts(table, selector, analyzer, _agent_output_dir(args) / 'confirmed_charts')
     agent_json, agent_md = export_agent_candidates(table, _agent_output_dir(args), args.agent_top_n)
     print(f'Agent JSON: {agent_json}')
     print(f'Agent MD  : {agent_md}')
@@ -91,6 +144,7 @@ def cmd_screen_top(args):
     cfg = load_config(args.config)
     provider = provider_from_args(args)
     analyzer = ChartAnalyzer(cfg)
+    selector = StockSelector(analyzer, provider, cfg)
     universe_service = TickerUniverseService(args.info_excel)
     universe = universe_service.get_universe(
         top_n=args.top_n,
@@ -102,7 +156,7 @@ def cmd_screen_top(args):
     if universe:
         print('상위 10종목:', ', '.join(f'{x.name}({x.ticker})' for x in universe[:10]))
 
-    table, errors = StockSelector(analyzer, provider, cfg).screen_universe(
+    table, errors = selector.screen_universe(
         universe,
         period=args.period,
         limit=args.max_results,
@@ -115,6 +169,7 @@ def cmd_screen_top(args):
     if args.report:
         save_screen_html(table, args.report)
         print(f'\nHTML TOP{args.top_n} 랭킹 리포트: {args.report}')
+    _save_confirmed_charts(table, selector, analyzer, _agent_output_dir(args) / 'confirmed_charts')
     agent_json, agent_md = export_agent_candidates(table, _agent_output_dir(args), args.agent_top_n)
     print(f'Agent JSON: {agent_json}')
     print(f'Agent MD  : {agent_md}')
@@ -146,7 +201,11 @@ def _print_screen(table, with_meta: bool = False):
         cols += ['source_rank', 'ticker', 'name', 'market', 'market_cap']
     else:
         cols += ['ticker']
-    cols += ['score', 'technical_score', 'timing_score', 'risk_score', 'chase_risk', 'action', 'market_regime', 'close']
+    cols += [
+        'Status', 'score', 'technical_score', 'timing_score', 'risk_score',
+        'relative_strength_score', 'leader_score', 'chase_risk', 'action',
+        'market_regime', 'close'
+    ]
     cols = [c for c in cols if c in table.columns]
     print(table[cols].to_string(index=False))
 
