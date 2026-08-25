@@ -24,20 +24,21 @@ if "%SORT_BY%"=="" set "SORT_BY=market_cap"
 if "%DAILY_TOP_N%"=="" set "DAILY_TOP_N=5"
 
 echo ============================================
-echo   Combined Range Backtest - KJB + Siyoon
+echo   Range Backtest - KJB + Siyoon + Bullish
 echo ============================================
 echo Date range    : %DATE_RANGE%
 echo Universe TOP N: %TOP_N%
 echo Sort by       : %SORT_BY%
 echo Combined TOP N: %DAILY_TOP_N% per day
 echo Forward bars  : 60
-echo Market context: Regime + Breadth + Shock phase
+echo Note          : BullishPatternAnalyzer remains independent.
+echo                 Combined outputs still use KJB + Siyoon only.
 echo ============================================
 echo.
 
 set "NO_PAUSE=1"
 
-echo [1/4] Running KJB range backtest...
+echo [1/5] Running KJB range backtest...
 call "%ROOT%KJBChartAnalyzer\run_swing_range.bat" "%DATE_RANGE%" "%TOP_N%" "%SORT_BY%"
 if errorlevel 1 (
     echo.
@@ -48,11 +49,22 @@ if errorlevel 1 (
 cd /d "%ROOT%"
 
 echo.
-echo [2/4] Running Siyoon range backtest...
+echo [2/5] Running Siyoon range backtest...
 call "%ROOT%SwingChartProbabilityAnalyzer\run_swing_range.bat" "%DATE_RANGE%" "%TOP_N%" "%SORT_BY%"
 if errorlevel 1 (
     echo.
     echo [ERROR] Siyoon range backtest failed.
+    pause
+    exit /b 1
+)
+cd /d "%ROOT%"
+
+echo.
+echo [3/5] Running BullishPatternAnalyzer range backtest...
+call "%ROOT%BullishPatternAnalyzer\run_swing_range.bat" "%DATE_RANGE%" "%TOP_N%"
+if errorlevel 1 (
+    echo.
+    echo [ERROR] BullishPatternAnalyzer range backtest failed.
     pause
     exit /b 1
 )
@@ -66,6 +78,8 @@ if exist "%ROOT%.venv\Scripts\python.exe" (
     set "PYTHON_EXE=%ROOT%SwingChartProbabilityAnalyzer\.venv\Scripts\python.exe"
 ) else if exist "%ROOT%KJBChartAnalyzer\.venv\Scripts\python.exe" (
     set "PYTHON_EXE=%ROOT%KJBChartAnalyzer\.venv\Scripts\python.exe"
+) else if exist "%ROOT%BullishPatternAnalyzer\.venv\Scripts\python.exe" (
+    set "PYTHON_EXE=%ROOT%BullishPatternAnalyzer\.venv\Scripts\python.exe"
 ) else (
     where py >nul 2>nul
     if not errorlevel 1 (
@@ -84,7 +98,7 @@ if "%PYTHON_EXE%"=="" (
 )
 
 echo.
-echo [3/4] Combining both analyzer results...
+echo [4/5] Combining KJB + Siyoon results...
 "%PYTHON_EXE%" %PYTHON_PREFIX% "%ROOT%scripts\run_combined_range_backtest.py" ^
     --date-range "%DATE_RANGE%" ^
     --daily-top-n "%DAILY_TOP_N%"
@@ -96,7 +110,7 @@ if errorlevel 1 (
 )
 
 echo.
-echo [4/4] Applying market exposure filter...
+echo [5/5] Applying market exposure filter to combined KJB + Siyoon results...
 "%PYTHON_EXE%" %PYTHON_PREFIX% "%ROOT%scripts\apply_market_filter.py" ^
     --date-range "%DATE_RANGE%" ^
     --daily-top-n "%DAILY_TOP_N%"
@@ -107,11 +121,19 @@ if errorlevel 1 (
     exit /b 1
 )
 
+set "NO_PAUSE="
+
 echo.
 echo ============================================
-echo [DONE] Combined range + market filter finished.
+echo [DONE] All range backtests finished.
 echo ============================================
-echo Output folder:
+echo [BullishPatternAnalyzer - independent]
+echo   BullishPatternAnalyzer\results\range_YYYYMMDD_YYYYMMDD\
+echo   events.csv
+echo   performance_by_pattern.csv
+echo   range_summary.md
+echo.
+echo [KJB + Siyoon combined]
 echo   results\combined_range_YYYYMMDD_YYYYMMDD\
 echo.
 echo Main files:
