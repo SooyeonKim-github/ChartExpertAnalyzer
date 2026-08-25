@@ -93,6 +93,7 @@ if errorlevel 1 (
 echo.
 echo [DONE] Screening finished.
 echo [DONE] Check output\
+echo [DONE] CONFIRMED charts: output\confirmed_charts\
 echo [DONE] Agent files: output\agent\candidates.json / candidates.md
 pause
 exit /b 0
