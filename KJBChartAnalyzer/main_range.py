@@ -11,8 +11,15 @@ from chartsel.analysis.analyzer import ChartAnalyzer
 from chartsel.analysis.market_regime import classify_market_regime
 from chartsel.data.pykrx_provider import PykrxDataProvider
 from chartsel.universe.ticker_universe_service import TickerUniverseService
-from chartsel.backtest.range_engine import RangeBacktester, RangeBacktestParams, parse_date_range, key_horizon_summary
+from chartsel.backtest.range_engine import (
+    RangeBacktester,
+    RangeBacktestParams,
+    parse_date_range,
+    key_horizon_summary,
+    build_forward_summary,
+)
 from chartsel.backtest.range_report import save_range_backtest_excel, save_range_backtest_html
+from chartsel.selection.confirmation import classify_confirmation_values
 
 ROOT = Path(__file__).resolve().parent
 
@@ -52,6 +59,69 @@ def _normalize_market(value) -> str:
     if 'KOSPI' in text or text in {'KS', '^KS11', '1001'}:
         return 'KOSPI'
     return ''
+
+
+def _apply_confirmation_status(events: pd.DataFrame, cfg: dict) -> pd.DataFrame:
+    """일일 Screen과 동일한 KJB CONFIRMED V1 판정을 Range 이벤트에 붙인다."""
+    if events is None or events.empty:
+        out = events.copy() if events is not None else pd.DataFrame()
+        if 'Status' not in out.columns:
+            out['Status'] = pd.Series(dtype='object')
+        return out
+
+    out = events.copy()
+    out['Status'] = out.apply(
+        lambda r: classify_confirmation_values(
+            selection_score=r['selection_score'],
+            technical_score=r['technical_score'],
+            timing_score=r['timing_score'],
+            risk_score=r['risk_score'],
+            leader_score=r['leader_score'],
+            relative_strength_score=r['relative_strength_score'],
+            chase_risk=r['chase_risk'],
+            cfg=cfg,
+        ),
+        axis=1,
+    )
+
+    cols = list(out.columns)
+    if 'Status' in cols:
+        cols.remove('Status')
+        insert_at = cols.index('selection_score') if 'selection_score' in cols else 0
+        cols.insert(insert_at, 'Status')
+        out = out[cols]
+    return out
+
+
+def _build_status_summary(events: pd.DataFrame, forward_bars: int) -> pd.DataFrame:
+    """KJB_ALL과 CONFIRMED/WATCH/REJECTED의 D+N 성과를 같은 형식으로 계산한다."""
+    cohorts = [('KJB_ALL', events)]
+    if events is not None and not events.empty and 'Status' in events.columns:
+        cohorts.extend([
+            ('KJB_CONFIRMED', events[events['Status'].eq('CONFIRMED')]),
+            ('KJB_WATCH', events[events['Status'].eq('WATCH')]),
+            ('KJB_REJECTED', events[events['Status'].eq('REJECTED')]),
+        ])
+
+    parts: list[pd.DataFrame] = []
+    for cohort, frame in cohorts:
+        s = build_forward_summary(frame, forward_bars)
+        if s.empty:
+            s = pd.DataFrame({
+                'horizon': [f'D+{h}' for h in range(1, forward_bars + 1)],
+                'trading_days': list(range(1, forward_bars + 1)),
+                'valid_count': 0,
+                'avg_return': np.nan,
+                'median_return': np.nan,
+                'win_rate': np.nan,
+                'loss_rate': np.nan,
+                'std_return': np.nan,
+                'best_return': np.nan,
+                'worst_return': np.nan,
+            })
+        s.insert(0, 'cohort', cohort)
+        parts.append(s)
+    return pd.concat(parts, ignore_index=True) if parts else pd.DataFrame()
 
 
 def _build_market_regime_daily(
@@ -246,6 +316,9 @@ def main():
     print()
 
     events, summary, universe, errors = runner.run(params, include_etf=args.include_etf)
+    events = _apply_confirmation_status(events, cfg)
+    status_summary = _build_status_summary(events, args.forward_bars)
+
     market_regime_daily = _build_market_regime_daily(
         provider, analyzer, start, end, args.history_days, args.forward_bars
     )
@@ -262,6 +335,7 @@ def main():
     xlsx = out_dir / 'chart_range_backtest.xlsx'
     csv = out_dir / 'chart_range_events.csv'
     summary_csv = out_dir / 'chart_range_summary_D1_D60.csv'
+    status_summary_csv = out_dir / 'chart_range_status_summary_D1_D60.csv'
     universe_csv = out_dir / 'universe.csv'
     error_csv = out_dir / 'errors.csv'
     regime_csv = out_dir / 'market_regime_daily.csv'
@@ -270,12 +344,14 @@ def main():
 
     events.to_csv(csv, index=False, encoding='utf-8-sig')
     summary.to_csv(summary_csv, index=False, encoding='utf-8-sig')
+    status_summary.to_csv(status_summary_csv, index=False, encoding='utf-8-sig')
     universe.to_csv(universe_csv, index=False, encoding='utf-8-sig')
     market_regime_daily.to_csv(regime_csv, index=False, encoding='utf-8-sig')
     market_breadth_daily.to_csv(breadth_csv, index=False, encoding='utf-8-sig')
     if not errors.empty:
         errors.to_csv(error_csv, index=False, encoding='utf-8-sig')
 
+    status_counts = events['Status'].value_counts() if not events.empty else pd.Series(dtype='int64')
     meta = {
         '기간': f'{start:%Y-%m-%d} ~ {end:%Y-%m-%d}',
         'Universe': f'{args.sort_by} TOP {args.top_n}',
@@ -286,12 +362,22 @@ def main():
         'Risk 최대': args.max_risk if args.max_risk is not None else '미사용',
         'Cooldown': args.cooldown_bars,
         '신호수': len(events),
+        'CONFIRMED 수': int(status_counts.get('CONFIRMED', 0)),
+        'WATCH 수': int(status_counts.get('WATCH', 0)),
+        'REJECTED 수': int(status_counts.get('REJECTED', 0)),
         'D+60 완전표본': int(events['forward_complete'].sum()) if not events.empty else 0,
         'Universe 주의': 'KOSPI_Info.xlsx 현재 스냅샷 고정 Universe',
         '시장 Regime': 'KOSPI/KOSDAQ별 일별 point-in-time 판정; 미래 데이터 미사용',
         '시장 Breadth': 'Range Universe 내부 MA20/MA60/5D/20D breadth; 미래 데이터 미사용',
+        'KJB Status': '일일 Screen과 동일 confirmation_v1 기준',
     }
     save_range_backtest_excel(events, summary, universe, errors, xlsx, meta)
+    if not status_summary.empty:
+        try:
+            with pd.ExcelWriter(xlsx, engine='openpyxl', mode='a', if_sheet_exists='replace') as writer:
+                status_summary.to_excel(writer, sheet_name='Status별통계', index=False)
+        except Exception as exc:
+            print(f'[WARN] Status별통계 Excel 시트 저장 실패: {exc}')
     save_range_backtest_html(events, summary, report, meta)
 
     print('\n[핵심 사후수익률]')
@@ -304,10 +390,26 @@ def main():
             view[c] = view[c].map(lambda x: '-' if x != x else f'{x*100:.2f}%')
         print(view.to_string(index=False))
 
+    print('\n[KJB STATUS별 D+5 / D+10 / D+20]')
+    status_key = status_summary[status_summary['trading_days'].isin([5, 10, 20])].copy()
+    if status_key.empty:
+        print('Status별 성과 없음')
+    else:
+        view = status_key[['cohort','horizon','valid_count','avg_return','median_return','win_rate']].copy()
+        for c in ['avg_return','median_return','win_rate']:
+            view[c] = view[c].map(lambda x: '-' if pd.isna(x) else f'{x*100:.2f}%')
+        print(view.to_string(index=False))
+
+    if not events.empty:
+        print('\n[KJB STATUS 신호 수]')
+        for status in ['CONFIRMED', 'WATCH', 'REJECTED']:
+            print(f'{status:9s}: {int(status_counts.get(status, 0))}건')
+
     print('\n[완료]')
     print('상세 Excel :', xlsx)
     print('상세 CSV   :', csv)
     print('통계 CSV   :', summary_csv)
+    print('Status 통계:', status_summary_csv)
     print('시장 Regime:', regime_csv)
     print('시장 Breadth:', breadth_csv)
     print('HTML Report:', report)
