@@ -72,7 +72,8 @@ def _candidate_from_row(row: pd.Series) -> dict[str, Any]:
         "name": str(row.get("name", "")),
         "asof": _clean(row.get("asof")),
         "strategy_score": _clean(row.get("score")),
-        "status": _clean(row.get("action")),
+        "status": _clean(row.get("Status")),
+        "action": _clean(row.get("action")),
         "close": _clean(row.get("close")),
         "stop_price": _clean(row.get("stop_price")),
         "strengths": _split_pipe(row.get("top_strengths")),
@@ -101,7 +102,7 @@ def export_agent_candidates(
         "strategy": "relative_strength_confluence",
         "generated_at": datetime.now().astimezone().isoformat(timespec="seconds"),
         "candidate_count": len(records),
-        "selection_note": "Python 스크리너가 상대강도/리더십/기술/타이밍/리스크 기준으로 정렬한 후보이며, 최종 TOP5는 김종봉 서브에이전트가 판단한다.",
+        "selection_note": "Python 스크리너가 상대강도/리더십/기술/타이밍/리스크 기준으로 정렬하며 KJB CONFIRMED V1 상태를 함께 제공한다. 최종 TOP5는 김종봉 서브에이전트가 판단한다.",
         "candidates": records,
     }
 
@@ -130,6 +131,7 @@ def _write_markdown(payload: dict[str, Any], path: Path) -> None:
         lines.extend([
             f"## {rank}. {candidate.get('name', '')} ({candidate.get('ticker', '')})",
             "",
+            f"- Status: {candidate.get('status')}",
             f"- Selection Score: {candidate.get('strategy_score')}",
             f"- Leader Score: {m.get('leader_score')}",
             f"- Relative Strength: {m.get('relative_strength_score')}",
@@ -137,7 +139,7 @@ def _write_markdown(payload: dict[str, Any], path: Path) -> None:
             f"- Timing: {m.get('timing_score')}",
             f"- Risk: {m.get('risk_score')}",
             f"- Chase Risk: {m.get('chase_risk')}",
-            f"- Action: {candidate.get('status')}",
+            f"- Action: {candidate.get('action')}",
             f"- Market Regime: {m.get('market_regime')}",
             f"- Close: {candidate.get('close')}",
             f"- Stop: {candidate.get('stop_price')}",
