@@ -4,6 +4,7 @@ import pandas as pd
 
 from ..analysis.analyzer import ChartAnalyzer
 from ..utils.logger import get_logger
+from .confirmation import classify_confirmation_v1
 
 logger = get_logger('StockSelector')
 
@@ -22,51 +23,10 @@ class StockSelector:
         # key=ticker, value=(raw_ohlcv, analysis_result)
         self.last_analysis: dict[str, tuple[pd.DataFrame, object]] = {}
 
-    def _status_from_result(self, r) -> str:
-        """백테스트 기반 KJB CONFIRMED V1 상태를 반환한다.
-
-        CONFIRMED:
-        - Selection >= 70
-        - Timing >= 72
-        - Leader >= 70
-        - Relative Strength >= 40
-        - Risk < 60
-        - Chase Risk != 높음
-
-        WATCH:
-        - Selection >= 62
-        - Technical >= 62
-        - Risk < 65
-
-        그 외는 REJECTED.
-        임계값은 config/default.yaml의 confirmation_v1에서 조정할 수 있다.
-        """
-        c = self.cfg.get('confirmation_v1', {}) or {}
-        confirmed = (
-            r.total_score >= float(c.get('selection_min', 70.0))
-            and r.timing_score >= float(c.get('timing_min', 72.0))
-            and r.leader_score >= float(c.get('leader_min', 70.0))
-            and r.relative_strength_score >= float(c.get('relative_strength_min', 40.0))
-            and r.risk_score < float(c.get('risk_max_exclusive', 60.0))
-            and (
-                not bool(c.get('reject_high_chase', True))
-                or str(r.chase_risk) != '높음'
-            )
-        )
-        if confirmed:
-            return 'CONFIRMED'
-
-        watch = (
-            r.total_score >= float(c.get('watch_selection_min', 62.0))
-            and r.technical_score >= float(c.get('watch_technical_min', 62.0))
-            and r.risk_score < float(c.get('watch_risk_max_exclusive', 65.0))
-        )
-        return 'WATCH' if watch else 'REJECTED'
-
     def _row_from_result(self, r, meta=None) -> dict:
         row = {
             'ticker': r.ticker, 'asof': r.asof, 'close': r.close,
-            'Status': self._status_from_result(r),
+            'Status': classify_confirmation_v1(r, self.cfg),
             'score': r.total_score, 'grade': r.grade,
             'technical_score': r.technical_score, 'technical_grade': r.technical_grade,
             'timing_score': r.timing_score, 'timing_grade': r.timing_grade,
