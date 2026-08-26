@@ -25,17 +25,40 @@ class BullishPatternScanner:
         regimes = {}
         for market in universe["market"].dropna().unique().tolist():
             idx_ticker = MARKET.index_tickers.get(str(market))
-            idx_df = self.provider.index_ohlcv(idx_ticker, start.strftime("%Y%m%d"), end.strftime("%Y%m%d")) if idx_ticker else pd.DataFrame()
+            idx_df = (
+                self.provider.index_ohlcv(
+                    idx_ticker, start.strftime("%Y%m%d"), end.strftime("%Y%m%d")
+                )
+                if idx_ticker
+                else pd.DataFrame()
+            )
             regimes[str(market)] = market_context(idx_df)
         for row in universe.itertuples(index=False):
-            results.extend(self._scan_ticker(as_of, row.ticker, row.name, row.market, regimes.get(row.market, MarketRegime.UNKNOWN)))
+            results.extend(
+                self._scan_ticker(
+                    as_of,
+                    row.ticker,
+                    row.name,
+                    row.market,
+                    regimes.get(row.market, MarketRegime.UNKNOWN),
+                )
+            )
         return sorted(results, key=lambda x: (x.selection_score, x.timing_score), reverse=True)
 
-    def _scan_ticker(self, as_of: str, ticker: str, name: str, market: str, regime: MarketRegime) -> list[Candidate]:
+    def _scan_ticker(
+        self,
+        as_of: str,
+        ticker: str,
+        name: str,
+        market: str,
+        regime: MarketRegime,
+    ) -> list[Candidate]:
         end = pd.Timestamp(as_of)
         start = end - pd.Timedelta(days=UNIVERSE.history_calendar_days)
         try:
-            df = self.provider.stock_ohlcv(ticker, start.strftime("%Y%m%d"), end.strftime("%Y%m%d"))
+            df = self.provider.stock_ohlcv(
+                ticker, start.strftime("%Y%m%d"), end.strftime("%Y%m%d")
+            )
         except Exception:
             return []
         if len(df) < UNIVERSE.min_history_bars:
@@ -46,6 +69,7 @@ class BullishPatternScanner:
             scored = self.scorer.score(df, det, regime)
             if scored["selection_score"] < SCORE.watch_selection_min and det.state == PatternState.FORMING:
                 continue
+
             br = scored["breakout"]
             vol = scored["volume"]
             candle = scored["candle"]
@@ -53,6 +77,14 @@ class BullishPatternScanner:
             ret = scored["retest"]
             risk = scored["risk"]
             reasons = list(det.reasons)
+
+            if scored["decision_status"].value == "CONFIRMED":
+                reasons.append("최종판정=CONFIRMED")
+            elif scored["decision_status"].value == "REJECT":
+                reasons.append(f"최종판정=REJECT({scored['reject_reason']})")
+            else:
+                reasons.append("최종판정=WATCH")
+
             if br["confirmed"] and vol["filter_pass"]:
                 reasons.append("종가 돌파 + 거래량 필터 통과")
             elif br["confirmed"]:
@@ -84,24 +116,53 @@ class BullishPatternScanner:
                 "mfi14": mom["mfi14"],
                 "mfi_bullish_divergence": scored["mfi_divergence"],
                 "above_ma200": mom["above_ma200"],
-                **{f"candle_{k}": v for k, v in candle.items() if k not in {"score", "signal"}},
+                **{
+                    f"candle_{k}": v
+                    for k, v in candle.items()
+                    if k not in {"score", "signal"}
+                },
                 "chase_atr": risk["chase_atr"],
                 "stop_distance_pct": risk["stop_distance_pct"],
             }
-            out.append(Candidate(
-                date=end.strftime("%Y%m%d"), ticker=ticker, name=name, market=market,
-                pattern_type=det.pattern_type, pattern_category=det.category, pattern_state=scored["state"],
-                structure_score=det.structure_score, breakout_score=br["score"], volume_score=vol["score"],
-                candle_score=candle["score"], momentum_score=mom["score"], retest_score=ret["score"],
-                selection_score=scored["selection_score"], timing_score=scored["timing_score"],
-                volume_filter_pass=vol["filter_pass"], candle_signal=candle["signal"],
-                chase_risk=risk["chase"], entry_risk=risk["entry"], market_regime=regime,
-                breakout_level=det.breakout_level, support_level=det.support_level, stop_level=det.stop_level,
-                current_price=float(df.iloc[-1]["close"]), breakout_price=det.breakout_level if br["confirmed"] else None,
-                volume_ratio=vol["ratio"], distance_from_breakout_pct=br["distance_pct"],
-                bullish_divergence=scored["divergence"], retest_valid=ret["valid"],
-                signal_reason="; ".join(reasons),
-                risk_reason=f"추격위험={risk['chase'].value}, 손절거리위험={risk['entry'].value}, 시장={regime.value}",
-                metrics=metrics,
-            ))
+            out.append(
+                Candidate(
+                    date=end.strftime("%Y%m%d"),
+                    ticker=ticker,
+                    name=name,
+                    market=market,
+                    pattern_type=det.pattern_type,
+                    pattern_category=det.category,
+                    pattern_state=scored["state"],
+                    decision_status=scored["decision_status"],
+                    reject_reason=scored["reject_reason"],
+                    structure_score=det.structure_score,
+                    breakout_score=br["score"],
+                    volume_score=vol["score"],
+                    candle_score=candle["score"],
+                    momentum_score=mom["score"],
+                    retest_score=ret["score"],
+                    selection_score=scored["selection_score"],
+                    timing_score=scored["timing_score"],
+                    volume_filter_pass=vol["filter_pass"],
+                    candle_signal=candle["signal"],
+                    chase_risk=risk["chase"],
+                    entry_risk=risk["entry"],
+                    market_regime=regime,
+                    breakout_level=det.breakout_level,
+                    support_level=det.support_level,
+                    stop_level=det.stop_level,
+                    current_price=float(df.iloc[-1]["close"]),
+                    breakout_price=det.breakout_level if br["confirmed"] else None,
+                    volume_ratio=vol["ratio"],
+                    distance_from_breakout_pct=br["distance_pct"],
+                    bullish_divergence=scored["divergence"],
+                    retest_valid=ret["valid"],
+                    signal_reason="; ".join(reasons),
+                    risk_reason=(
+                        f"추격위험={risk['chase'].value}, "
+                        f"손절거리위험={risk['entry'].value}, 시장={regime.value}"
+                    ),
+                    metrics=metrics,
+                )
+            )
         return out
