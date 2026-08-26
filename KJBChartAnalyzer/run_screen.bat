@@ -6,13 +6,17 @@ cd /d "%~dp0"
 set "MODE=%~1"
 
 if "%MODE%"=="" (
-    echo ============================================
-    echo   Stock Screening
-    echo ============================================
-    echo   1. KOSPI Top 100 by market cap
-    echo   2. Tickers in tickers_example.txt
-    echo.
-    set /p "MODE=Select [1/2] (default 1): "
+    if defined NO_PAUSE (
+        set "MODE=1"
+    ) else (
+        echo ============================================
+        echo   Stock Screening
+        echo ============================================
+        echo   1. KOSPI Top 100 by market cap
+        echo   2. Tickers in tickers_example.txt
+        echo.
+        set /p "MODE=Select [1/2] (default 1): "
+    )
 )
 
 if "%MODE%"=="" set "MODE=1"
@@ -36,7 +40,7 @@ if exist "%CD%\.venv\Scripts\python.exe" (
 if "%PYTHON_EXE%"=="" (
     echo [ERROR] Python was not found.
     echo Install Python or create .venv in this project folder.
-    pause
+    if not defined NO_PAUSE pause
     exit /b 1
 )
 
@@ -47,7 +51,7 @@ if /I "%MODE%"=="list" goto LIST
 
 echo [ERROR] Unknown mode: %MODE%
 echo Use 1/top100 or 2/list.
-pause
+if not defined NO_PAUSE pause
 exit /b 1
 
 :TOP100
@@ -68,7 +72,7 @@ goto CHECK_RESULT
 :LIST
 if not exist "tickers_example.txt" (
     echo [ERROR] tickers_example.txt was not found.
-    pause
+    if not defined NO_PAUSE pause
     exit /b 1
 )
 echo.
@@ -86,7 +90,7 @@ goto CHECK_RESULT
 if errorlevel 1 (
     echo.
     echo [ERROR] Screening failed.
-    pause
+    if not defined NO_PAUSE pause
     exit /b 1
 )
 
@@ -95,5 +99,5 @@ echo [DONE] Screening finished.
 echo [DONE] Check output\
 echo [DONE] CONFIRMED charts: output\confirmed_charts\
 echo [DONE] Agent files: output\agent\candidates.json / candidates.md
-pause
+if not defined NO_PAUSE pause
 exit /b 0
