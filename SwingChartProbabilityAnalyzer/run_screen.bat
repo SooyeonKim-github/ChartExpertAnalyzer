@@ -37,6 +37,8 @@ echo   Siyoon Swing Stock Screening
 echo ============================================
 echo   TOP_N  : %TOP_N%
 echo   CHARTS : %CHARTS%
+echo   STATUS : STRONG_CONFIRMED ^> CONFIRMED ^> WATCH ^> REJECTED
+echo   STRONG : Existing CONFIRMED rules + Score 90 or higher
 echo.
 
 "%PYTHON_EXE%" %PYTHON_PREFIX% main.py scan ^
@@ -54,6 +56,7 @@ if errorlevel 1 (
 echo.
 echo [DONE] Screening finished.
 echo [DONE] Check results\YYYYMMDD\
+echo [DONE] STRONG_CONFIRMED is ranked first in candidates/charts.
 echo [DONE] Agent files: results\YYYYMMDD\agent\candidates.json / candidates.md
 pause
 exit /b 0
