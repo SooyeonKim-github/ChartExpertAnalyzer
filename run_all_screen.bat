@@ -45,11 +45,50 @@ for /d %%D in ("%~dp0*") do (
     )
 )
 
+echo ============================================
+echo [POST] Aggregating confirmed candidates ...
+echo ============================================
+
+set "AGG_PYTHON="
+set "AGG_PREFIX="
+
+if exist "%~dp0KJBChartAnalyzer\.venv\Scripts\python.exe" (
+    set "AGG_PYTHON=%~dp0KJBChartAnalyzer\.venv\Scripts\python.exe"
+) else if exist "%~dp0SwingChartProbabilityAnalyzer\.venv\Scripts\python.exe" (
+    set "AGG_PYTHON=%~dp0SwingChartProbabilityAnalyzer\.venv\Scripts\python.exe"
+) else if exist "%~dp0BullishPatternAnalyzer\.venv\Scripts\python.exe" (
+    set "AGG_PYTHON=%~dp0BullishPatternAnalyzer\.venv\Scripts\python.exe"
+) else (
+    where py >nul 2>nul
+    if not errorlevel 1 (
+        set "AGG_PYTHON=py"
+        set "AGG_PREFIX=-3"
+    ) else (
+        where python >nul 2>nul
+        if not errorlevel 1 set "AGG_PYTHON=python"
+    )
+)
+
+if not defined AGG_PYTHON (
+    echo [ERROR] Python was not found for confirmed candidate aggregation.
+    goto RUN_FAILED
+)
+
+"!AGG_PYTHON!" !AGG_PREFIX! "%~dp0scripts\aggregate_confirmed_candidates.py"
+if errorlevel 1 (
+    echo [ERROR] Confirmed candidate aggregation failed.
+    goto RUN_FAILED
+)
+
 set "NO_PAUSE="
 
+echo.
 echo ============================================
 echo [DONE] All analyzer screenings finished.
 echo ============================================
+echo [Confirmed Summary]
+echo   results\confirmed_candidates.csv
+echo.
 echo [KJB Agent]
 echo   KJBChartAnalyzer\output\agent\candidates.json
 echo   KJBChartAnalyzer\output\agent\candidates.md
