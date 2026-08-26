@@ -7,6 +7,7 @@ import pandas as pd
 from backtest.event_backtester import (
     EventBacktester,
     performance_by_condition,
+    performance_by_decision,
     performance_by_market_regime,
     performance_by_pattern,
     performance_by_state,
@@ -27,8 +28,14 @@ def main() -> None:
     p = argparse.ArgumentParser(description="Bullish chart-pattern range backtest V1.1")
     p.add_argument("--date-range", required=True)
     p.add_argument("--top-n", type=int, default=100)
-    p.add_argument("--daily-candidate-top-n", type=int, default=BACKTEST.daily_candidate_top_n)
-    p.add_argument("--event-cooldown-sessions", type=int, default=BACKTEST.event_cooldown_sessions)
+    p.add_argument(
+        "--daily-candidate-top-n", type=int, default=BACKTEST.daily_candidate_top_n
+    )
+    p.add_argument(
+        "--event-cooldown-sessions",
+        type=int,
+        default=BACKTEST.event_cooldown_sessions,
+    )
     a = p.parse_args()
 
     start, end = parse_range(a.date_range)
@@ -37,7 +44,9 @@ def main() -> None:
     all_candidates = []
     selected_keys: set[tuple[str, str, str]] = set()
     last_event_session: dict[tuple[str, str], int] = {}
-    dates = provider.trading_dates(start.strftime("%Y%m%d"), end.strftime("%Y%m%d")) or [x.strftime("%Y%m%d") for x in pd.bdate_range(start, end)]
+    dates = provider.trading_dates(
+        start.strftime("%Y%m%d"), end.strftime("%Y%m%d")
+    ) or [x.strftime("%Y%m%d") for x in pd.bdate_range(start, end)]
 
     for session_no, date in enumerate(dates):
         try:
@@ -46,7 +55,7 @@ def main() -> None:
             print(f"[WARN] {date}: {exc}")
             continue
         all_candidates.extend(day)
-        actionable = [c for c in day if c.volume_filter_pass and c.pattern_state.value in {"BREAKOUT_CONFIRMED", "RETEST", "ENTRY_READY"}]
+        actionable = [c for c in day if c.decision_status.value == "CONFIRMED"]
         kept = []
         for c in actionable:
             key = (c.ticker, c.pattern_type.value)
@@ -59,25 +68,55 @@ def main() -> None:
                 break
         for c in kept:
             selected_keys.add((c.date, c.ticker, c.pattern_type.value))
-        print(f"[{date}] detected={len(day)} actionable={len(actionable)} unique_kept={len(kept)}")
+
+        confirmed_cnt = sum(c.decision_status.value == "CONFIRMED" for c in day)
+        watch_cnt = sum(c.decision_status.value == "WATCH" for c in day)
+        reject_cnt = sum(c.decision_status.value == "REJECT" for c in day)
+        print(
+            f"[{date}] detected={len(day)} confirmed={confirmed_cnt} "
+            f"watch={watch_cnt} reject={reject_cnt} unique_kept={len(kept)}"
+        )
 
     backtester = EventBacktester(provider)
     all_df = backtester.enrich(all_candidates)
     if all_df.empty:
         events = pd.DataFrame()
     else:
-        signal_keys = all_df.apply(lambda r: (str(r.get("date")), str(r.get("ticker")).zfill(6), str(r.get("pattern_type"))), axis=1)
+        signal_keys = all_df.apply(
+            lambda r: (
+                str(r.get("date")),
+                str(r.get("ticker")).zfill(6),
+                str(r.get("pattern_type")),
+            ),
+            axis=1,
+        )
         events = all_df[signal_keys.isin(selected_keys)].copy()
 
     perf_pattern = performance_by_pattern(events)
     perf_pattern_all = performance_by_pattern(all_df)
     perf_state = performance_by_state(all_df)
+    perf_decision = performance_by_decision(all_df)
     perf_volume = performance_by_volume(all_df)
     perf_market = performance_by_market_regime(all_df)
     perf_condition = performance_by_condition(all_df)
 
-    out = Path(__file__).resolve().parent / "results" / f"range_{start.strftime('%Y%m%d')}_{end.strftime('%Y%m%d')}"
-    write_range(out, all_df, events, perf_pattern, perf_pattern_all, perf_state, perf_volume, perf_market, perf_condition)
+    out = (
+        Path(__file__).resolve().parent
+        / "results"
+        / f"range_{start.strftime('%Y%m%d')}_{end.strftime('%Y%m%d')}"
+    )
+    write_range(
+        out,
+        all_df,
+        events,
+        perf_pattern,
+        perf_pattern_all,
+        perf_state,
+        perf_decision,
+        perf_volume,
+        perf_market,
+        perf_condition,
+    )
     print(f"[DONE] detections={len(all_df)} unique_events={len(events)} -> {out}")
 
 
