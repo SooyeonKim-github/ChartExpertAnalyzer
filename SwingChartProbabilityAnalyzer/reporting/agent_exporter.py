@@ -36,6 +36,8 @@ _SWING_METRICS = [
     "Reference_Volume_Ratio",
 ]
 
+_CANDIDATE_STATUSES = ["STRONG_CONFIRMED", "CONFIRMED", "WATCH"]
+
 
 def _clean(value: Any) -> Any:
     if value is None:
@@ -98,9 +100,7 @@ def export_agent_candidates(
     if signals.empty:
         candidates = signals.copy()
     else:
-        candidates = signals[
-            signals["Status"].isin(["CONFIRMED", "WATCH"])
-        ].copy()
+        candidates = signals[signals["Status"].isin(_CANDIDATE_STATUSES)].copy()
         candidates = candidates.head(max(0, int(top_n)))
 
     records = [_candidate_from_row(row) for _, row in candidates.iterrows()]
@@ -109,7 +109,7 @@ def export_agent_candidates(
         "strategy": "swing_pullback_channel",
         "generated_at": datetime.now().astimezone().isoformat(timespec="seconds"),
         "candidate_count": len(records),
-        "selection_note": "Python 스크리너가 CONFIRMED/WATCH 후보를 정리한 파일이며, 최종 TOP5는 시윤주식 서브에이전트가 판단한다.",
+        "selection_note": "Python 스크리너가 STRONG_CONFIRMED/CONFIRMED/WATCH 후보를 정리한 파일이며, STRONG_CONFIRMED는 D+10 강화 검증 단계다.",
         "candidates": records,
     }
 
@@ -130,7 +130,7 @@ def _write_markdown(payload: dict[str, Any], path: Path) -> None:
         "",
         f"- 생성일시: {payload['generated_at']}",
         f"- 후보 수: {payload['candidate_count']}",
-        "- 용도: 이 후보들 중 시윤주식 강의 철학에 가장 부합하는 최종 TOP5 선정",
+        "- 용도: STRONG_CONFIRMED/CONFIRMED/WATCH 후보 중 시윤주식 강의 철학에 가장 부합하는 최종 TOP5 선정",
         "",
     ]
 
