@@ -3,9 +3,17 @@ from __future__ import annotations
 import pandas as pd
 
 from config import PATTERN, SCORE
-from core.analysis import breakout_analysis, bullish_divergence, indicator_bullish_divergence, momentum_quality, retest_analysis, risk_analysis, volume_quality
+from core.analysis import (
+    breakout_analysis,
+    bullish_divergence,
+    indicator_bullish_divergence,
+    momentum_quality,
+    retest_analysis,
+    risk_analysis,
+    volume_quality,
+)
 from core.candle_analysis import analyze_candles
-from core.models import MarketRegime, PatternDetection, PatternState, RiskLevel
+from core.models import DecisionStatus, MarketRegime, PatternDetection, PatternState, RiskLevel
 from core.swing_points import find_swing_lows
 
 
@@ -19,7 +27,11 @@ class BullishPatternScorer:
         recent_lows = find_swing_lows(recent, PATTERN.swing_order)
         low_positions = recent_lows["pos"].astype(int).tail(2).tolist() if len(recent_lows) >= 2 else []
         divergence = bullish_divergence(recent, low_positions) if low_positions else False
-        mfi_divergence = indicator_bullish_divergence(recent, low_positions, "mfi14", 3.0) if low_positions else False
+        mfi_divergence = (
+            indicator_bullish_divergence(recent, low_positions, "mfi14", 3.0)
+            if low_positions
+            else False
+        )
         momentum = momentum_quality(df, divergence, mfi_divergence)
         retest = retest_analysis(df, detection.breakout_level, br["confirmed"])
         risk = risk_analysis(df, detection.breakout_level, detection.stop_level)
@@ -69,8 +81,29 @@ class BullishPatternScorer:
         ):
             state = PatternState.ENTRY_READY
 
+        reject_reasons: list[str] = []
+        if detection.state == PatternState.INVALIDATED:
+            reject_reasons.append("pattern_invalidated")
+        if candle["bearish_warning"]:
+            reject_reasons.append("bearish_candle_warning")
+        if risk["chase"] == RiskLevel.HIGH:
+            reject_reasons.append("high_chase_risk")
+        if risk["entry"] == RiskLevel.HIGH:
+            reject_reasons.append("high_entry_risk")
+        if regime == MarketRegime.CRASH:
+            reject_reasons.append("market_crash")
+
+        if reject_reasons:
+            decision = DecisionStatus.REJECT
+        elif br["confirmed"] and volume["filter_pass"]:
+            decision = DecisionStatus.CONFIRMED
+        else:
+            decision = DecisionStatus.WATCH
+
         return {
             "state": state,
+            "decision_status": decision,
+            "reject_reason": ";".join(reject_reasons),
             "breakout": br,
             "volume": volume,
             "candle": candle,
