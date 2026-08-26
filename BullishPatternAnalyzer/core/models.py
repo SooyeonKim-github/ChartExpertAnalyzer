@@ -29,6 +29,12 @@ class PatternState(str, Enum):
     INVALIDATED = "INVALIDATED"
 
 
+class DecisionStatus(str, Enum):
+    CONFIRMED = "CONFIRMED"
+    WATCH = "WATCH"
+    REJECT = "REJECT"
+
+
 class RiskLevel(str, Enum):
     LOW = "LOW"
     MEDIUM = "MEDIUM"
@@ -67,6 +73,8 @@ class Candidate:
     pattern_type: PatternType
     pattern_category: PatternCategory
     pattern_state: PatternState
+    decision_status: DecisionStatus
+    reject_reason: str
     structure_score: float
     breakout_score: float
     volume_score: float
@@ -95,7 +103,15 @@ class Candidate:
 
     def as_record(self) -> dict[str, Any]:
         row = asdict(self)
-        for key in ("pattern_type", "pattern_category", "pattern_state", "chase_risk", "entry_risk", "market_regime"):
+        for key in (
+            "pattern_type",
+            "pattern_category",
+            "pattern_state",
+            "decision_status",
+            "chase_risk",
+            "entry_risk",
+            "market_regime",
+        ):
             value = row[key]
             row[key] = value.value if hasattr(value, "value") else value
         metrics = row.pop("metrics", {})
