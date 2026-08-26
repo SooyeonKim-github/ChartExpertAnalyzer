@@ -86,10 +86,20 @@ class SwingSignalAnalyzer:
         confirmation = db["confirmed"] or vol["reference_high_break"] or vol["bullish_turn"] or ma["reclaimed"]
         not_chasing = cm["position"] <= self.cfg.max_entry_channel_position
 
+        confirmed_conditions = (
+            score >= self.cfg.confirmed_score
+            and cm["recent_lower_touch"]
+            and confirmation
+            and not_chasing
+        )
+
         if hard_fail:
             status = "REJECTED"
             primary = "TREND_BROKEN_OR_NOT_UPTREND"
-        elif score >= self.cfg.confirmed_score and cm["recent_lower_touch"] and confirmation and not_chasing:
+        elif confirmed_conditions and score >= self.cfg.strong_confirmed_score:
+            status = "STRONG_CONFIRMED"
+            primary = "D10_STRONG_LOWER_CHANNEL_CONFIRMED_REVERSAL"
+        elif confirmed_conditions:
             status = "CONFIRMED"
             primary = "LOWER_CHANNEL_CONFIRMED_REVERSAL"
         elif score >= self.cfg.watch_score and cm["recent_lower_touch"]:
