@@ -28,7 +28,7 @@ if exist "%CD%\.venv\Scripts\python.exe" (
 if "%PYTHON_EXE%"=="" (
     echo [ERROR] Python was not found.
     echo Install Python or create .venv in this project folder.
-    pause
+    if not defined NO_PAUSE pause
     exit /b 1
 )
 
@@ -49,7 +49,7 @@ echo.
 if errorlevel 1 (
     echo.
     echo [ERROR] Screening failed.
-    pause
+    if not defined NO_PAUSE pause
     exit /b 1
 )
 
@@ -58,5 +58,5 @@ echo [DONE] Screening finished.
 echo [DONE] Check results\YYYYMMDD\
 echo [DONE] STRONG_CONFIRMED is ranked first in candidates/charts.
 echo [DONE] Agent files: results\YYYYMMDD\agent\candidates.json / candidates.md
-pause
+if not defined NO_PAUSE pause
 exit /b 0
