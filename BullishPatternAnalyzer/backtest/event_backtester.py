@@ -33,9 +33,15 @@ class EventBacktester:
 
             for c in ticker_candidates:
                 row = c.as_record()
-                future = price_df[price_df.index > pd.Timestamp(c.date)] if not price_df.empty else pd.DataFrame()
+                future = (
+                    price_df[price_df.index > pd.Timestamp(c.date)]
+                    if not price_df.empty
+                    else pd.DataFrame()
+                )
                 if future.empty:
-                    row.update({"entry_mode": "NEXT_OPEN", "entry_date": None, "entry_price": None})
+                    row.update(
+                        {"entry_mode": "NEXT_OPEN", "entry_date": None, "entry_price": None}
+                    )
                     for bar in FORWARD_BARS:
                         row[f"return_d{bar}"] = None
                         row[f"mfe_d{bar}"] = None
@@ -54,14 +60,18 @@ class EventBacktester:
                         row[f"mae_d{bar}"] = None
                         continue
                     window = future.iloc[:bar]
-                    row[f"return_d{bar}"] = float(window.iloc[-1]["close"] / entry_price - 1.0)
+                    row[f"return_d{bar}"] = float(
+                        window.iloc[-1]["close"] / entry_price - 1.0
+                    )
                     row[f"mfe_d{bar}"] = float(window["high"].max() / entry_price - 1.0)
                     row[f"mae_d{bar}"] = float(window["low"].min() / entry_price - 1.0)
                 rows.append(row)
         return pd.DataFrame(rows)
 
 
-def _performance(events: pd.DataFrame, group_col: str, output_col: str | None = None) -> pd.DataFrame:
+def _performance(
+    events: pd.DataFrame, group_col: str, output_col: str | None = None
+) -> pd.DataFrame:
     if events.empty or group_col not in events:
         return pd.DataFrame()
     output_col = output_col or group_col
@@ -85,6 +95,10 @@ def performance_by_state(events: pd.DataFrame) -> pd.DataFrame:
     return _performance(events, "pattern_state")
 
 
+def performance_by_decision(events: pd.DataFrame) -> pd.DataFrame:
+    return _performance(events, "decision_status")
+
+
 def performance_by_market_regime(events: pd.DataFrame) -> pd.DataFrame:
     return _performance(events, "market_regime")
 
@@ -94,7 +108,12 @@ def performance_by_volume(events: pd.DataFrame) -> pd.DataFrame:
         return pd.DataFrame()
     d = events.copy()
     ratio = pd.to_numeric(d.get("volume_ratio"), errors="coerce")
-    d["volume_bucket"] = pd.cut(ratio, bins=[-np.inf, 0.8, 1.0, 1.3, 1.6, 2.0, np.inf], right=False, labels=["<0.8", "0.8-1.0", "1.0-1.3", "1.3-1.6", "1.6-2.0", ">=2.0"])
+    d["volume_bucket"] = pd.cut(
+        ratio,
+        bins=[-np.inf, 0.8, 1.0, 1.3, 1.6, 2.0, np.inf],
+        right=False,
+        labels=["<0.8", "0.8-1.0", "1.0-1.3", "1.3-1.6", "1.6-2.0", ">=2.0"],
+    )
     return _performance(d, "volume_bucket")
 
 
