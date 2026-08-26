@@ -80,10 +80,10 @@ def _base_row(
         "market": _text(market),
         "signal": _text(signal),
         "pattern_type": _text(pattern_type),
-        "D+5": np.nan,
-        "D+10": np.nan,
-        "D+20": np.nan,
-        "D+60": np.nan,
+        "D+5_Pct": np.nan,
+        "D+10_Pct": np.nan,
+        "D+20_Pct": np.nan,
+        "D+60_Pct": np.nan,
         "source_file": str(source_file.relative_to(ROOT)),
     }
 
@@ -107,7 +107,8 @@ def _load_kjb(path: Path) -> list[dict]:
             source_file=path,
         )
         for h in MILESTONES:
-            row[f"D+{h}"] = _num(r.get(f"D+{h}", np.nan))
+            value = _num(r.get(f"D+{h}", np.nan))
+            row[f"D+{h}_Pct"] = value * 100.0 if pd.notna(value) else np.nan
         rows.append(row)
     return rows
 
@@ -133,8 +134,7 @@ def _load_swing(path: Path) -> list[dict]:
             source_file=path,
         )
         for h in MILESTONES:
-            # Swing Range CSV는 수익률이 % 단위이므로 통합 CSV도 % 숫자로 맞춘다.
-            row[f"D+{h}"] = _num(r.get(f"D+{h}_Close_Return_Pct", np.nan))
+            row[f"D+{h}_Pct"] = _num(r.get(f"D+{h}_Close_Return_Pct", np.nan))
         rows.append(row)
     return rows
 
@@ -161,7 +161,7 @@ def _load_bullish(path: Path) -> list[dict]:
         )
         for h in MILESTONES:
             value = _num(r.get(f"return_d{h}", np.nan))
-            row[f"D+{h}"] = value * 100.0 if pd.notna(value) else np.nan
+            row[f"D+{h}_Pct"] = value * 100.0 if pd.notna(value) else np.nan
         rows.append(row)
     return rows
 
@@ -225,7 +225,7 @@ def main() -> int:
     columns = [
         "signal_date", "analyzer", "ticker", "name", "status",
         "score", "timing_score", "market", "signal", "pattern_type",
-        "D+5", "D+10", "D+20", "D+60", "source_file",
+        "D+5_Pct", "D+10_Pct", "D+20_Pct", "D+60_Pct", "source_file",
     ]
     pd.DataFrame(rows, columns=columns).to_csv(out_path, index=False, encoding="utf-8-sig")
 
