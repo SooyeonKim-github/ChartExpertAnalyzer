@@ -68,6 +68,8 @@ class StrategyConfig:
     stop_buffer_pct: float = 0.03
 
     # 신호 판정
+    # STRONG_CONFIRMED는 기존 CONFIRMED 조건을 모두 충족하면서 score >= 90인 D+10 강화 단계.
+    strong_confirmed_score: int = 90
     confirmed_score: int = 75
     watch_score: int = 58
 
