@@ -32,11 +32,22 @@ if not defined PYTHON_EXE (
     exit /b 1
 )
 
-if "%SCAN_DATE%"=="" (
-    "%PYTHON_EXE%" %PYTHON_PREFIX% main.py --top-n %TOP_N%
-) else (
-    "%PYTHON_EXE%" %PYTHON_PREFIX% main.py --date %SCAN_DATE% --top-n %TOP_N%
+if not defined LIQUIDITY_MEMBERSHIP_CSV (
+    call "%~dp0..\prepare_liquidity_universe.bat" screen "%SCAN_DATE%" "%TOP_N%" 20
+    if errorlevel 1 (
+        echo [ERROR] Liquidity universe preparation failed.
+        if not defined NO_PAUSE pause
+        exit /b 1
+    )
 )
+
+set "SCAN_DATE=%LIQUIDITY_AS_OF%"
+echo [INFO] BullishPattern universe: recent 20-trading-day avg trading value TOP%TOP_N%
+echo [INFO] Markets: KOSPI + KOSDAQ
+echo [INFO] As of  : %SCAN_DATE%
+echo [INFO] Daily membership: %LIQUIDITY_MEMBERSHIP_CSV%
+
+"%PYTHON_EXE%" %PYTHON_PREFIX% main.py --date %SCAN_DATE% --top-n %TOP_N%
 
 if errorlevel 1 (
     echo [ERROR] BullishPatternAnalyzer screening failed.
@@ -44,6 +55,7 @@ if errorlevel 1 (
     exit /b 1
 )
 
+echo [DONE] Universe: recent 20-trading-day avg trading value TOP%TOP_N%
 echo [DONE] Check results\YYYYMMDD\
 if not defined NO_PAUSE pause
 exit /b 0
