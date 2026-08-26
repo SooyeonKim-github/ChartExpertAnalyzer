@@ -19,6 +19,8 @@ from utils.logger import get_logger
 
 log = get_logger("SwingRangeAnalysis")
 
+CANDIDATE_STATUSES = ("STRONG_CONFIRMED", "CONFIRMED", "WATCH")
+
 
 def parse_date_range(text: str) -> tuple[pd.Timestamp, pd.Timestamp]:
     value = str(text).strip().replace(" ", "")
@@ -74,13 +76,14 @@ def run_range(args) -> int:
     fetch_end = min(requested_future_end, today)
 
     log.info(
-        "RANGE %s ~ %s | universe=%d | fetch=%s~%s | forward=%d bars",
+        "RANGE %s ~ %s | universe=%d | fetch=%s~%s | forward=%d bars | strong_score=%d",
         start_ts.date(),
         end_ts.date(),
         len(universe),
         fetch_start.date(),
         fetch_end.date(),
         args.forward_bars,
+        cfg.strong_confirmed_score,
     )
 
     rows: list[dict] = []
@@ -142,7 +145,7 @@ def run_range(args) -> int:
                     )
 
                 rows.append(row)
-                if result.status in ("CONFIRMED", "WATCH"):
+                if result.status in CANDIDATE_STATUSES:
                     candidate_count += 1
                     if int(forward.get(complete_col, 0)) == 1:
                         complete_horizon_count += 1
@@ -170,7 +173,7 @@ def run_range(args) -> int:
     out_dir.mkdir(parents=True, exist_ok=True)
 
     all_results.to_csv(out_dir / "range_all_results.csv", index=False, encoding="utf-8-sig")
-    candidates = all_results[all_results["Status"].isin(["CONFIRMED", "WATCH"])].copy()
+    candidates = all_results[all_results["Status"].isin(CANDIDATE_STATUSES)].copy()
     candidates.to_csv(out_dir / "range_candidates.csv", index=False, encoding="utf-8-sig")
 
     agent_json, agent_md = export_range_agent_summary(
@@ -188,11 +191,20 @@ def run_range(args) -> int:
         forward_bars=args.forward_bars,
     )
 
+    status_counts = candidates["Status"].value_counts() if not candidates.empty else pd.Series(dtype="int64")
     log.info("완료: %s", out_dir)
     log.info("Excel: %s", workbook)
     log.info("Agent JSON: %s", agent_json)
     log.info("Agent MD  : %s", agent_md)
-    log.info("후보=%d | D+%d 완전평가=%d", candidate_count, args.forward_bars, complete_horizon_count)
+    log.info(
+        "후보=%d | STRONG=%d | CONFIRMED=%d | WATCH=%d | D+%d 완전평가=%d",
+        candidate_count,
+        int(status_counts.get("STRONG_CONFIRMED", 0)),
+        int(status_counts.get("CONFIRMED", 0)),
+        int(status_counts.get("WATCH", 0)),
+        args.forward_bars,
+        complete_horizon_count,
+    )
 
     if not candidates.empty:
         milestones = [d for d in (5, 10, 20, 40, 60) if d <= args.forward_bars]
