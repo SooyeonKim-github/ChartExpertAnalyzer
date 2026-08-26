@@ -20,6 +20,10 @@ from utils.logger import get_logger
 log = get_logger()
 
 
+CANDIDATE_STATUSES = ("STRONG_CONFIRMED", "CONFIRMED", "WATCH")
+STATUS_RANK = {"STRONG_CONFIRMED": 0, "CONFIRMED": 1, "WATCH": 2, "REJECTED": 3}
+
+
 def _config_rows(cfg):
     return [{"Parameter": k, "Value": v} for k,v in cfg.to_dict().items()]
 
@@ -49,16 +53,15 @@ def scan(args) -> int:
     if signals.empty:
         log.warning("결과 없음")
         return 1
-    # 정렬: CONFIRMED > WATCH > REJECTED, 이후 확률(있으면) > 점수
-    rank={"CONFIRMED":0,"WATCH":1,"REJECTED":2}
-    signals["_rank"] = signals["Status"].map(rank).fillna(9)
+    # 정렬: STRONG_CONFIRMED > CONFIRMED > WATCH > REJECTED, 이후 확률(있으면) > 점수
+    signals["_rank"] = signals["Status"].map(STATUS_RANK).fillna(9)
     probcol="Prob_Upper_Before_Stop"
     if probcol not in signals.columns: signals[probcol]=pd.NA
     signals = signals.sort_values(["_rank", probcol, "Score"], ascending=[True, False, False], na_position="last").drop(columns="_rank")
     out_dir = RESULT_DIR / pd.Timestamp(args.date).strftime("%Y%m%d")
     out_dir.mkdir(parents=True, exist_ok=True)
     signals.to_csv(out_dir/"scan_results.csv", index=False, encoding="utf-8-sig")
-    cand = signals[signals["Status"].isin(["CONFIRMED","WATCH"])]
+    cand = signals[signals["Status"].isin(CANDIDATE_STATUSES)]
     cand.to_csv(out_dir/"candidates.csv", index=False, encoding="utf-8-sig")
     agent_json, agent_md = export_agent_candidates(signals, out_dir, top_n=args.agent_top_n)
     calibration_summary = pd.DataFrame()
@@ -68,9 +71,9 @@ def scan(args) -> int:
                              .agg(["count","mean"]).reset_index())
         calibration_summary.columns=["_".join([str(y) for y in x if y]) if isinstance(x,tuple) else x for x in calibration_summary.columns]
     write_result_workbook(out_dir/"swing_candidates.xlsx", signals, _config_rows(cfg), calibration_summary)
-    # 상위 차트 생성
-    selected = [r for r in result_objects if r.status in ("CONFIRMED","WATCH")]
-    selected.sort(key=lambda r: (0 if r.status=="CONFIRMED" else 1, -r.score))
+    # 상위 차트 생성: STRONG_CONFIRMED를 가장 먼저 그린다.
+    selected = [r for r in result_objects if r.status in CANDIDATE_STATUSES]
+    selected.sort(key=lambda r: (STATUS_RANK.get(r.status, 9), -r.score))
     for r in selected[:args.charts]:
         render_chart(data_map[r.ticker], r, cfg, out_dir/"charts")
     log.info("완료: %s", out_dir)
@@ -103,7 +106,7 @@ def calibrate(args) -> int:
                     continue
                 hist=full.iloc[:i+1]
                 r=analyzer.analyze(info.ticker, info.name, hist.index[-1].strftime("%Y-%m-%d"), hist)
-                if r.status not in ("CONFIRMED","WATCH"):
+                if r.status not in CANDIDATE_STATUSES:
                     continue
                 if i - last_event_pos < cfg.calibration_cooldown_bars:
                     continue
