@@ -50,6 +50,8 @@ echo [INFO] Date range         : %DATE_RANGE%
 echo [INFO] Top N              : %TOP_N%
 echo [INFO] Sort by            : %SORT_BY%
 echo [INFO] Forward performance: D+1 ~ D+60 trading bars
+echo [INFO] Status             : STRONG_CONFIRMED ^> CONFIRMED ^> WATCH ^> REJECTED
+echo [INFO] Strong threshold   : Existing CONFIRMED rules + Score 90 or higher
 echo.
 
 "%PYTHON_EXE%" %PYTHON_PREFIX% main_range.py ^
@@ -68,6 +70,7 @@ if errorlevel 1 (
 echo.
 echo [DONE] Swing range backtest finished.
 echo [DONE] Excel : results\range_YYYYMMDD_YYYYMMDD\swing_range_backtest.xlsx
+echo [DONE] CSV   : results\range_YYYYMMDD_YYYYMMDD\range_candidates.csv
 echo [DONE] Agent : results\range_YYYYMMDD_YYYYMMDD\agent\range_summary.json
 echo [DONE] Agent : results\range_YYYYMMDD_YYYYMMDD\agent\range_summary.md
 if /I not "%NO_PAUSE%"=="1" pause
