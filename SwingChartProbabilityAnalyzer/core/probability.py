@@ -51,33 +51,50 @@ class EmpiricalProbabilityModel:
             if path.exists():
                 self.table = pd.read_csv(path)
 
+    def _status_candidates(self, status: str) -> list[str]:
+        # 기존 calibration 파일에는 STRONG_CONFIRMED가 없을 수 있으므로
+        # 동일한 CONFIRMED 모집단을 fallback으로 사용한다.
+        if status == "STRONG_CONFIRMED":
+            return ["STRONG_CONFIRMED", "CONFIRMED"]
+        return [status]
+
     def _estimate(self, score: int, status: str, pkey: str, target_col: str) -> tuple[float | None, int, str]:
         if self.table.empty or target_col not in self.table.columns:
             return None, 0, "NO_CALIBRATION"
 
+        status_candidates = self._status_candidates(status)
+
         # 1) 현재 영상 패턴 서명이 정확히 같은 과거 표본
         if "Pattern_Key" in self.table.columns:
-            sub = self.table[(self.table["Pattern_Key"] == pkey) & (self.table["Status"] == status)]
-            vals = pd.to_numeric(sub[target_col], errors="coerce").dropna()
-            if len(vals) >= self.cfg.calibration_min_samples:
-                wins=float(vals.sum()); n=len(vals)
-                return (wins+1)/(n+2), n, "EXACT_PATTERN"
+            for candidate_status in status_candidates:
+                sub = self.table[(self.table["Pattern_Key"] == pkey) & (self.table["Status"] == candidate_status)]
+                vals = pd.to_numeric(sub[target_col], errors="coerce").dropna()
+                if len(vals) >= self.cfg.calibration_min_samples:
+                    wins=float(vals.sum()); n=len(vals)
+                    source = "EXACT_PATTERN" if candidate_status == status else "CONFIRMED_EXACT_PATTERN_FALLBACK"
+                    return (wins+1)/(n+2), n, source
 
         # 2) 같은 Status + Score band
         band = score_band(score)
-        sub = self.table[(self.table["Score_Band"] == band) & (self.table["Status"] == status)]
-        vals = pd.to_numeric(sub[target_col], errors="coerce").dropna()
-        if len(vals) >= self.cfg.calibration_min_samples:
-            wins=float(vals.sum()); n=len(vals)
-            return (wins+1)/(n+2), n, "STATUS_SCORE_BAND"
+        for candidate_status in status_candidates:
+            sub = self.table[(self.table["Score_Band"] == band) & (self.table["Status"] == candidate_status)]
+            vals = pd.to_numeric(sub[target_col], errors="coerce").dropna()
+            if len(vals) >= self.cfg.calibration_min_samples:
+                wins=float(vals.sum()); n=len(vals)
+                source = "STATUS_SCORE_BAND" if candidate_status == status else "CONFIRMED_SCORE_BAND_FALLBACK"
+                return (wins+1)/(n+2), n, source
 
-        # 3) 같은 Status 전체. 이것도 표본 부족이면 숫자를 만들지 않는다.
-        sub = self.table[self.table["Status"] == status]
-        vals = pd.to_numeric(sub[target_col], errors="coerce").dropna()
-        if len(vals) >= self.cfg.calibration_min_samples:
-            wins=float(vals.sum()); n=len(vals)
-            return (wins+1)/(n+2), n, "STATUS_FALLBACK"
-        return None, len(vals), "INSUFFICIENT_SAMPLE"
+        # 3) 같은 Status 전체. STRONG은 필요 시 기존 CONFIRMED 전체를 fallback으로 사용한다.
+        last_n = 0
+        for candidate_status in status_candidates:
+            sub = self.table[self.table["Status"] == candidate_status]
+            vals = pd.to_numeric(sub[target_col], errors="coerce").dropna()
+            last_n = len(vals)
+            if len(vals) >= self.cfg.calibration_min_samples:
+                wins=float(vals.sum()); n=len(vals)
+                source = "STATUS_FALLBACK" if candidate_status == status else "CONFIRMED_STATUS_FALLBACK"
+                return (wins+1)/(n+2), n, source
+        return None, last_n, "INSUFFICIENT_SAMPLE"
 
     def predict(self, score: int, status: str, metrics: dict) -> dict:
         pkey = pattern_key(metrics)
