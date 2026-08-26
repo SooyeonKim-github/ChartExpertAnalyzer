@@ -3,6 +3,8 @@ from __future__ import annotations
 import numpy as np
 import pandas as pd
 
+from config import VOLUME_FILTER
+
 
 def normalize_ohlcv(df: pd.DataFrame) -> pd.DataFrame:
     out = df.copy()
@@ -31,13 +33,35 @@ def add_indicators(df: pd.DataFrame) -> pd.DataFrame:
     out["ma5"] = out["close"].rolling(5).mean()
     out["ma20"] = out["close"].rolling(20).mean()
     out["ma60"] = out["close"].rolling(60).mean()
-    out["vol_ma20"] = out["volume"].rolling(20).mean()
+    out["ma200"] = out["close"].rolling(200).mean()
+
+    out["vol_ma5"] = out["volume"].rolling(VOLUME_FILTER.oscillator_short).mean()
+    out["vol_ma20"] = out["volume"].rolling(VOLUME_FILTER.oscillator_long).mean()
+    denom = out["vol_ma20"].replace(0, np.nan)
+    out["volume_oscillator_pct"] = (out["vol_ma5"] - out["vol_ma20"]) / denom * 100.0
+
     delta = out["close"].diff()
     gain = delta.clip(lower=0).rolling(14).mean()
     loss = (-delta.clip(upper=0)).rolling(14).mean()
     rs = gain / loss.replace(0, np.nan)
     out["rsi14"] = 100 - 100 / (1 + rs)
+
+    typical = (out["high"] + out["low"] + out["close"]) / 3.0
+    raw_money = typical * out["volume"]
+    direction = typical.diff()
+    positive = raw_money.where(direction > 0, 0.0).rolling(14).sum()
+    negative = raw_money.where(direction < 0, 0.0).rolling(14).sum()
+    money_ratio = positive / negative.replace(0, np.nan)
+    mfi = 100 - 100 / (1 + money_ratio)
+    mfi = mfi.where(negative > 0, 100.0)
+    mfi = mfi.where((positive + negative) > 0, 50.0)
+    out["mfi14"] = mfi
+
     prev_close = out["close"].shift(1)
-    tr = pd.concat([out["high"] - out["low"], (out["high"] - prev_close).abs(), (out["low"] - prev_close).abs()], axis=1).max(axis=1)
+    tr = pd.concat([
+        out["high"] - out["low"],
+        (out["high"] - prev_close).abs(),
+        (out["low"] - prev_close).abs(),
+    ], axis=1).max(axis=1)
     out["atr14"] = tr.rolling(14).mean()
     return out

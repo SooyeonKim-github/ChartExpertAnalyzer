@@ -1,55 +1,35 @@
-# BullishPatternAnalyzer V1
+# BullishPatternAnalyzer V1.1
 
 국내 주식 일봉에서 강의 기반 상승 차트 패턴을 독립적으로 탐지하고 백테스트하는 Analyzer다.
-기존 `KJBChartAnalyzer`, `SwingChartProbabilityAnalyzer`와 코드/실행 결과를 합치지 않는다.
+기존 `KJBChartAnalyzer`, `SwingChartProbabilityAnalyzer`와 결과를 합치지 않는다.
 
-## V1 패턴
+## 패턴
 
 1. Ascending Triangle
-2. Symmetrical Triangle — 상방 돌파된 경우만 bullish confirmation
+2. Symmetrical Triangle — 상방 돌파만 bullish confirmation
 3. Bull Flag
 4. Falling Wedge
 5. W Pattern
 6. Inverse Head & Shoulders
 
-## 공통 분석
+## V1.1 확인 계층
 
-- Swing high / swing low 기반 구조 탐지
-- Breakout confirmation
-- Breakout volume
-- RSI 및 bullish divergence
-- 5/20/60일 이동평균
-- Retest
-- Chase risk
-- Entry-to-stop risk
-- KOSPI/KOSDAQ market context
+패턴 모양만으로 후보를 확정하지 않고 다음 확인 요소를 별도로 계산한다.
 
-## 설치
+- 돌파 거래량: 기본적으로 20일 평균 거래량의 1.3배 이상
+- 돌파 전 거래량 수축: 최근 5일 평균 / 최근 20일 평균
+- Volume Oscillator: 5일 거래량 평균과 20일 평균 차이
+- MFI(14) 및 MFI 상승 다이버전스
+- 상승 모멘텀 장대양봉과 종가 고가권 마감
+- 강세 핀바(긴 아래꼬리)
+- 상승 장악형 / 장악형 확인봉
+- 강세 인사이드바 돌파 + Mother bar보다 큰 돌파 거래량
+- 모닝스타
+- 적삼병
+- 고점권 반복 윗꼬리 + 증가 거래량 경고
+- 저항/고점권 좁은 몸통 + 대량거래 경고
 
-```bash
-cd BullishPatternAnalyzer
-python -m venv .venv
-.venv\Scripts\activate
-pip install -r requirements.txt
-```
-
-## 일별 스캔
-
-```bash
-python main.py --date 20260825 --top-n 100
-```
-
-Windows에서는 `run_screen.bat`을 사용할 수 있다.
-
-출력:
-
-```text
-results/YYYYMMDD/
-  bullish_pattern_all.csv
-  bullish_pattern_candidates.csv
-  bullish_pattern_watchlist.csv
-  summary.md
-```
+가격만 저항을 돌파하고 거래량 필터를 통과하지 못한 경우 `ENTRY_READY`로 승격하지 않는다. 해당 표본은 WATCH/전체 탐지 데이터에는 남겨 가짜 돌파 성능을 비교할 수 있다.
 
 ## 기간 백테스트
 
@@ -57,34 +37,26 @@ results/YYYYMMDD/
 python main_range.py --date-range 20260501~20260531 --top-n 100
 ```
 
-또는 `run_swing_range.bat`.
-
 출력:
 
 ```text
 results/range_YYYYMMDD_YYYYMMDD/
+  range_all_detections.csv
   events.csv
   performance_by_pattern.csv
+  performance_by_pattern_all.csv
+  performance_by_state.csv
+  performance_by_volume.csv
+  performance_by_market_regime.csv
+  performance_by_condition.csv
   range_summary.md
 ```
 
-Forward return은 D+1, D+3, D+5, D+10, D+20, D+40, D+60 거래일 기준으로 기록한다.
+- `range_all_detections.csv`: FORMING/WATCH/거래량 탈락/확정 상태를 모두 보존한다.
+- `events.csv`: 거래량 필터를 통과한 actionable 이벤트만 저장하며 동일 종목·동일 패턴은 기본 10거래일 cooldown을 둔다.
+- 진입 가격은 신호일 종가가 아니라 다음 거래일 시가(`NEXT_OPEN`)다.
+- D+1/3/5/10/20/40/60 수익률과 MFE/MAE를 함께 저장한다.
 
-## 상태
+## 초기값 주의
 
-- `FORMING`: 구조 형성 중
-- `WATCH`: 구조는 유효하나 핵심 돌파 전
-- `BREAKOUT_CONFIRMED`: 종가 기준 돌파 확인
-- `RETEST`: 돌파 후 레벨 재확인 및 지지
-- `ENTRY_READY`: 점수/리스크/시장상황까지 통과
-
-## 점수
-
-V1 점수는 초기 휴리스틱이며 강의에서 숫자로 제시한 값이 아니다.
-모든 허용오차와 임계값은 `config.py`에서 수정할 수 있고, 기간 백테스트 결과로 보정하는 것을 전제로 한다.
-
-## 유의사항
-
-- `pykrx` 데이터 제공 상태에 따라 휴장일/일시적 API 오류가 발생할 수 있다.
-- 패턴 탐지는 투자 권유가 아니라 정량화된 후보 탐색 도구다.
-- V1은 일봉 중심이다. 피벗 포인트 기반 분봉 진입은 의도적으로 제외했다.
+`1.3배`, 거래량 수축 `0.85`, 캔들 몸통/꼬리 임계값 등은 강의가 정한 고정 숫자가 아니라 V1.1 백테스트용 초기값이다. `config.py`에서 수정하고 `performance_by_volume.csv`, `performance_by_condition.csv` 결과로 보정하는 것을 전제로 한다.

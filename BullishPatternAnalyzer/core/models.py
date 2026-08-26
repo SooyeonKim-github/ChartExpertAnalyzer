@@ -70,10 +70,13 @@ class Candidate:
     structure_score: float
     breakout_score: float
     volume_score: float
+    candle_score: float
     momentum_score: float
     retest_score: float
     selection_score: float
     timing_score: float
+    volume_filter_pass: bool
+    candle_signal: str
     chase_risk: RiskLevel
     entry_risk: RiskLevel
     market_regime: MarketRegime

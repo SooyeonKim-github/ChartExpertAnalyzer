@@ -3,7 +3,7 @@ from __future__ import annotations
 import numpy as np
 import pandas as pd
 
-from config import CONFIRMATION, MARKET
+from config import CONFIRMATION, MARKET, VOLUME_FILTER
 from core.models import MarketRegime, RiskLevel
 
 
@@ -22,55 +22,116 @@ def breakout_analysis(df: pd.DataFrame, level: float | None) -> dict:
 
 
 def volume_quality(df: pd.DataFrame, breakout_level: float | None = None) -> dict:
-    if df.empty: return {"score": 0.0, "ratio": 0.0}
+    if df.empty:
+        return {"score": 0.0, "ratio": 0.0, "filter_pass": False}
     row = df.iloc[-1]
     ma = float(row.get("vol_ma20", np.nan))
     ratio = float(row["volume"] / ma) if np.isfinite(ma) and ma > 0 else 0.0
-    score = min(100.0, ratio / CONFIRMATION.breakout_volume_ratio_strong * 100.0)
-    if breakout_level and float(row["close"]) <= breakout_level: score *= 0.75
-    return {"score": round(score, 2), "ratio": round(ratio, 3)}
+    oscillator = float(row.get("volume_oscillator_pct", np.nan))
+    prev_oscillator = float(df.iloc[-2].get("volume_oscillator_pct", np.nan)) if len(df) >= 2 else np.nan
+    oscillator_positive = bool(np.isfinite(oscillator) and oscillator > 0)
+    oscillator_rising = bool(np.isfinite(oscillator) and np.isfinite(prev_oscillator) and oscillator > prev_oscillator)
+
+    prior = df.iloc[:-1]
+    short_mean = float(prior["volume"].tail(VOLUME_FILTER.contraction_window).mean()) if len(prior) else np.nan
+    ref_mean = float(prior["volume"].tail(VOLUME_FILTER.reference_window).mean()) if len(prior) else np.nan
+    contraction_ratio = short_mean / ref_mean if np.isfinite(ref_mean) and ref_mean > 0 else np.nan
+    pre_breakout_contraction = bool(np.isfinite(contraction_ratio) and contraction_ratio <= VOLUME_FILTER.contraction_max_ratio)
+
+    breakout = bool(breakout_level and float(row["close"]) > float(breakout_level))
+    ratio_pass = ratio >= VOLUME_FILTER.breakout_min_ratio
+    oscillator_pass = oscillator_positive if VOLUME_FILTER.require_positive_oscillator else True
+    filter_pass = bool((not VOLUME_FILTER.enabled) or (breakout and ratio_pass and oscillator_pass))
+
+    score = 55.0 * min(1.0, ratio / max(VOLUME_FILTER.breakout_strong_ratio, 1e-9))
+    if pre_breakout_contraction: score += 20.0
+    if oscillator_positive: score += 15.0
+    if oscillator_rising: score += 10.0
+    if breakout_level and not breakout: score *= 0.70
+
+    price10 = float(df["close"].iloc[-1] / df["close"].iloc[-10] - 1.0) if len(df) >= 10 else np.nan
+    vol_slope = float(np.polyfit(np.arange(min(10, len(df))), df["volume"].tail(10).to_numpy(float), 1)[0]) if len(df) >= 3 else np.nan
+    bearish_volume_divergence = bool(np.isfinite(price10) and price10 > 0.03 and np.isfinite(vol_slope) and vol_slope < 0)
+
+    return {
+        "score": round(max(0.0, min(100.0, score)), 2),
+        "ratio": round(ratio, 3),
+        "filter_pass": filter_pass,
+        "pre_breakout_contraction": pre_breakout_contraction,
+        "contraction_ratio": None if not np.isfinite(contraction_ratio) else round(float(contraction_ratio), 4),
+        "volume_oscillator_pct": None if not np.isfinite(oscillator) else round(float(oscillator), 3),
+        "volume_oscillator_positive": oscillator_positive,
+        "volume_oscillator_rising": oscillator_rising,
+        "bearish_volume_divergence": bearish_volume_divergence,
+    }
+
+
+def indicator_bullish_divergence(df: pd.DataFrame, low_positions: list[int], column: str, min_delta: float = 2.0) -> bool:
+    if len(low_positions) < 2 or column not in df:
+        return False
+    a, b = low_positions[-2], low_positions[-1]
+    p1, p2 = float(df.iloc[a]["low"]), float(df.iloc[b]["low"])
+    i1, i2 = float(df.iloc[a][column]), float(df.iloc[b][column])
+    return bool(np.isfinite(i1) and np.isfinite(i2) and p2 <= p1 * 1.02 and i2 > i1 + min_delta)
 
 
 def bullish_divergence(df: pd.DataFrame, low_positions: list[int]) -> bool:
-    if len(low_positions) < 2 or "rsi14" not in df: return False
-    a, b = low_positions[-2], low_positions[-1]
-    p1, p2 = float(df.iloc[a]["low"]), float(df.iloc[b]["low"])
-    r1, r2 = float(df.iloc[a]["rsi14"]), float(df.iloc[b]["rsi14"])
-    return bool(np.isfinite(r1) and np.isfinite(r2) and p2 <= p1 * 1.02 and r2 > r1 + 2.0)
+    return indicator_bullish_divergence(df, low_positions, "rsi14", 2.0)
 
 
-def momentum_quality(df: pd.DataFrame, divergence: bool = False) -> dict:
+def momentum_quality(df: pd.DataFrame, divergence: bool = False, mfi_divergence: bool = False) -> dict:
     row = df.iloc[-1]
-    close = float(row["close"]); ma5 = float(row.get("ma5", np.nan)); ma20 = float(row.get("ma20", np.nan)); rsi = float(row.get("rsi14", np.nan))
+    close = float(row["close"])
+    ma5 = float(row.get("ma5", np.nan))
+    ma20 = float(row.get("ma20", np.nan))
+    ma200 = float(row.get("ma200", np.nan))
+    rsi = float(row.get("rsi14", np.nan))
+    mfi = float(row.get("mfi14", np.nan))
     score = 0.0
-    if np.isfinite(ma5) and close > ma5: score += 25
-    if np.isfinite(ma20) and close > ma20: score += 25
-    if np.isfinite(ma5) and np.isfinite(ma20) and ma5 > ma20: score += 20
-    if np.isfinite(rsi) and 45 <= rsi <= 75: score += 20
-    if divergence: score += 10
-    return {"score": min(100.0, score), "rsi14": None if not np.isfinite(rsi) else round(rsi, 2)}
+    if np.isfinite(ma5) and close > ma5: score += 20
+    if np.isfinite(ma20) and close > ma20: score += 20
+    if np.isfinite(ma5) and np.isfinite(ma20) and ma5 > ma20: score += 15
+    if np.isfinite(rsi) and 45 <= rsi <= 75: score += 15
+    if np.isfinite(mfi) and 20 <= mfi <= 80: score += 10
+    if np.isfinite(ma200) and close > ma200: score += 5
+    if divergence: score += 8
+    if mfi_divergence: score += 7
+    return {
+        "score": min(100.0, score),
+        "rsi14": None if not np.isfinite(rsi) else round(rsi, 2),
+        "mfi14": None if not np.isfinite(mfi) else round(mfi, 2),
+        "above_ma200": bool(np.isfinite(ma200) and close > ma200),
+    }
 
 
 def ma_context(df: pd.DataFrame, reference_pos: int | None = None) -> dict:
     pos = len(df) - 1 if reference_pos is None else reference_pos
-    row = df.iloc[pos]; close = float(row["close"]); ma20 = float(row.get("ma20", np.nan))
+    row = df.iloc[pos]
+    close = float(row["close"])
+    ma20 = float(row.get("ma20", np.nan))
     dist = close / ma20 - 1.0 if np.isfinite(ma20) and ma20 else np.nan
-    current = df.iloc[-1]; prev = df.iloc[-2] if len(df) >= 2 else current
+    current = df.iloc[-1]
+    prev = df.iloc[-2] if len(df) >= 2 else current
     ma5_reclaim = bool(np.isfinite(current.get("ma5", np.nan)) and np.isfinite(prev.get("ma5", np.nan)) and float(prev["close"]) <= float(prev["ma5"]) and float(current["close"]) > float(current["ma5"]))
     ma20_reclaim = bool(np.isfinite(current.get("ma20", np.nan)) and np.isfinite(prev.get("ma20", np.nan)) and float(prev["close"]) <= float(prev["ma20"]) and float(current["close"]) > float(current["ma20"]))
     return {"ma20_distance_pct": None if not np.isfinite(dist) else round(float(dist), 5), "above_ma20": bool(np.isfinite(ma20) and close >= ma20), "ma5_reclaim": ma5_reclaim, "ma20_reclaim": ma20_reclaim}
 
 
 def retest_analysis(df: pd.DataFrame, level: float | None, breakout_confirmed: bool) -> dict:
-    if not breakout_confirmed or not level or len(df) < 3: return {"valid": False, "score": 0.0}
-    recent = df.tail(CONFIRMATION.retest_lookback_bars); t = CONFIRMATION.retest_tolerance_pct
-    touched = ((recent["low"] <= level * (1 + t)) & (recent["low"] >= level * (1 - t))).any(); held = float(df.iloc[-1]["close"]) >= level
+    if not breakout_confirmed or not level or len(df) < 3:
+        return {"valid": False, "score": 0.0}
+    recent = df.tail(CONFIRMATION.retest_lookback_bars)
+    t = CONFIRMATION.retest_tolerance_pct
+    touched = ((recent["low"] <= level * (1 + t)) & (recent["low"] >= level * (1 - t))).any()
+    held = float(df.iloc[-1]["close"]) >= level
     valid = bool(touched and held)
     return {"valid": valid, "score": 100.0 if valid else 35.0}
 
 
 def risk_analysis(df: pd.DataFrame, breakout_level: float | None, stop_level: float | None) -> dict:
-    row = df.iloc[-1]; close = float(row["close"]); atr = float(row.get("atr14", np.nan))
+    row = df.iloc[-1]
+    close = float(row["close"])
+    atr = float(row.get("atr14", np.nan))
     chase_atr = max(0.0, (close - breakout_level) / atr) if breakout_level and np.isfinite(atr) and atr > 0 else None
     chase = RiskLevel.UNKNOWN if chase_atr is None else (RiskLevel.HIGH if chase_atr >= CONFIRMATION.chase_high_atr else RiskLevel.MEDIUM if chase_atr >= CONFIRMATION.chase_medium_atr else RiskLevel.LOW)
     stop_pct = max(0.0, (close - stop_level) / close) if stop_level and stop_level > 0 else None
@@ -79,10 +140,15 @@ def risk_analysis(df: pd.DataFrame, breakout_level: float | None, stop_level: fl
 
 
 def market_context(index_df: pd.DataFrame | None) -> MarketRegime:
-    if index_df is None or len(index_df) < 60: return MarketRegime.UNKNOWN
-    d = index_df.copy(); d["ma20"] = d["close"].rolling(20).mean(); d["ma60"] = d["close"].rolling(60).mean()
-    row = d.iloc[-1]; close, ma20, ma60 = float(row["close"]), float(row["ma20"]), float(row["ma60"])
-    recent_high = float(d["close"].tail(max(60, MARKET.recent_window_bars)).max()); drawdown = close / recent_high - 1.0 if recent_high > 0 else 0.0
+    if index_df is None or len(index_df) < 60:
+        return MarketRegime.UNKNOWN
+    d = index_df.copy()
+    d["ma20"] = d["close"].rolling(20).mean()
+    d["ma60"] = d["close"].rolling(60).mean()
+    row = d.iloc[-1]
+    close, ma20, ma60 = float(row["close"]), float(row["ma20"]), float(row["ma60"])
+    recent_high = float(d["close"].tail(max(60, MARKET.recent_window_bars)).max())
+    drawdown = close / recent_high - 1.0 if recent_high > 0 else 0.0
     ma20_slope = float(d["ma20"].iloc[-1] - d["ma20"].iloc[-6])
     if drawdown <= MARKET.crash_drawdown_pct and close < ma20: return MarketRegime.CRASH
     if drawdown <= MARKET.weak_drawdown_pct or (close < ma20 and close < ma60): return MarketRegime.WEAK

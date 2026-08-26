@@ -51,10 +51,43 @@ class ConfirmationConfig:
 
 
 @dataclass(frozen=True)
+class VolumeFilterConfig:
+    enabled: bool = True
+    breakout_min_ratio: float = 1.30
+    breakout_strong_ratio: float = 1.60
+    contraction_window: int = 5
+    reference_window: int = 20
+    contraction_max_ratio: float = 0.85
+    oscillator_short: int = 5
+    oscillator_long: int = 20
+    require_positive_oscillator: bool = False
+    distribution_min_ratio: float = 1.30
+
+
+@dataclass(frozen=True)
+class CandleConfig:
+    momentum_body_ratio_min: float = 0.60
+    momentum_close_location_min: float = 0.75
+    pin_lower_wick_ratio_min: float = 0.45
+    pin_body_ratio_max: float = 0.35
+    long_upper_wick_ratio_min: float = 0.40
+    narrow_body_ratio_max: float = 0.25
+    high_zone_lookback: int = 60
+    high_zone_ratio: float = 0.90
+
+
+@dataclass(frozen=True)
 class ScoreConfig:
     candidate_selection_min: float = 70.0
     entry_timing_min: float = 70.0
     watch_selection_min: float = 60.0
+
+
+@dataclass(frozen=True)
+class BacktestConfig:
+    event_cooldown_sessions: int = 10
+    daily_candidate_top_n: int = 20
+    entry_mode: str = "NEXT_OPEN"
 
 
 @dataclass(frozen=True)
@@ -68,6 +101,9 @@ class MarketConfig:
 UNIVERSE = UniverseConfig()
 PATTERN = PatternConfig()
 CONFIRMATION = ConfirmationConfig()
+VOLUME_FILTER = VolumeFilterConfig()
+CANDLE = CandleConfig()
 SCORE = ScoreConfig()
+BACKTEST = BacktestConfig()
 MARKET = MarketConfig()
 FORWARD_BARS: tuple[int, ...] = (1, 3, 5, 10, 20, 40, 60)
