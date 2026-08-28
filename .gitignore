@@ -21,8 +21,6 @@ logs/
 cache/
 .cache/
 
-results/liquidity_universe/
-
 reports/self-improvement/
 .self_improvement_state.json
 

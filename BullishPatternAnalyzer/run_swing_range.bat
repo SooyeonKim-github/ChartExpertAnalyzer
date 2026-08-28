@@ -5,11 +5,9 @@ cd /d "%~dp0"
 
 set "DATE_RANGE=%~1"
 set "TOP_N=%~2"
-set "SORT_BY=%~3"
 
 if "%DATE_RANGE%"=="" set /p "DATE_RANGE=Date range YYYYMMDD~YYYYMMDD: "
 if "%TOP_N%"=="" set "TOP_N=100"
-if "%SORT_BY%"=="" set "SORT_BY=liquidity_20d"
 if "%DATE_RANGE%"=="" exit /b 1
 
 set "PYTHON_EXE="
@@ -33,22 +31,6 @@ if not defined PYTHON_EXE (
     exit /b 1
 )
 
-if /I "%SORT_BY%"=="liquidity_20d" (
-    if not defined LIQUIDITY_MEMBERSHIP_CSV (
-        call "%~dp0..\prepare_liquidity_universe.bat" range "%DATE_RANGE%" "%TOP_N%" 20
-        if errorlevel 1 (
-            echo [ERROR] Liquidity universe preparation failed.
-            if not defined NO_PAUSE pause
-            exit /b 1
-        )
-    )
-    echo [INFO] BullishPattern range universe: recent 20-trading-day avg trading value TOP%TOP_N% per date
-    echo [INFO] Membership: %LIQUIDITY_MEMBERSHIP_CSV%
-) else (
-    set "LIQUIDITY_MEMBERSHIP_CSV="
-    echo [INFO] BullishPattern range universe: legacy market-cap mode
-)
-
 "%PYTHON_EXE%" %PYTHON_PREFIX% main_range.py --date-range "%DATE_RANGE%" --top-n %TOP_N%
 if errorlevel 1 (
     echo [ERROR] BullishPatternAnalyzer range backtest failed.
@@ -57,6 +39,5 @@ if errorlevel 1 (
 )
 
 echo [DONE] Check results\range_YYYYMMDD_YYYYMMDD\
-if /I "%SORT_BY%"=="liquidity_20d" echo [DONE] Universe: recent 20-trading-day avg trading value TOP%TOP_N% point-in-time
 if not defined NO_PAUSE pause
 exit /b 0

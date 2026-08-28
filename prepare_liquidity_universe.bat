@@ -53,12 +53,12 @@ set "LIQ_OUT_DIR=%LIQ_ROOT%results\liquidity_universe\screen_latest"
 echo.
 echo [LIQUIDITY] Building recent %LIQ_LOOKBACK%-day average trading-value TOP %LIQ_TOP_N%...
 if "%LIQ_TARGET%"=="" (
-    "%LIQ_PYTHON_EXE%" %LIQ_PYTHON_PREFIX% "%LIQ_ROOT%scripts\run_liquidity_universe.py" ^
+    "%LIQ_PYTHON_EXE%" %LIQ_PYTHON_PREFIX% "%LIQ_ROOT%scripts\build_liquidity_universe.py" ^
         --top-n %LIQ_TOP_N% ^
         --lookback %LIQ_LOOKBACK% ^
         --output-dir "%LIQ_OUT_DIR%"
 ) else (
-    "%LIQ_PYTHON_EXE%" %LIQ_PYTHON_PREFIX% "%LIQ_ROOT%scripts\run_liquidity_universe.py" ^
+    "%LIQ_PYTHON_EXE%" %LIQ_PYTHON_PREFIX% "%LIQ_ROOT%scripts\build_liquidity_universe.py" ^
         --as-of "%LIQ_TARGET%" ^
         --top-n %LIQ_TOP_N% ^
         --lookback %LIQ_LOOKBACK% ^
@@ -80,7 +80,7 @@ set "LIQ_RANGE_END=%LIQ_TARGET:~-8%"
 set "LIQ_OUT_DIR=%LIQ_ROOT%results\liquidity_universe\range_%LIQ_RANGE_START%_%LIQ_RANGE_END%"
 echo.
 echo [LIQUIDITY] Building point-in-time recent %LIQ_LOOKBACK%-day average trading-value TOP %LIQ_TOP_N%...
-"%LIQ_PYTHON_EXE%" %LIQ_PYTHON_PREFIX% "%LIQ_ROOT%scripts\run_liquidity_universe.py" ^
+"%LIQ_PYTHON_EXE%" %LIQ_PYTHON_PREFIX% "%LIQ_ROOT%scripts\build_liquidity_universe.py" ^
     --date-range "%LIQ_TARGET%" ^
     --top-n %LIQ_TOP_N% ^
     --lookback %LIQ_LOOKBACK% ^
@@ -95,26 +95,14 @@ if not exist "%LIQ_OUT_DIR%\liquidity_universe.env" (
     echo [ERROR] Liquidity environment file was not created.
     exit /b 1
 )
+call "%LIQ_OUT_DIR%\liquidity_universe.env"
 
-REM Do not CALL the .env file directly. On some Windows PCs .env is associated
-REM with security software such as AnySign4PC, which opens a password/save dialog.
-REM Read each generated SET command as plain text and execute it in this CMD process.
-for /f "usebackq delims=" %%L in ("%LIQ_OUT_DIR%\liquidity_universe.env") do call %%L
-
-if "%LIQUIDITY_UNIVERSE_XLSX%"=="" (
-    echo [ERROR] LIQUIDITY_UNIVERSE_XLSX was not loaded from the env file.
-    exit /b 1
-)
-if "%LIQUIDITY_MEMBERSHIP_CSV%"=="" (
-    echo [ERROR] LIQUIDITY_MEMBERSHIP_CSV was not loaded from the env file.
-    exit /b 1
-)
 if not exist "%LIQUIDITY_UNIVERSE_XLSX%" (
-    echo [ERROR] Liquidity union Excel was not created: %LIQUIDITY_UNIVERSE_XLSX%
+    echo [ERROR] Liquidity union Excel was not created.
     exit /b 1
 )
 if not exist "%LIQUIDITY_MEMBERSHIP_CSV%" (
-    echo [ERROR] Liquidity membership CSV was not created: %LIQUIDITY_MEMBERSHIP_CSV%
+    echo [ERROR] Liquidity membership CSV was not created.
     exit /b 1
 )
 

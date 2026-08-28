@@ -12,7 +12,7 @@ if "%MODE%"=="" (
         echo ============================================
         echo   Stock Screening
         echo ============================================
-        echo   1. Recent 20-day avg trading-value TOP100
+        echo   1. KOSPI Top 100 by market cap
         echo   2. Tickers in tickers_example.txt
         echo.
         set /p "MODE=Select [1/2] (default 1): "
@@ -55,29 +55,13 @@ if not defined NO_PAUSE pause
 exit /b 1
 
 :TOP100
-if not defined LIQUIDITY_UNIVERSE_XLSX (
-    call "%~dp0..\prepare_liquidity_universe.bat" screen "" 100 20
-    if errorlevel 1 (
-        echo [ERROR] Liquidity universe preparation failed.
-        if not defined NO_PAUSE pause
-        exit /b 1
-    )
-)
-if not exist "%LIQUIDITY_UNIVERSE_XLSX%" (
-    echo [ERROR] Liquidity universe Excel was not found: %LIQUIDITY_UNIVERSE_XLSX%
-    if not defined NO_PAUSE pause
-    exit /b 1
-)
-
 echo.
-echo [INFO] Screening recent 20-trading-day average trading-value TOP100...
-echo [INFO] Markets   : KOSPI + KOSDAQ
-echo [INFO] Universe  : %LIQUIDITY_UNIVERSE_XLSX%
+echo [INFO] Screening KOSPI market-cap TOP100...
 "%PYTHON_EXE%" %PYTHON_PREFIX% app.py screen-top100 ^
     --provider pykrx ^
-    --info-excel "%LIQUIDITY_UNIVERSE_XLSX%" ^
+    --info-excel KOSPI_Info.xlsx ^
     --top-n 100 ^
-    --sort-by trading_value ^
+    --sort-by market_cap ^
     --period 5y ^
     --agent-top-n 30 ^
     --out output\top100_screen.csv ^
@@ -112,7 +96,6 @@ if errorlevel 1 (
 
 echo.
 echo [DONE] Screening finished.
-echo [DONE] Universe: recent 20-trading-day avg trading value TOP100
 echo [DONE] Check output\
 echo [DONE] CONFIRMED charts: output\confirmed_charts\
 echo [DONE] Agent files: output\agent\candidates.json / candidates.md
