@@ -93,15 +93,18 @@ class SwingSignalAnalyzer:
             and not_chasing
         )
 
+        # Backtest result showed that the former STRONG_CONFIRMED group had
+        # materially better short-term hit rates. Promote that rule to the only
+        # CONFIRMED rule. The former ordinary CONFIRMED group is now WATCH.
         if hard_fail:
             status = "REJECTED"
             primary = "TREND_BROKEN_OR_NOT_UPTREND"
         elif confirmed_conditions and score >= self.cfg.strong_confirmed_score:
-            status = "STRONG_CONFIRMED"
+            status = "CONFIRMED"
             primary = "D10_STRONG_LOWER_CHANNEL_CONFIRMED_REVERSAL"
         elif confirmed_conditions:
-            status = "CONFIRMED"
-            primary = "LOWER_CHANNEL_CONFIRMED_REVERSAL"
+            status = "WATCH"
+            primary = "LOWER_CHANNEL_CONFIRMED_REVERSAL_WATCH"
         elif score >= self.cfg.watch_score and cm["recent_lower_touch"]:
             status = "WATCH"
             primary = "LOWER_CHANNEL_WATCH"
