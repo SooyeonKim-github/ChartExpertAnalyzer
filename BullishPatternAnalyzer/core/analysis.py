@@ -7,62 +7,196 @@ from config import CONFIRMATION, MARKET, VOLUME_FILTER
 from core.models import MarketRegime, RiskLevel
 
 
+def _recent_breakout_context(df: pd.DataFrame, level: float | None) -> dict:
+    if level is None or level <= 0 or df.empty or len(df) < 2:
+        return {
+            "found": False,
+            "confirmed": False,
+            "breakout_pos": None,
+            "age_bars": None,
+            "volume_ratio": 0.0,
+            "current_breakout": False,
+            "held": False,
+        }
+
+    threshold = float(level) * (1 + CONFIRMATION.breakout_min_pct)
+    lookback = max(1, int(CONFIRMATION.breakout_lookback_bars))
+    search_start = max(1, len(df) - lookback)
+    breakout_pos = None
+
+    for pos in range(search_start, len(df)):
+        prev_close = float(df.iloc[pos - 1]["close"])
+        close = float(df.iloc[pos]["close"])
+        if prev_close < threshold <= close:
+            breakout_pos = pos
+
+    if breakout_pos is None:
+        return {
+            "found": False,
+            "confirmed": False,
+            "breakout_pos": None,
+            "age_bars": None,
+            "volume_ratio": 0.0,
+            "current_breakout": False,
+            "held": False,
+        }
+
+    breakout_row = df.iloc[breakout_pos]
+    vol_ma = float(breakout_row.get("vol_ma20", np.nan))
+    volume_ratio = (
+        float(breakout_row["volume"] / vol_ma)
+        if np.isfinite(vol_ma) and vol_ma > 0
+        else 0.0
+    )
+    age_bars = len(df) - 1 - breakout_pos
+    current_close = float(df.iloc[-1]["close"])
+    held = current_close >= float(level) * (1 - CONFIRMATION.retest_tolerance_pct)
+
+    return {
+        "found": True,
+        "confirmed": bool(held),
+        "breakout_pos": breakout_pos,
+        "age_bars": age_bars,
+        "volume_ratio": volume_ratio,
+        "current_breakout": age_bars == 0,
+        "held": bool(held),
+    }
+
+
 def breakout_analysis(df: pd.DataFrame, level: float | None) -> dict:
     if level is None or level <= 0 or df.empty:
-        return {"confirmed": False, "score": 0.0, "volume_ratio": 0.0, "distance_pct": None}
-    row = df.iloc[-1]
-    close = float(row["close"])
-    vol_ma = float(row.get("vol_ma20", np.nan))
-    volume_ratio = float(row["volume"] / vol_ma) if np.isfinite(vol_ma) and vol_ma > 0 else 0.0
+        return {
+            "confirmed": False,
+            "score": 0.0,
+            "volume_ratio": 0.0,
+            "distance_pct": None,
+            "breakout_age_bars": None,
+            "current_breakout": False,
+            "held": False,
+        }
+
+    close = float(df.iloc[-1]["close"])
     distance = close / level - 1.0
-    close_ok = close >= level * (1 + CONFIRMATION.breakout_min_pct)
-    volume_score = min(100.0, max(0.0, volume_ratio / CONFIRMATION.breakout_volume_ratio_strong * 100.0))
-    score = 0.65 * (100.0 if close_ok else 0.0) + 0.35 * volume_score
-    return {"confirmed": bool(close_ok), "score": round(score, 2), "volume_ratio": round(volume_ratio, 3), "distance_pct": round(distance, 5)}
+    context = _recent_breakout_context(df, level)
+    volume_ratio = float(context["volume_ratio"])
+    volume_score = min(
+        100.0,
+        max(
+            0.0,
+            volume_ratio / CONFIRMATION.breakout_volume_ratio_strong * 100.0,
+        ),
+    )
+    score = 0.65 * (100.0 if context["confirmed"] else 0.0) + 0.35 * volume_score
+    return {
+        "confirmed": bool(context["confirmed"]),
+        "score": round(score, 2),
+        "volume_ratio": round(volume_ratio, 3),
+        "distance_pct": round(distance, 5),
+        "breakout_age_bars": context["age_bars"],
+        "current_breakout": bool(context["current_breakout"]),
+        "held": bool(context["held"]),
+    }
 
 
 def volume_quality(df: pd.DataFrame, breakout_level: float | None = None) -> dict:
     if df.empty:
         return {"score": 0.0, "ratio": 0.0, "filter_pass": False}
-    row = df.iloc[-1]
+
+    context = _recent_breakout_context(df, breakout_level)
+    signal_pos = context["breakout_pos"] if context["found"] else len(df) - 1
+    row = df.iloc[signal_pos]
     ma = float(row.get("vol_ma20", np.nan))
     ratio = float(row["volume"] / ma) if np.isfinite(ma) and ma > 0 else 0.0
     oscillator = float(row.get("volume_oscillator_pct", np.nan))
-    prev_oscillator = float(df.iloc[-2].get("volume_oscillator_pct", np.nan)) if len(df) >= 2 else np.nan
+    prev_oscillator = (
+        float(df.iloc[signal_pos - 1].get("volume_oscillator_pct", np.nan))
+        if signal_pos >= 1
+        else np.nan
+    )
     oscillator_positive = bool(np.isfinite(oscillator) and oscillator > 0)
-    oscillator_rising = bool(np.isfinite(oscillator) and np.isfinite(prev_oscillator) and oscillator > prev_oscillator)
+    oscillator_rising = bool(
+        np.isfinite(oscillator)
+        and np.isfinite(prev_oscillator)
+        and oscillator > prev_oscillator
+    )
 
-    prior = df.iloc[:-1]
-    short_mean = float(prior["volume"].tail(VOLUME_FILTER.contraction_window).mean()) if len(prior) else np.nan
-    ref_mean = float(prior["volume"].tail(VOLUME_FILTER.reference_window).mean()) if len(prior) else np.nan
-    contraction_ratio = short_mean / ref_mean if np.isfinite(ref_mean) and ref_mean > 0 else np.nan
-    pre_breakout_contraction = bool(np.isfinite(contraction_ratio) and contraction_ratio <= VOLUME_FILTER.contraction_max_ratio)
+    prior = df.iloc[:signal_pos]
+    short_mean = (
+        float(prior["volume"].tail(VOLUME_FILTER.contraction_window).mean())
+        if len(prior)
+        else np.nan
+    )
+    ref_mean = (
+        float(prior["volume"].tail(VOLUME_FILTER.reference_window).mean())
+        if len(prior)
+        else np.nan
+    )
+    contraction_ratio = (
+        short_mean / ref_mean if np.isfinite(ref_mean) and ref_mean > 0 else np.nan
+    )
+    pre_breakout_contraction = bool(
+        np.isfinite(contraction_ratio)
+        and contraction_ratio <= VOLUME_FILTER.contraction_max_ratio
+    )
 
-    breakout = bool(breakout_level and float(row["close"]) > float(breakout_level))
     ratio_pass = ratio >= VOLUME_FILTER.breakout_min_ratio
     oscillator_pass = oscillator_positive if VOLUME_FILTER.require_positive_oscillator else True
-    filter_pass = bool((not VOLUME_FILTER.enabled) or (breakout and ratio_pass and oscillator_pass))
+    filter_pass = bool(
+        (not VOLUME_FILTER.enabled)
+        or (context["confirmed"] and ratio_pass and oscillator_pass)
+    )
 
     score = 55.0 * min(1.0, ratio / max(VOLUME_FILTER.breakout_strong_ratio, 1e-9))
-    if pre_breakout_contraction: score += 20.0
-    if oscillator_positive: score += 15.0
-    if oscillator_rising: score += 10.0
-    if breakout_level and not breakout: score *= 0.70
+    if pre_breakout_contraction:
+        score += 20.0
+    if oscillator_positive:
+        score += 15.0
+    if oscillator_rising:
+        score += 10.0
+    if breakout_level and not context["confirmed"]:
+        score *= 0.70
 
-    price10 = float(df["close"].iloc[-1] / df["close"].iloc[-10] - 1.0) if len(df) >= 10 else np.nan
-    vol_slope = float(np.polyfit(np.arange(min(10, len(df))), df["volume"].tail(10).to_numpy(float), 1)[0]) if len(df) >= 3 else np.nan
-    bearish_volume_divergence = bool(np.isfinite(price10) and price10 > 0.03 and np.isfinite(vol_slope) and vol_slope < 0)
+    price10 = (
+        float(df["close"].iloc[-1] / df["close"].iloc[-10] - 1.0)
+        if len(df) >= 10
+        else np.nan
+    )
+    vol_slope = (
+        float(
+            np.polyfit(
+                np.arange(min(10, len(df))),
+                df["volume"].tail(10).to_numpy(float),
+                1,
+            )[0]
+        )
+        if len(df) >= 3
+        else np.nan
+    )
+    bearish_volume_divergence = bool(
+        np.isfinite(price10)
+        and price10 > 0.03
+        and np.isfinite(vol_slope)
+        and vol_slope < 0
+    )
 
     return {
         "score": round(max(0.0, min(100.0, score)), 2),
         "ratio": round(ratio, 3),
         "filter_pass": filter_pass,
         "pre_breakout_contraction": pre_breakout_contraction,
-        "contraction_ratio": None if not np.isfinite(contraction_ratio) else round(float(contraction_ratio), 4),
-        "volume_oscillator_pct": None if not np.isfinite(oscillator) else round(float(oscillator), 3),
+        "contraction_ratio": (
+            None
+            if not np.isfinite(contraction_ratio)
+            else round(float(contraction_ratio), 4)
+        ),
+        "volume_oscillator_pct": (
+            None if not np.isfinite(oscillator) else round(float(oscillator), 3)
+        ),
         "volume_oscillator_positive": oscillator_positive,
         "volume_oscillator_rising": oscillator_rising,
         "bearish_volume_divergence": bearish_volume_divergence,
+        "breakout_age_bars": context["age_bars"],
+        "breakout_candle_used": bool(context["found"]),
     }
 
 
@@ -120,10 +254,23 @@ def ma_context(df: pd.DataFrame, reference_pos: int | None = None) -> dict:
 def retest_analysis(df: pd.DataFrame, level: float | None, breakout_confirmed: bool) -> dict:
     if not breakout_confirmed or not level or len(df) < 3:
         return {"valid": False, "score": 0.0}
-    recent = df.tail(CONFIRMATION.retest_lookback_bars)
+
+    context = _recent_breakout_context(df, level)
+    breakout_pos = context["breakout_pos"]
+    if breakout_pos is None or breakout_pos >= len(df) - 1:
+        return {"valid": False, "score": 35.0}
+
+    start = max(breakout_pos + 1, len(df) - CONFIRMATION.retest_lookback_bars)
+    recent = df.iloc[start:]
+    if recent.empty:
+        return {"valid": False, "score": 35.0}
+
     t = CONFIRMATION.retest_tolerance_pct
-    touched = ((recent["low"] <= level * (1 + t)) & (recent["low"] >= level * (1 - t))).any()
-    held = float(df.iloc[-1]["close"]) >= level
+    touched = (
+        (recent["low"] <= level * (1 + t))
+        & (recent["low"] >= level * (1 - t))
+    ).any()
+    held = float(df.iloc[-1]["close"]) >= level * (1 - t)
     valid = bool(touched and held)
     return {"valid": valid, "score": 100.0 if valid else 35.0}
 
