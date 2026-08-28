@@ -95,14 +95,26 @@ if not exist "%LIQ_OUT_DIR%\liquidity_universe.env" (
     echo [ERROR] Liquidity environment file was not created.
     exit /b 1
 )
-call "%LIQ_OUT_DIR%\liquidity_universe.env"
 
+REM Do not CALL the .env file directly. On some Windows PCs .env is associated
+REM with security software such as AnySign4PC, which opens a password/save dialog.
+REM Read each generated SET command as plain text and execute it in this CMD process.
+for /f "usebackq delims=" %%L in ("%LIQ_OUT_DIR%\liquidity_universe.env") do call %%L
+
+if "%LIQUIDITY_UNIVERSE_XLSX%"=="" (
+    echo [ERROR] LIQUIDITY_UNIVERSE_XLSX was not loaded from the env file.
+    exit /b 1
+)
+if "%LIQUIDITY_MEMBERSHIP_CSV%"=="" (
+    echo [ERROR] LIQUIDITY_MEMBERSHIP_CSV was not loaded from the env file.
+    exit /b 1
+)
 if not exist "%LIQUIDITY_UNIVERSE_XLSX%" (
-    echo [ERROR] Liquidity union Excel was not created.
+    echo [ERROR] Liquidity union Excel was not created: %LIQUIDITY_UNIVERSE_XLSX%
     exit /b 1
 )
 if not exist "%LIQUIDITY_MEMBERSHIP_CSV%" (
-    echo [ERROR] Liquidity membership CSV was not created.
+    echo [ERROR] Liquidity membership CSV was not created: %LIQUIDITY_MEMBERSHIP_CSV%
     exit /b 1
 )
 
