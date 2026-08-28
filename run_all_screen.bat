@@ -6,17 +6,7 @@ cd /d "%~dp0"
 echo ============================================
 echo   Chart Expert Analyzer - Run All Screens
 echo ============================================
-echo Universe: recent 20-trading-day avg trading value TOP100
-echo Market  : KOSPI + KOSDAQ
-echo ============================================
 echo.
-
-call "%~dp0prepare_liquidity_universe.bat" screen "" 100 20
-if errorlevel 1 (
-    echo [ERROR] Liquidity universe preparation failed.
-    pause
-    exit /b 1
-)
 
 rem Child run_screen.bat files must not pause or ask interactive questions.
 set "NO_PAUSE=1"
@@ -34,7 +24,6 @@ if !TOTAL! EQU 0 (
 )
 
 echo [INFO] Found !TOTAL! analyzer screen scripts.
-echo [INFO] Shared liquidity universe: %LIQUIDITY_MEMBERSHIP_CSV%
 echo.
 
 set /a CURRENT=0
@@ -97,10 +86,6 @@ echo.
 echo ============================================
 echo [DONE] All analyzer screenings finished.
 echo ============================================
-echo [Liquidity Universe]
-echo   Recent 20-trading-day average trading value TOP100
-echo   %LIQUIDITY_MEMBERSHIP_CSV%
-echo.
 echo [Confirmed Summary]
 echo   results\confirmed_candidates.csv
 echo.
