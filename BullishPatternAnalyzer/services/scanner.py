@@ -86,13 +86,20 @@ class BullishPatternScanner:
                 reasons.append("최종판정=WATCH")
 
             if br["confirmed"] and vol["filter_pass"]:
-                reasons.append("종가 돌파 + 거래량 필터 통과")
+                if br.get("current_breakout"):
+                    reasons.append("당일 종가 돌파 + 돌파봉 거래량 필터 통과")
+                else:
+                    reasons.append(
+                        f"최근 {br['breakout_age_bars']}봉 전 돌파 유지 + 돌파봉 거래량 필터 통과"
+                    )
             elif br["confirmed"]:
-                reasons.append("가격 돌파했으나 거래량 필터 미통과")
+                reasons.append("최근 돌파는 유지했으나 돌파봉 거래량 필터 미통과")
+            if ret["valid"]:
+                reasons.append("돌파 후 저항선 재테스트 유지")
             if vol["pre_breakout_contraction"]:
                 reasons.append("돌파 전 거래량 수축")
-            if vol["ratio"] >= 1.3:
-                reasons.append(f"20일 평균 대비 거래량 {vol['ratio']:.2f}배")
+            if vol["ratio"] >= 1.15:
+                reasons.append(f"돌파봉 거래량 20일 평균 대비 {vol['ratio']:.2f}배")
             if candle["signal"] != "NONE":
                 reasons.append(f"캔들={candle['signal']}")
             if scored["divergence"]:
@@ -100,11 +107,14 @@ class BullishPatternScanner:
             if scored["mfi_divergence"]:
                 reasons.append("MFI 상승 다이버전스")
             if candle["bearish_warning"]:
-                reasons.append("고점 매도압력형 캔들 경고")
+                reasons.append("고점 매도압력형 캔들 경고 -> WATCH")
 
             metrics = {
                 **det.metrics,
                 "price_breakout_confirmed": br["confirmed"],
+                "breakout_age_bars": br.get("breakout_age_bars"),
+                "current_breakout": br.get("current_breakout"),
+                "breakout_held": br.get("held"),
                 "breakout_volume_ratio": vol["ratio"],
                 "volume_filter_pass": vol["filter_pass"],
                 "pre_breakout_volume_contraction": vol["pre_breakout_contraction"],
