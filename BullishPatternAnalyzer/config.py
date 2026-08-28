@@ -40,7 +40,8 @@ class PatternConfig:
 @dataclass(frozen=True)
 class ConfirmationConfig:
     breakout_min_pct: float = 0.002
-    breakout_volume_ratio_good: float = 1.30
+    breakout_lookback_bars: int = 5
+    breakout_volume_ratio_good: float = 1.15
     breakout_volume_ratio_strong: float = 1.60
     retest_tolerance_pct: float = 0.025
     retest_lookback_bars: int = 7
@@ -53,7 +54,7 @@ class ConfirmationConfig:
 @dataclass(frozen=True)
 class VolumeFilterConfig:
     enabled: bool = True
-    breakout_min_ratio: float = 1.30
+    breakout_min_ratio: float = 1.15
     breakout_strong_ratio: float = 1.60
     contraction_window: int = 5
     reference_window: int = 20
