@@ -69,6 +69,9 @@ class BullishPatternScorer:
         elif br["confirmed"] and volume["filter_pass"]:
             state = PatternState.BREAKOUT_CONFIRMED
 
+        if candle["bearish_warning"] and state != PatternState.INVALIDATED:
+            state = PatternState.WATCH
+
         if (
             br["confirmed"]
             and volume["filter_pass"]
@@ -84,8 +87,6 @@ class BullishPatternScorer:
         reject_reasons: list[str] = []
         if detection.state == PatternState.INVALIDATED:
             reject_reasons.append("pattern_invalidated")
-        if candle["bearish_warning"]:
-            reject_reasons.append("bearish_candle_warning")
         if risk["chase"] == RiskLevel.HIGH:
             reject_reasons.append("high_chase_risk")
         if risk["entry"] == RiskLevel.HIGH:
@@ -95,6 +96,8 @@ class BullishPatternScorer:
 
         if reject_reasons:
             decision = DecisionStatus.REJECT
+        elif candle["bearish_warning"]:
+            decision = DecisionStatus.WATCH
         elif br["confirmed"] and volume["filter_pass"]:
             decision = DecisionStatus.CONFIRMED
         else:
