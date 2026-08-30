@@ -106,16 +106,10 @@ def _load_kjb() -> list[dict[str, str]]:
             continue
         rows.append(
             _normalized_row(
-                scan_date=r.get("asof", ""),
-                analyzer="KJB",
-                ticker=r.get("ticker", ""),
-                name=r.get("name", ""),
-                status=r.get("Status", ""),
-                score=r.get("score", ""),
-                timing_score=r.get("timing_score", ""),
-                market=r.get("market", ""),
-                signal=r.get("action", ""),
-                source_file=path,
+                scan_date=r.get("asof", ""), analyzer="KJB", ticker=r.get("ticker", ""),
+                name=r.get("name", ""), status=r.get("Status", ""), score=r.get("score", ""),
+                timing_score=r.get("timing_score", ""), market=r.get("market", ""),
+                signal=r.get("action", ""), source_file=path,
             )
         )
     return rows
@@ -134,16 +128,10 @@ def _load_swing() -> list[dict[str, str]]:
             continue
         rows.append(
             _normalized_row(
-                scan_date=r.get("Actual_Date", result_dir.name),
-                analyzer="SWING",
-                ticker=r.get("Ticker", ""),
-                name=r.get("Name", ""),
-                status=status,
-                score=r.get("Score", ""),
-                market=r.get("Market", ""),
-                signal=r.get("Primary_Signal", ""),
-                entry_price=r.get("Close", ""),
-                source_file=path,
+                scan_date=r.get("Actual_Date", result_dir.name), analyzer="SWING",
+                ticker=r.get("Ticker", ""), name=r.get("Name", ""), status=status,
+                score=r.get("Score", ""), market=r.get("Market", ""),
+                signal=r.get("Primary_Signal", ""), entry_price=r.get("Close", ""), source_file=path,
             )
         )
     return rows
@@ -158,21 +146,15 @@ def _load_ma() -> list[dict[str, str]]:
     rows = []
     for r in _read_csv(path):
         status = _clean(r.get("Status")).upper()
-        if status != "CONFIRMED":
+        if status not in {"STRONG_CONFIRMED", "CONFIRMED"}:
             continue
         rows.append(
             _normalized_row(
-                scan_date=r.get("Actual_Date", result_dir.name),
-                analyzer="MA",
-                ticker=r.get("Ticker", ""),
-                name=r.get("Name", ""),
-                status=status,
-                score=r.get("Score", ""),
-                timing_score=r.get("Timing_Score", ""),
-                market=r.get("Market", ""),
-                signal=r.get("Primary_Signal", ""),
-                entry_price=r.get("Close", ""),
-                source_file=path,
+                scan_date=r.get("Actual_Date", result_dir.name), analyzer="MA",
+                ticker=r.get("Ticker", ""), name=r.get("Name", ""), status=status,
+                score=r.get("Score", ""), timing_score=r.get("Timing_Score", ""),
+                market=r.get("Market", ""), signal=r.get("Primary_Signal", ""),
+                entry_price=r.get("Close", ""), source_file=path,
             )
         )
     return rows
