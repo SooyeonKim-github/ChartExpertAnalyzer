@@ -1,72 +1,102 @@
-# MAChartAnalyzer
+# MAChartAnalyzer V2
 
-사용자가 제공한 이동평균 매매 강의 내용을 기반으로 만든 **독립 BUY 판단 Analyzer**입니다.
+사용자가 제공한 이동평균 매매 강의를 기반으로 만든 **독립 BUY 판단 Analyzer**입니다.
 
-기존 `KJBChartAnalyzer`, `SwingChartProbabilityAnalyzer`의 점수와 섞지 않고 별도의 신호를 생성합니다.
+`KJBChartAnalyzer`, `SwingChartProbabilityAnalyzer`와 점수를 합치지 않으며 각 Analyzer의 신호는 독립적으로 유지합니다.
 
 ## 전략 구조
 
-`Direction -> Timing -> Confirmation -> Sideways Filter -> Risk`
+`Direction -> Setup -> Confirmation -> Sideways Filter -> Risk -> Trade Management`
 
 - 장기 방향: 200MA 위치 + 기울기
 - 단기 타점: 단기 MA(기본 20) 눌림/재돌파
-- Squeeze: 단기/장기 MA 간격 압축 후 추세 방향 탈출
-- 돌파 확정: 장대 양봉 / MA와 캔들 완전 분리 / 직전 고점 몸통 돌파
-- 횡보 회피: 짧은 구간 내 가격/이평 교차 반복
-- 박스 재개: 횡보 박스 상단 강한 돌파
-- 추격 방지: 단기 MA 대비 이격 과다
+- Squeeze: 단기/장기 MA 압축을 Setup으로 감시
+- 핵심 매수: 상승 방향에서의 강한 박스 상단 돌파
+- 돌파 확인: 장대 양봉 / MA와 캔들 완전 분리 / 직전 고점 몸통 돌파
+- 횡보 회피: 가격/이평의 반복 교차
+- 실제 Retest: 돌파 당일이 아니라 과거 1~5봉 전 박스 돌파 레벨을 다시 지지하는지 확인
+- 추격 방지: 단기 MA 대비 과도한 이격 제한
 - 위험 신호: 장기 MA의 명확한 하향 훼손
 
-상세한 강의 규칙과 코드 매핑은 `RULE_MAPPING.md` 참고.
+강의 규칙과 코드 매핑은 `RULE_MAPPING.md` 참고.
 
-## 중요
+## V2에서 바뀐 점
 
-강의 자동자막은 단기 이동평균 값을 `20`, `22` 등으로 혼재하여 기록합니다.
-V1은 단기 MA를 20으로 정규화했지만 `config.py`에서 변경 가능합니다.
+V1 기간 백테스트 결과를 바탕으로 다음을 수정했습니다.
 
-또한 강의에 숫자로 제시되지 않은 Squeeze 간격, 장대봉 배수, 횡보 교차 횟수 등은
-결정론적 백테스트를 위한 구현 파라미터입니다. 강의의 원문 숫자라고 간주하면 안 됩니다.
+1. `BOX_BREAKOUT`을 핵심 CONFIRMED 트리거로 유지.
+2. 일반 `PULLBACK_RECLAIM`은 WATCH로 강등.
+3. Pullback은 **장대 양봉 + MA 위 완전 분리**가 함께 확인되어야 `PULLBACK_STRONG_CONFIRMATION`으로 CONFIRMED 가능.
+4. `SQUEEZE_BREAKOUT`은 단독 매수신호가 아니라 WATCH Setup으로 사용.
+5. 20봉 박스 돌파와 20봉 전고점 돌파의 중복 점수 제거.
+6. 같은 돌파봉이 `Box_Retest_Hold`로 동시에 잡히던 오류 제거.
+7. Retest는 **과거 1~5봉 전 실제 돌파 이후** 현재 가격이 그 레벨을 다시 확인하고 지지해야 인정.
+8. 상태를 `STRONG_CONFIRMED / CONFIRMED / WATCH / REJECTED`로 세분화.
+9. 기간 백테스트의 진입가격을 신호일 종가가 아니라 **D+1 시가**로 변경.
+10. 실제 포지션 시뮬레이션 추가: `신호봉 저가 손절 -> 단기 MA 종가 이탈 -> 최대 보유기간 청산`.
+11. 같은 종목 확정신호는 기본 10거래일 cooldown 적용.
+12. 루트 통합 백테스트에서는 **각 신호일 당시 KOSPI+KOSDAQ 최근 20거래일 평균 거래대금 TOP N** point-in-time Universe 사용.
 
-강의 후반의 '세력 지표'는 계산식이 공개되지 않아 구현하지 않았습니다.
+## 상태 판정
 
-## 설치
+### STRONG_CONFIRMED
 
-```bash
-pip install -r requirements.txt
-```
+확정 매수 Trigger를 충족하고 기본적으로:
 
-기본 Universe Excel은 저장소에 이미 있는
-`../SwingChartProbabilityAnalyzer/KOSPI_Info.xlsx`를 사용합니다.
-신호 로직은 Swing Analyzer와 공유하지 않습니다.
+- `Score >= 80`
+- `Timing_Score >= 70`
+
+인 강한 후보입니다.
+
+### CONFIRMED
+
+장기 상승 방향이 유효하고 다음 중 하나의 확정 Trigger가 있으며 추격위험/횡보 차단 조건을 통과한 후보입니다.
+
+- `BOX_BREAKOUT`
+- `BOX_RETEST_CONFIRMED`
+- `PULLBACK_STRONG_CONFIRMATION`
+- 강한 캔들 확인을 동반한 `PRIOR_HIGH_BREAKOUT`
+
+기본 최소값:
+
+- `Score >= 70`
+- `Timing_Score >= 50`
+
+### WATCH
+
+방향은 유효하지만 확정 매수까지 한 단계 부족한 Setup입니다.
+
+- `SQUEEZE_SETUP_WATCH`
+- `SQUEEZE_BREAKOUT_WATCH`
+- `PULLBACK_RECLAIM_WATCH`
+- 기타 추세 유지 + 확인 대기
+
+### REJECTED
+
+대표적으로:
+
+- 장기 매수 방향 미확인
+- 200MA 명확한 하향 훼손
+- 반복 교차 횡보인데 박스 이탈/Retest 확인 없음
+- 추격 이격 과다
+- 진입조건 미완성
 
 ## 일일 스크리닝
 
-```bash
-python main.py scan --top-n 100
+```bat
+MAChartAnalyzer\run_screen.bat 100
 ```
 
-전체 Universe:
-
-```bash
-python main.py scan --top-n 0
-```
-
-특정 종목 설명:
-
-```bash
-python main.py explain --ticker 005930 --date 2026-08-28
-```
-
-Windows:
+프로젝트 루트의 전체 스크리닝:
 
 ```bat
-run_screen.bat 100
+run_all_screen.bat
 ```
 
 결과:
 
 ```text
-results/YYYYMMDD/
+MAChartAnalyzer/results/YYYYMMDD/
   scan_results.csv
   candidates.csv
   ma_candidates.xlsx
@@ -74,52 +104,73 @@ results/YYYYMMDD/
 
 ## 기간 백테스트
 
-```bash
-python main_range.py \
-  --date-range 20260101~20260821 \
-  --top-n 100 \
-  --sort-by market_cap \
-  --forward-bars 60
-```
-
-Windows:
+MA만 단독 실행:
 
 ```bat
-run_ma_range.bat 20260101~20260821 100 market_cap
+MAChartAnalyzer\run_ma_range.bat 20260101~20260821 100 market_cap
 ```
 
-결과:
+KJB/Swing/MA를 동일한 point-in-time Universe로 실행:
+
+```bat
+run_combined_range.bat 20260101~20260821 100
+```
+
+루트 통합 실행에서는 `TOP_N=100`이면 각 신호일 당시:
+
+- KOSPI + KOSDAQ
+- 최근 20거래일 평균 거래대금
+- 상위 100종목
+
+만 평가합니다. 현재 시점의 시가총액 TOP100을 과거 전체 기간에 소급 적용하지 않습니다.
+
+## 기간 결과
 
 ```text
-results/range_YYYYMMDD_YYYYMMDD/
+MAChartAnalyzer/results/range_YYYYMMDD_YYYYMMDD/
   range_all_results.csv
   range_candidates.csv
+  trade_events.csv
   ma_range_backtest.xlsx
 ```
 
-## 주요 출력 필드
+`ma_range_backtest.xlsx`에는 다음 시트가 생성됩니다.
 
-- `Status`: CONFIRMED / WATCH / REJECTED
-- `Score`: 방향 + 구조 + 확인 + 위험을 합친 점수
-- `Timing_Score`: 현재 진입 타점의 강도
-- `Primary_Signal`
-- `Long_MA_Slope_Pct`, `Short_MA_Slope_Pct`
-- `Squeeze_Compressed`, `Squeeze_Breakout`
-- `Pullback_Reclaim`
-- `Prior_High_Breakout`
-- `Long_Bull_Body`
-- `Detached_Above_MA`
-- `Cross_Count`, `Sideways`
-- `Box_Breakout`, `Box_Retest_Hold`
-- `MA20_Distance_Pct`, `Chase_Risk`
-- `Long_MA_Breakdown`
-- `Stop_Entry_Candle_Low`, `Stop_Short_MA`
+- `AllResults`: 모든 일별 판정
+- `Candidates`: cooldown 반영 확정후보 + WATCH
+- `TradeEvents`: 실제 매매 시뮬레이션 대상
+- `Summary`: 상태별 통계
+- `TradeSummary`: 신호별 실제 매매 성과
+- `Config`: 사용한 임계값/실행조건
 
-## V1 목적
+## 실제 매매 백테스트 기준
 
-첫 버전에서는 강의 내용의 구조를 최대한 누락 없이 코드화하고,
-숫자로 공개되지 않은 임계값은 전부 `config.py`로 분리했습니다.
+확정 신호일을 D0라고 할 때:
 
-따라서 다음 단계는 기간 백테스트 결과를 보고
-`CONFIRMED`의 D+5 / D+10 / D+20 / D+60 성능과 실패 원인을 기준으로
-각 구현 임계값을 조정하는 것입니다.
+1. **D+1 시가 진입**
+2. 신호봉 저가 아래로 Gap 발생 시 D+1 이후 해당 시가에서 손절
+3. 장중 신호봉 저가 이탈 시 신호봉 저가 가격으로 손절 처리
+4. 그 전에 손절되지 않았다면 종가가 단기 MA 아래로 내려오는 첫 날 종가 청산
+5. 끝까지 청산되지 않으면 `forward_bars` 시점 종가로 TIME EXIT
+
+주요 필드:
+
+- `Entry_Price_D1_Open`
+- `Cooldown_Eligible`
+- `Trade_Return_Pct`
+- `Trade_Exit_Reason`
+- `Trade_Holding_Bars`
+- `Trade_MFE_Pct`
+- `Trade_MAE_Pct`
+- `Universe_Rank`
+- `Avg_Trading_Value_20D`
+
+기존 신호일 종가 기준 D+N 성과도 비교용으로 `Signal_D+N_Close_Return_Pct`에 남겨 둡니다.
+
+## 주의
+
+강의 자동자막은 단기 이동평균 값이 `20`, `22`처럼 혼재합니다. 구현 기본값은 20이며 `config.py`에서 변경할 수 있습니다.
+
+또한 Squeeze 간격, 장대봉 배수, 횡보 교차 횟수 등의 숫자는 강의에서 직접 제시된 값이 아니라 정성적 설명을 백테스트 가능하게 만든 구현 파라미터입니다.
+
+강의 후반의 이른바 `세력 지표`는 정확한 산식이 공개되지 않았으므로 임의 구현하지 않았습니다.
