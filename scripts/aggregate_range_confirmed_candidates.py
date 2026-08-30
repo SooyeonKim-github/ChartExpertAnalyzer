@@ -6,7 +6,6 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
-
 ROOT = Path(__file__).resolve().parents[1]
 MILESTONES = (5, 10, 20, 60)
 
@@ -55,20 +54,8 @@ def _read_csv(path: Path) -> pd.DataFrame:
     return pd.read_csv(path, encoding="utf-8-sig")
 
 
-def _base_row(
-    *,
-    signal_date,
-    analyzer: str,
-    ticker,
-    name,
-    status,
-    score=np.nan,
-    timing_score=np.nan,
-    market="",
-    signal="",
-    pattern_type="",
-    source_file: Path,
-) -> dict:
+def _base_row(*, signal_date, analyzer: str, ticker, name, status, score=np.nan,
+              timing_score=np.nan, market="", signal="", pattern_type="", source_file: Path) -> dict:
     return {
         "signal_date": _text(signal_date),
         "analyzer": analyzer,
@@ -95,16 +82,10 @@ def _load_kjb(path: Path) -> list[dict]:
     rows: list[dict] = []
     for _, r in df[df["Status"].astype(str).str.upper().eq("CONFIRMED")].iterrows():
         row = _base_row(
-            signal_date=r.get("signal_date", ""),
-            analyzer="KJB",
-            ticker=r.get("ticker", ""),
-            name=r.get("name", ""),
-            status="CONFIRMED",
-            score=r.get("selection_score", np.nan),
-            timing_score=r.get("timing_score", np.nan),
-            market=r.get("market", ""),
-            signal=r.get("entry_status", ""),
-            source_file=path,
+            signal_date=r.get("signal_date", ""), analyzer="KJB", ticker=r.get("ticker", ""),
+            name=r.get("name", ""), status="CONFIRMED", score=r.get("selection_score", np.nan),
+            timing_score=r.get("timing_score", np.nan), market=r.get("market", ""),
+            signal=r.get("entry_status", ""), source_file=path,
         )
         for h in MILESTONES:
             value = _num(r.get(f"D+{h}", np.nan))
@@ -117,21 +98,14 @@ def _load_swing(path: Path) -> list[dict]:
     df = _read_csv(path)
     if df.empty or "Status" not in df.columns:
         return []
-    statuses = df["Status"].astype(str).str.upper()
-    selected = df[statuses.isin(["STRONG_CONFIRMED", "CONFIRMED"])]
+    selected = df[df["Status"].astype(str).str.upper().isin(["STRONG_CONFIRMED", "CONFIRMED"])]
     rows: list[dict] = []
     for _, r in selected.iterrows():
         status = _text(r.get("Status", "")).upper()
         row = _base_row(
-            signal_date=r.get("Actual_Date", ""),
-            analyzer="SWING",
-            ticker=r.get("Ticker", ""),
-            name=r.get("Name", ""),
-            status=status,
-            score=r.get("Score", np.nan),
-            market=r.get("Market", ""),
-            signal=r.get("Primary_Signal", ""),
-            source_file=path,
+            signal_date=r.get("Actual_Date", ""), analyzer="SWING", ticker=r.get("Ticker", ""),
+            name=r.get("Name", ""), status=status, score=r.get("Score", np.nan),
+            market=r.get("Market", ""), signal=r.get("Primary_Signal", ""), source_file=path,
         )
         for h in MILESTONES:
             row[f"D+{h}_Pct"] = _num(r.get(f"D+{h}_Close_Return_Pct", np.nan))
@@ -143,20 +117,17 @@ def _load_ma(path: Path) -> list[dict]:
     df = _read_csv(path)
     if df.empty or "Status" not in df.columns:
         return []
-    selected = df[df["Status"].astype(str).str.upper().eq("CONFIRMED")]
+    selected = df[df["Status"].astype(str).str.upper().isin(["STRONG_CONFIRMED", "CONFIRMED"])].copy()
+    if "Cooldown_Eligible" in selected.columns:
+        selected = selected[pd.to_numeric(selected["Cooldown_Eligible"], errors="coerce").fillna(0).eq(1)]
     rows: list[dict] = []
     for _, r in selected.iterrows():
+        status = _text(r.get("Status", "")).upper()
         row = _base_row(
-            signal_date=r.get("Actual_Date", ""),
-            analyzer="MA",
-            ticker=r.get("Ticker", ""),
-            name=r.get("Name", ""),
-            status="CONFIRMED",
-            score=r.get("Score", np.nan),
-            timing_score=r.get("Timing_Score", np.nan),
-            market=r.get("Market", ""),
-            signal=r.get("Primary_Signal", ""),
-            source_file=path,
+            signal_date=r.get("Actual_Date", ""), analyzer="MA", ticker=r.get("Ticker", ""),
+            name=r.get("Name", ""), status=status, score=r.get("Score", np.nan),
+            timing_score=r.get("Timing_Score", np.nan), market=r.get("Market", ""),
+            signal=r.get("Primary_Signal", ""), source_file=path,
         )
         for h in MILESTONES:
             row[f"D+{h}_Pct"] = _num(r.get(f"D+{h}_Close_Return_Pct", np.nan))
@@ -165,10 +136,6 @@ def _load_ma(path: Path) -> list[dict]:
 
 
 def _dedupe_within_analyzer(rows: list[dict]) -> list[dict]:
-    """같은 Analyzer/날짜/종목의 중복만 제거한다.
-
-    Analyzer 간 같은 종목은 절대 합치지 않는다. 서로 독립된 결과로 남긴다.
-    """
     best: dict[tuple[str, str, str], dict] = {}
     for row in rows:
         key = (row["analyzer"], row["signal_date"], row["ticker"])
@@ -190,41 +157,31 @@ def _dedupe_within_analyzer(rows: list[dict]) -> list[dict]:
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(
-        description="Collect independent CONFIRMED range signals from KJB, Swing, and MA analyzers"
-    )
+    parser = argparse.ArgumentParser(description="Collect independent confirmed range signals from KJB, Swing, and MA")
     parser.add_argument("--date-range", required=True)
     args = parser.parse_args()
 
     start, end = _parse_range(args.date_range)
     range_key = f"{start}_{end}"
-
     kjb_path = ROOT / "KJBChartAnalyzer" / "results" / f"range_{range_key}" / "chart_range_events.csv"
     swing_path = ROOT / "SwingChartProbabilityAnalyzer" / "results" / f"range_{range_key}" / "range_all_results.csv"
     ma_path = ROOT / "MAChartAnalyzer" / "results" / f"range_{range_key}" / "range_all_results.csv"
 
-    rows = _load_kjb(kjb_path) + _load_swing(swing_path) + _load_ma(ma_path)
-    rows = _dedupe_within_analyzer(rows)
-
+    rows = _dedupe_within_analyzer(_load_kjb(kjb_path) + _load_swing(swing_path) + _load_ma(ma_path))
     status_rank = {"STRONG_CONFIRMED": 0, "CONFIRMED": 1}
     rows.sort(
         key=lambda r: (
-            r["signal_date"],
-            status_rank.get(r["status"], 9),
-            r["analyzer"],
-            -(r["score"] if pd.notna(r["score"]) else -1e18),
-            r["ticker"],
+            r["signal_date"], status_rank.get(r["status"], 9), r["analyzer"],
+            -(r["score"] if pd.notna(r["score"]) else -1e18), r["ticker"],
         )
     )
 
     out_dir = ROOT / "results" / f"range_{range_key}"
     out_dir.mkdir(parents=True, exist_ok=True)
     out_path = out_dir / "confirmed_candidates.csv"
-
     columns = [
-        "signal_date", "analyzer", "ticker", "name", "status",
-        "score", "timing_score", "market", "signal", "pattern_type",
-        "D+5_Pct", "D+10_Pct", "D+20_Pct", "D+60_Pct", "source_file",
+        "signal_date", "analyzer", "ticker", "name", "status", "score", "timing_score",
+        "market", "signal", "pattern_type", "D+5_Pct", "D+10_Pct", "D+20_Pct", "D+60_Pct", "source_file",
     ]
     pd.DataFrame(rows, columns=columns).to_csv(out_path, index=False, encoding="utf-8-sig")
 
