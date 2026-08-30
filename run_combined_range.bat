@@ -8,7 +8,6 @@ cd /d "%ROOT%"
 set "DATE_RANGE=%~1"
 set "TOP_N=%~2"
 set "SORT_BY=%~3"
-
 if "%DATE_RANGE%"=="" (
     echo Example: 20260401~20260531
     set /p "DATE_RANGE=Date range YYYYMMDD~YYYYMMDD: "
@@ -21,114 +20,97 @@ if "%DATE_RANGE%"=="" (
 if "%TOP_N%"=="" set "TOP_N=100"
 if "%SORT_BY%"=="" set "SORT_BY=market_cap"
 
+set "NO_PAUSE=1"
 echo ============================================
 echo   Range Backtest - Independent Analyzers
 echo ============================================
-echo Date range    : %DATE_RANGE%
-echo Universe TOP N: %TOP_N%
-echo Sort by       : %SORT_BY%
-echo Forward bars  : 60
+echo Date range     : %DATE_RANGE%
+echo Universe TOP N : %TOP_N%
+echo Universe rule  : recent 20-trading-day avg trading value, point-in-time
+echo Markets         : KOSPI + KOSDAQ
+echo Forward bars    : 60
 echo.
 echo KJB, Swing, and MA are evaluated independently.
 echo No analyzer scores are combined and no consensus/BOTH logic is used.
 echo ============================================
 echo.
 
-set "NO_PAUSE=1"
+echo [0/7] Preparing shared point-in-time liquidity universe...
+call "%ROOT%prepare_liquidity_universe.bat" range "%DATE_RANGE%" "%TOP_N%" 20
+if errorlevel 1 goto RUN_FAILED
+if not defined LIQUIDITY_UNIVERSE_XLSX goto RUN_FAILED
+if not defined LIQUIDITY_MEMBERSHIP_CSV goto RUN_FAILED
 
-echo [1/4] Running KJB range backtest...
+set "FILTER_PYTHON=%LIQ_PYTHON_EXE%"
+set "FILTER_PREFIX=%LIQ_PYTHON_PREFIX%"
+if "%FILTER_PYTHON%"=="" (
+    echo [ERROR] Python was not resolved by liquidity preparation.
+    goto RUN_FAILED
+)
+
+echo.
+echo [1/7] Running KJB on shared universe union...
 call "%ROOT%KJBChartAnalyzer\run_swing_range.bat" "%DATE_RANGE%" "%TOP_N%" "%SORT_BY%"
-if errorlevel 1 (
-    echo.
-    echo [ERROR] KJB range backtest failed.
-    goto RUN_FAILED
-)
+if errorlevel 1 goto RUN_FAILED
 cd /d "%ROOT%"
 
 echo.
-echo [2/4] Running Swing range backtest...
+echo [2/7] Applying KJB point-in-time membership...
+"%FILTER_PYTHON%" %FILTER_PREFIX% "%ROOT%scripts\filter_liquidity_membership.py" ^
+    --analyzer kjb --date-range "%DATE_RANGE%" --membership-csv "%LIQUIDITY_MEMBERSHIP_CSV%" ^
+    --top-n "%TOP_N%" --lookback 20 --forward-bars 60
+if errorlevel 1 goto RUN_FAILED
+
+echo.
+echo [3/7] Running Swing on shared universe union...
 call "%ROOT%SwingChartProbabilityAnalyzer\run_swing_range.bat" "%DATE_RANGE%" "%TOP_N%" "%SORT_BY%"
-if errorlevel 1 (
-    echo.
-    echo [ERROR] Swing range backtest failed.
-    goto RUN_FAILED
-)
+if errorlevel 1 goto RUN_FAILED
 cd /d "%ROOT%"
 
 echo.
-echo [3/4] Running MA range backtest...
+echo [4/7] Applying Swing point-in-time membership...
+"%FILTER_PYTHON%" %FILTER_PREFIX% "%ROOT%scripts\filter_liquidity_membership.py" ^
+    --analyzer swing --date-range "%DATE_RANGE%" --membership-csv "%LIQUIDITY_MEMBERSHIP_CSV%" ^
+    --top-n "%TOP_N%" --lookback 20 --forward-bars 60
+if errorlevel 1 goto RUN_FAILED
+
+echo.
+echo [5/7] Running MA V2 with point-in-time membership...
 call "%ROOT%MAChartAnalyzer\run_ma_range.bat" "%DATE_RANGE%" "%TOP_N%" "%SORT_BY%"
-if errorlevel 1 (
-    echo.
-    echo [ERROR] MA range backtest failed.
-    goto RUN_FAILED
-)
+if errorlevel 1 goto RUN_FAILED
 cd /d "%ROOT%"
 
-set "PYTHON_EXE="
-set "PYTHON_PREFIX="
-if exist "%ROOT%.venv\Scripts\python.exe" (
-    set "PYTHON_EXE=%ROOT%.venv\Scripts\python.exe"
-) else if exist "%ROOT%KJBChartAnalyzer\.venv\Scripts\python.exe" (
-    set "PYTHON_EXE=%ROOT%KJBChartAnalyzer\.venv\Scripts\python.exe"
-) else if exist "%ROOT%SwingChartProbabilityAnalyzer\.venv\Scripts\python.exe" (
-    set "PYTHON_EXE=%ROOT%SwingChartProbabilityAnalyzer\.venv\Scripts\python.exe"
-) else if exist "%ROOT%MAChartAnalyzer\.venv\Scripts\python.exe" (
-    set "PYTHON_EXE=%ROOT%MAChartAnalyzer\.venv\Scripts\python.exe"
-) else (
-    where py >nul 2>nul
-    if not errorlevel 1 (
-        set "PYTHON_EXE=py"
-        set "PYTHON_PREFIX=-3"
-    ) else (
-        where python >nul 2>nul
-        if not errorlevel 1 set "PYTHON_EXE=python"
-    )
-)
-
-if "%PYTHON_EXE%"=="" (
-    echo [ERROR] Python was not found for confirmed candidate aggregation.
+echo.
+echo [6/7] Validating MA V2 outputs...
+if not exist "%ROOT%MAChartAnalyzer\results\range_%DATE_RANGE:~0,8%_%DATE_RANGE:~-8%\trade_events.csv" (
+    echo [ERROR] MA trade_events.csv was not created.
     goto RUN_FAILED
 )
+echo [OK] MA V2 trade events created.
 
 echo.
-echo [4/4] Collecting independent CONFIRMED signals...
-"%PYTHON_EXE%" %PYTHON_PREFIX% "%ROOT%scripts\aggregate_range_confirmed_candidates.py" ^
-    --date-range "%DATE_RANGE%"
-if errorlevel 1 (
-    echo.
-    echo [ERROR] Confirmed candidate aggregation failed.
-    goto RUN_FAILED
-)
+echo [7/7] Collecting independent confirmed signals...
+"%FILTER_PYTHON%" %FILTER_PREFIX% "%ROOT%scripts\aggregate_range_confirmed_candidates.py" --date-range "%DATE_RANGE%"
+if errorlevel 1 goto RUN_FAILED
 
 set "NO_PAUSE="
-
 echo.
 echo ============================================
 echo [DONE] All independent range backtests finished.
 echo ============================================
+echo [Universe]
+echo   %LIQUIDITY_MEMBERSHIP_CSV%
+echo.
 echo [Confirmed summary]
 echo   results\range_YYYYMMDD_YYYYMMDD\confirmed_candidates.csv
 echo.
-echo [KJB]
-echo   KJBChartAnalyzer\results\range_YYYYMMDD_YYYYMMDD\
-echo   chart_range_events.csv
-echo   chart_range_status_summary_D1_D60.csv
-echo   chart_range_backtest.xlsx
+echo [MA V2]
+echo   MAChartAnalyzer\results\range_YYYYMMDD_YYYYMMDD\range_all_results.csv
+echo   MAChartAnalyzer\results\range_YYYYMMDD_YYYYMMDD\range_candidates.csv
+echo   MAChartAnalyzer\results\range_YYYYMMDD_YYYYMMDD\trade_events.csv
+echo   MAChartAnalyzer\results\range_YYYYMMDD_YYYYMMDD\ma_range_backtest.xlsx
 echo.
-echo [Swing]
-echo   SwingChartProbabilityAnalyzer\results\range_YYYYMMDD_YYYYMMDD\
-echo   range_all_results.csv
-echo   range_candidates.csv
-echo   swing_range_backtest.xlsx
-echo.
-echo [MA]
-echo   MAChartAnalyzer\results\range_YYYYMMDD_YYYYMMDD\
-echo   range_all_results.csv
-echo   range_candidates.csv
-echo   ma_range_backtest.xlsx
-echo.
-echo [INFO] KJB, Swing, and MA remain independent. Combined scoring and market-filter steps are not executed.
+echo [INFO] KJB, Swing, and MA remain independent.
 echo ============================================
 pause
 exit /b 0
