@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+from pathlib import Path
 import re
 
 import numpy as np
@@ -13,6 +14,7 @@ from universe import TickerUniverse
 
 
 MILESTONES = (1, 5, 10, 20, 40, 60)
+CONFIRMED_STATUSES = {"STRONG_CONFIRMED", "CONFIRMED"}
 
 
 def parse_date_range(text: str) -> tuple[pd.Timestamp, pd.Timestamp]:
@@ -26,32 +28,140 @@ def parse_date_range(text: str) -> tuple[pd.Timestamp, pd.Timestamp]:
     return start, end
 
 
+def _ticker(value) -> str:
+    text = str(value or "").strip()
+    if text.endswith(".0"):
+        text = text[:-2]
+    return text.zfill(6) if text else ""
+
+
+def load_membership(path: str, start: pd.Timestamp, end: pd.Timestamp) -> pd.DataFrame:
+    if not path:
+        return pd.DataFrame()
+    p = Path(path)
+    if not p.exists():
+        raise FileNotFoundError(f"Liquidity membership CSV가 없습니다: {p}")
+    m = pd.read_csv(p, encoding="utf-8-sig", dtype={"ticker": str})
+    required = {"date", "ticker"}
+    missing = required - set(m.columns)
+    if missing:
+        raise ValueError(f"Membership 필수 컬럼 누락: {sorted(missing)}")
+    m = m.copy()
+    m["date"] = pd.to_datetime(m["date"], errors="coerce").dt.normalize()
+    m["ticker"] = m["ticker"].map(_ticker)
+    m = m[(m["date"] >= start) & (m["date"] <= end)].dropna(subset=["date"])
+    return m.drop_duplicates(["date", "ticker"], keep="last").copy()
+
+
 def forward_metrics(full: pd.DataFrame, pos: int, max_bars: int) -> dict:
-    base = float(full["Close"].iloc[pos])
+    """Forward returns using D+1 open as the realistic entry price.
+
+    D+N_Close_Return_Pct is measured from D+1 open to D+N close.
+    Signal_D+N_Close_Return_Pct keeps the former signal-close baseline.
+    """
     row: dict = {}
+    signal_close = float(full["Close"].iloc[pos])
+    entry_pos = pos + 1
+    if entry_pos >= len(full):
+        row["Entry_Date"] = ""
+        row["Entry_Price_D1_Open"] = np.nan
+        for n in MILESTONES:
+            if n <= max_bars:
+                row[f"D+{n}_Close_Return_Pct"] = np.nan
+                row[f"Signal_D+{n}_Close_Return_Pct"] = np.nan
+        row[f"Forward_Complete_{max_bars}D"] = 0
+        row[f"MFE_{max_bars}D_Pct"] = np.nan
+        row[f"MAE_{max_bars}D_Pct"] = np.nan
+        return row
+
+    entry_price = float(full["Open"].iloc[entry_pos])
+    row["Entry_Date"] = full.index[entry_pos].strftime("%Y-%m-%d")
+    row["Entry_Price_D1_Open"] = entry_price
     for n in MILESTONES:
         if n > max_bars:
             continue
         j = pos + n
-        row[f"D+{n}_Close_Return_Pct"] = (
-            (float(full["Close"].iloc[j]) / base - 1.0) * 100.0 if j < len(full) else np.nan
-        )
+        if j < len(full):
+            close_n = float(full["Close"].iloc[j])
+            row[f"D+{n}_Close_Return_Pct"] = (close_n / entry_price - 1.0) * 100.0
+            row[f"Signal_D+{n}_Close_Return_Pct"] = (close_n / signal_close - 1.0) * 100.0
+        else:
+            row[f"D+{n}_Close_Return_Pct"] = np.nan
+            row[f"Signal_D+{n}_Close_Return_Pct"] = np.nan
 
     end = min(len(full) - 1, pos + max_bars)
-    future = full.iloc[pos + 1 : end + 1]
+    future = full.iloc[entry_pos : end + 1]
     row[f"Forward_Complete_{max_bars}D"] = int(pos + max_bars < len(full))
     if future.empty:
         row[f"MFE_{max_bars}D_Pct"] = np.nan
         row[f"MAE_{max_bars}D_Pct"] = np.nan
     else:
-        row[f"MFE_{max_bars}D_Pct"] = (float(future["High"].max()) / base - 1.0) * 100.0
-        row[f"MAE_{max_bars}D_Pct"] = (float(future["Low"].min()) / base - 1.0) * 100.0
+        row[f"MFE_{max_bars}D_Pct"] = (float(future["High"].max()) / entry_price - 1.0) * 100.0
+        row[f"MAE_{max_bars}D_Pct"] = (float(future["Low"].min()) / entry_price - 1.0) * 100.0
     return row
+
+
+def _empty_trade() -> dict:
+    return {
+        "Trade_Entry_Date": "",
+        "Trade_Entry_Price": np.nan,
+        "Trade_Exit_Date": "",
+        "Trade_Exit_Price": np.nan,
+        "Trade_Exit_Reason": "",
+        "Trade_Holding_Bars": np.nan,
+        "Trade_Return_Pct": np.nan,
+        "Trade_MFE_Pct": np.nan,
+        "Trade_MAE_Pct": np.nan,
+        "Trade_Complete": 0,
+    }
+
+
+def simulate_trade(full: pd.DataFrame, pos: int, max_bars: int, short_ma_period: int, signal_low: float) -> dict:
+    """D+1 open entry; signal-low stop -> short-MA close -> time exit."""
+    entry_pos = pos + 1
+    if entry_pos >= len(full):
+        return _empty_trade()
+
+    entry_price = float(full["Open"].iloc[entry_pos])
+    ma_short = full["Close"].rolling(short_ma_period).mean()
+    end_pos = min(len(full) - 1, pos + max_bars)
+    exit_pos = end_pos
+    exit_price = float(full["Close"].iloc[end_pos])
+    exit_reason = "TIME_EXIT" if pos + max_bars < len(full) else "DATA_END"
+
+    for i in range(entry_pos, end_pos + 1):
+        o = float(full["Open"].iloc[i])
+        lo = float(full["Low"].iloc[i])
+        cl = float(full["Close"].iloc[i])
+        short_value = ma_short.iloc[i]
+        if o < signal_low:
+            exit_pos = i; exit_price = o; exit_reason = "ENTRY_LOW_GAP_STOP"; break
+        if lo <= signal_low:
+            exit_pos = i; exit_price = signal_low; exit_reason = "ENTRY_LOW_STOP"; break
+        if pd.notna(short_value) and cl < float(short_value):
+            exit_pos = i; exit_price = cl; exit_reason = "SHORT_MA_CLOSE"; break
+
+    held = full.iloc[entry_pos : exit_pos + 1]
+    mfe = (float(held["High"].max()) / entry_price - 1.0) * 100.0 if not held.empty else np.nan
+    mae = (float(held["Low"].min()) / entry_price - 1.0) * 100.0 if not held.empty else np.nan
+    return {
+        "Trade_Entry_Date": full.index[entry_pos].strftime("%Y-%m-%d"),
+        "Trade_Entry_Price": entry_price,
+        "Trade_Exit_Date": full.index[exit_pos].strftime("%Y-%m-%d"),
+        "Trade_Exit_Price": exit_price,
+        "Trade_Exit_Reason": exit_reason,
+        "Trade_Holding_Bars": int(exit_pos - entry_pos + 1),
+        "Trade_Return_Pct": (exit_price / entry_price - 1.0) * 100.0,
+        "Trade_MFE_Pct": mfe,
+        "Trade_MAE_Pct": mae,
+        "Trade_Complete": int(exit_reason != "DATA_END"),
+    }
 
 
 def run_range(args) -> int:
     cfg = DEFAULT_CONFIG
     start, end = parse_date_range(args.date_range)
+    membership = load_membership(args.membership_csv, start, end)
     universe = TickerUniverse(args.info_excel).get(args.top_n, args.sort_by)
     provider = PykrxDataProvider(use_cache=not args.no_cache)
     analyzer = MAChartSignalAnalyzer(cfg)
@@ -59,11 +169,18 @@ def run_range(args) -> int:
     fetch_start = start - pd.Timedelta(days=cfg.history_calendar_days)
     requested_future_end = end + pd.Timedelta(days=max(120, args.forward_bars * 4))
     fetch_end = min(requested_future_end, pd.Timestamp.today().normalize())
-
+    mode = "point-in-time liquidity membership" if not membership.empty else "static input universe"
     print(
-        f"[INFO] MA range={start.date()}~{end.date()} universe={len(universe)} "
-        f"fetch={fetch_start.date()}~{fetch_end.date()} forward={args.forward_bars}"
+        f"[INFO] MA V2 range={start.date()}~{end.date()} universe_union={len(universe)} "
+        f"mode={mode} fetch={fetch_start.date()}~{fetch_end.date()} forward={args.forward_bars}"
     )
+
+    membership_by_ticker: dict[str, pd.DataFrame] = {}
+    if not membership.empty:
+        membership_by_ticker = {
+            ticker: frame.set_index("date").sort_index()
+            for ticker, frame in membership.groupby("ticker")
+        }
 
     rows: list[dict] = []
     for ti, info in enumerate(universe, 1):
@@ -76,25 +193,57 @@ def run_range(args) -> int:
             if len(full) < cfg.min_history_bars:
                 continue
 
+            allowed = membership_by_ticker.get(info.ticker)
+            if not membership.empty and allowed is None:
+                continue
+            allowed_dates = set(allowed.index) if allowed is not None else None
+
             positions = [
-                i
-                for i, dt in enumerate(full.index)
+                i for i, dt in enumerate(full.index)
                 if start <= pd.Timestamp(dt).normalize() <= end
+                and (allowed_dates is None or pd.Timestamp(dt).normalize() in allowed_dates)
             ]
+            last_confirmed_pos = -10**9
             for pos in positions:
                 if pos < cfg.min_history_bars - 1:
                     continue
                 hist = full.iloc[: pos + 1]
                 signal_date = hist.index[-1].strftime("%Y-%m-%d")
-                result = analyzer.analyze(
-                    info.ticker,
-                    info.name,
-                    info.market,
-                    signal_date,
-                    hist,
-                )
+                result = analyzer.analyze(info.ticker, info.name, info.market, signal_date, hist)
                 row = result.to_row()
+
+                if allowed is not None:
+                    key = pd.Timestamp(hist.index[-1]).normalize()
+                    if key in allowed.index:
+                        m = allowed.loc[key]
+                        if isinstance(m, pd.DataFrame):
+                            m = m.iloc[-1]
+                        row["Universe_Rank"] = m.get("source_rank", np.nan)
+                        row["Avg_Trading_Value_20D"] = m.get("avg_trading_value_20d", np.nan)
+                        row["Universe_Mode"] = "LIQUIDITY_20D_POINT_IN_TIME"
+                else:
+                    row["Universe_Rank"] = np.nan
+                    row["Avg_Trading_Value_20D"] = np.nan
+                    row["Universe_Mode"] = "STATIC_INPUT_UNIVERSE"
+
+                is_confirmed = result.status in CONFIRMED_STATUSES
+                cooldown_eligible = 0
+                if is_confirmed and pos - last_confirmed_pos >= args.cooldown_bars:
+                    cooldown_eligible = 1
+                    last_confirmed_pos = pos
+                row["Cooldown_Bars"] = args.cooldown_bars
+                row["Cooldown_Eligible"] = cooldown_eligible
+
                 row.update(forward_metrics(full, pos, args.forward_bars))
+                if is_confirmed and cooldown_eligible:
+                    row.update(
+                        simulate_trade(
+                            full, pos, args.forward_bars, cfg.short_ma_period,
+                            float(hist["Low"].iloc[-1]),
+                        )
+                    )
+                else:
+                    row.update(_empty_trade())
                 rows.append(row)
 
             if ti % 10 == 0:
@@ -111,13 +260,18 @@ def run_range(args) -> int:
     out_dir = RESULT_DIR / f"range_{range_key}"
     out_dir.mkdir(parents=True, exist_ok=True)
 
-    candidates = all_results[all_results["Status"].isin(["CONFIRMED", "WATCH"])].copy()
+    confirmed_mask = all_results["Status"].isin(CONFIRMED_STATUSES) & all_results["Cooldown_Eligible"].eq(1)
+    watch_mask = all_results["Status"].eq("WATCH")
+    candidates = all_results[confirmed_mask | watch_mask].copy()
+    trade_events = all_results[confirmed_mask].copy()
+
     all_results.to_csv(out_dir / "range_all_results.csv", index=False, encoding="utf-8-sig")
     candidates.to_csv(out_dir / "range_candidates.csv", index=False, encoding="utf-8-sig")
+    trade_events.to_csv(out_dir / "trade_events.csv", index=False, encoding="utf-8-sig")
 
     summary = (
         all_results.groupby("Status", dropna=False)
-        .agg(Count=("Ticker", "count"), Avg_Score=("Score", "mean"))
+        .agg(Count=("Ticker", "count"), Avg_Score=("Score", "mean"), Avg_Timing=("Timing_Score", "mean"))
         .reset_index()
     )
     forward_cols = [c for c in all_results.columns if c.startswith("D+") and c.endswith("_Close_Return_Pct")]
@@ -125,40 +279,61 @@ def run_range(args) -> int:
         avg = all_results.groupby("Status")[forward_cols].mean().reset_index()
         summary = summary.merge(avg, on="Status", how="left")
 
+    trade_summary = pd.DataFrame()
+    if not trade_events.empty:
+        trade_summary = (
+            trade_events.groupby(["Status", "Primary_Signal"], dropna=False)
+            .agg(
+                Trades=("Ticker", "count"),
+                Avg_Return_Pct=("Trade_Return_Pct", "mean"),
+                Median_Return_Pct=("Trade_Return_Pct", "median"),
+                Win_Rate=("Trade_Return_Pct", lambda s: float((pd.to_numeric(s, errors="coerce") > 0).mean())),
+                Avg_Holding_Bars=("Trade_Holding_Bars", "mean"),
+                Avg_MFE_Pct=("Trade_MFE_Pct", "mean"),
+                Avg_MAE_Pct=("Trade_MAE_Pct", "mean"),
+            )
+            .reset_index()
+        )
+
     with pd.ExcelWriter(out_dir / "ma_range_backtest.xlsx", engine="openpyxl") as writer:
         all_results.to_excel(writer, sheet_name="AllResults", index=False)
         candidates.to_excel(writer, sheet_name="Candidates", index=False)
+        trade_events.to_excel(writer, sheet_name="TradeEvents", index=False)
         summary.to_excel(writer, sheet_name="Summary", index=False)
+        trade_summary.to_excel(writer, sheet_name="TradeSummary", index=False)
         cfg_rows = [{"Parameter": k, "Value": v} for k, v in cfg.to_dict().items()]
         cfg_rows += [
             {"Parameter": "date_range", "Value": args.date_range},
             {"Parameter": "top_n", "Value": args.top_n},
             {"Parameter": "sort_by", "Value": args.sort_by},
             {"Parameter": "forward_bars", "Value": args.forward_bars},
+            {"Parameter": "cooldown_bars", "Value": args.cooldown_bars},
+            {"Parameter": "membership_csv", "Value": args.membership_csv},
+            {"Parameter": "entry_rule", "Value": "D+1 open"},
+            {"Parameter": "exit_rule", "Value": "signal candle low stop -> short MA close -> time exit"},
         ]
         pd.DataFrame(cfg_rows).to_excel(writer, sheet_name="Config", index=False)
 
     counts = all_results["Status"].value_counts()
     print(f"[DONE] {out_dir}")
     print(
-        f"[INFO] CONFIRMED={int(counts.get('CONFIRMED', 0))} "
-        f"WATCH={int(counts.get('WATCH', 0))} "
-        f"REJECTED={int(counts.get('REJECTED', 0))}"
+        f"[INFO] STRONG={int(counts.get('STRONG_CONFIRMED', 0))} "
+        f"CONFIRMED={int(counts.get('CONFIRMED', 0))} "
+        f"WATCH={int(counts.get('WATCH', 0))} REJECTED={int(counts.get('REJECTED', 0))} "
+        f"COOLDOWN_TRADES={len(trade_events)}"
     )
     return 0
 
 
 def build_parser() -> argparse.ArgumentParser:
-    p = argparse.ArgumentParser(description="MAChartAnalyzer range backtest")
+    p = argparse.ArgumentParser(description="MAChartAnalyzer V2 range backtest")
     p.add_argument("--date-range", required=True, help="YYYYMMDD~YYYYMMDD")
     p.add_argument("--info-excel", default=str(DEFAULT_INFO_EXCEL))
+    p.add_argument("--membership-csv", default="", help="point-in-time liquidity membership CSV")
     p.add_argument("--top-n", type=int, default=100)
-    p.add_argument(
-        "--sort-by",
-        default="market_cap",
-        choices=["market_cap", "trading_value", "volume"],
-    )
+    p.add_argument("--sort-by", default="market_cap", choices=["market_cap", "trading_value", "volume"])
     p.add_argument("--forward-bars", type=int, default=60)
+    p.add_argument("--cooldown-bars", type=int, default=DEFAULT_CONFIG.cooldown_bars)
     p.add_argument("--no-cache", action="store_true")
     return p
 
