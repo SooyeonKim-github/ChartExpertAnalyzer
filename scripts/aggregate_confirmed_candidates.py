@@ -149,6 +149,35 @@ def _load_swing() -> list[dict[str, str]]:
     return rows
 
 
+def _load_ma() -> list[dict[str, str]]:
+    result_dir = _latest_date_dir(ROOT / "MAChartAnalyzer" / "results")
+    if result_dir is None:
+        print("[WARN] MA result directory not found.")
+        return []
+    path = result_dir / "scan_results.csv"
+    rows = []
+    for r in _read_csv(path):
+        status = _clean(r.get("Status")).upper()
+        if status != "CONFIRMED":
+            continue
+        rows.append(
+            _normalized_row(
+                scan_date=r.get("Actual_Date", result_dir.name),
+                analyzer="MA",
+                ticker=r.get("Ticker", ""),
+                name=r.get("Name", ""),
+                status=status,
+                score=r.get("Score", ""),
+                timing_score=r.get("Timing_Score", ""),
+                market=r.get("Market", ""),
+                signal=r.get("Primary_Signal", ""),
+                entry_price=r.get("Close", ""),
+                source_file=path,
+            )
+        )
+    return rows
+
+
 def _dedupe(rows: list[dict[str, str]]) -> list[dict[str, str]]:
     """Analyzer별 동일 종목은 가장 강한 한 행만 남긴다.
 
@@ -174,7 +203,7 @@ def _sort_key(row: dict[str, str]):
 
 
 def main() -> int:
-    rows = _load_kjb() + _load_swing()
+    rows = _load_kjb() + _load_swing() + _load_ma()
     rows = sorted(_dedupe(rows), key=_sort_key)
 
     OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
@@ -188,7 +217,7 @@ def main() -> int:
         counts[row["analyzer"]] = counts.get(row["analyzer"], 0) + 1
 
     print(f"[DONE] Confirmed candidates: {len(rows)} -> {OUTPUT_FILE}")
-    for analyzer in ("KJB", "SWING"):
+    for analyzer in ("KJB", "SWING", "MA"):
         print(f"[INFO] {analyzer}: {counts.get(analyzer, 0)}")
     return 0
 

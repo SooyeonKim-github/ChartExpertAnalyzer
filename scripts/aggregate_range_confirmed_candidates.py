@@ -139,6 +139,31 @@ def _load_swing(path: Path) -> list[dict]:
     return rows
 
 
+def _load_ma(path: Path) -> list[dict]:
+    df = _read_csv(path)
+    if df.empty or "Status" not in df.columns:
+        return []
+    selected = df[df["Status"].astype(str).str.upper().eq("CONFIRMED")]
+    rows: list[dict] = []
+    for _, r in selected.iterrows():
+        row = _base_row(
+            signal_date=r.get("Actual_Date", ""),
+            analyzer="MA",
+            ticker=r.get("Ticker", ""),
+            name=r.get("Name", ""),
+            status="CONFIRMED",
+            score=r.get("Score", np.nan),
+            timing_score=r.get("Timing_Score", np.nan),
+            market=r.get("Market", ""),
+            signal=r.get("Primary_Signal", ""),
+            source_file=path,
+        )
+        for h in MILESTONES:
+            row[f"D+{h}_Pct"] = _num(r.get(f"D+{h}_Close_Return_Pct", np.nan))
+        rows.append(row)
+    return rows
+
+
 def _dedupe_within_analyzer(rows: list[dict]) -> list[dict]:
     """같은 Analyzer/날짜/종목의 중복만 제거한다.
 
@@ -165,7 +190,9 @@ def _dedupe_within_analyzer(rows: list[dict]) -> list[dict]:
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description="Collect independent CONFIRMED range signals from KJB and Swing analyzers")
+    parser = argparse.ArgumentParser(
+        description="Collect independent CONFIRMED range signals from KJB, Swing, and MA analyzers"
+    )
     parser.add_argument("--date-range", required=True)
     args = parser.parse_args()
 
@@ -174,8 +201,9 @@ def main() -> int:
 
     kjb_path = ROOT / "KJBChartAnalyzer" / "results" / f"range_{range_key}" / "chart_range_events.csv"
     swing_path = ROOT / "SwingChartProbabilityAnalyzer" / "results" / f"range_{range_key}" / "range_all_results.csv"
+    ma_path = ROOT / "MAChartAnalyzer" / "results" / f"range_{range_key}" / "range_all_results.csv"
 
-    rows = _load_kjb(kjb_path) + _load_swing(swing_path)
+    rows = _load_kjb(kjb_path) + _load_swing(swing_path) + _load_ma(ma_path)
     rows = _dedupe_within_analyzer(rows)
 
     status_rank = {"STRONG_CONFIRMED": 0, "CONFIRMED": 1}
@@ -203,7 +231,7 @@ def main() -> int:
     print(f"[DONE] Independent confirmed candidates: {len(rows)} -> {out_path}")
     if rows:
         counts = pd.DataFrame(rows)["analyzer"].value_counts()
-        for analyzer in ("KJB", "SWING"):
+        for analyzer in ("KJB", "SWING", "MA"):
             print(f"[INFO] {analyzer}: {int(counts.get(analyzer, 0))}")
     return 0
 
