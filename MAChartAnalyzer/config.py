@@ -6,24 +6,16 @@ from pathlib import Path
 PROJECT_ROOT = Path(__file__).resolve().parent
 RESULT_DIR = PROJECT_ROOT / "results"
 CACHE_DIR = PROJECT_ROOT / "cache"
-
-# Reuse the repository's current stock-universe workbook instead of duplicating a binary file.
-# The analyzer itself does not reuse Swing's signal logic.
 DEFAULT_INFO_EXCEL = PROJECT_ROOT.parent / "SwingChartProbabilityAnalyzer" / "KOSPI_Info.xlsx"
 
 
 @dataclass(frozen=True)
 class MAConfig:
-    """Moving-average strategy configuration.
+    """Moving-average lecture strategy configuration (V2).
 
-    Source-backed values:
-    - long_ma_period=200: explicitly described in the lecture as the main direction line.
-    - short_ma_period=20: the subtitle alternates between expressions that OCR as 20/22.
-      We normalize the default to 20 for implementation, but keep it configurable.
-
-    All percentage/window thresholds below are engineering thresholds needed to turn
-    qualitative lecture language ("flat", "squeeze", "long candle", "too far") into
-    deterministic code. They are not claimed to be numeric thresholds from the lecture.
+    The lecture supplies the strategy structure. Thresholds that the lecture did
+    not quantify remain explicit engineering parameters so they can be tuned by
+    backtest without changing the strategy meaning.
     """
 
     short_ma_period: int = 20
@@ -35,7 +27,7 @@ class MAConfig:
     slope_lookback_bars: int = 10
     flat_long_slope_abs_pct: float = 0.15
 
-    # Squeeze
+    # Squeeze setup (V2: setup/watch only, never enough by itself for CONFIRMED)
     squeeze_lookback_bars: int = 15
     squeeze_recent_bars: int = 5
     squeeze_gap_max_pct: float = 4.0
@@ -55,14 +47,24 @@ class MAConfig:
     sideways_cross_count: int = 4
     box_lookback_bars: int = 20
     box_breakout_buffer_pct: float = 0.3
+    box_retest_lookback_bars: int = 5
     box_retest_tolerance_pct: float = 2.0
+    box_retest_max_break_pct: float = 1.0
 
     # Risk
     max_ma20_distance_pct: float = 10.0
 
-    # Classification
+    # Classification. V1 backtest showed the best separation around stronger
+    # timing and score cohorts, but V2 removes duplicated box/prior-high/retest
+    # points before applying these thresholds.
+    strong_confirmed_score: int = 80
+    strong_timing_score: int = 70
     confirmed_score: int = 70
+    confirmed_timing_score: int = 50
     watch_score: int = 50
+
+    # Range backtest
+    cooldown_bars: int = 10
 
     def to_dict(self) -> dict:
         return asdict(self)
