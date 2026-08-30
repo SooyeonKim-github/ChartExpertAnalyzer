@@ -139,38 +139,10 @@ def _load_swing(path: Path) -> list[dict]:
     return rows
 
 
-def _load_bullish(path: Path) -> list[dict]:
-    df = _read_csv(path)
-    if df.empty or "decision_status" not in df.columns:
-        return []
-    selected = df[df["decision_status"].astype(str).str.upper().eq("CONFIRMED")]
-    rows: list[dict] = []
-    for _, r in selected.iterrows():
-        row = _base_row(
-            signal_date=r.get("date", ""),
-            analyzer="BULLISH_PATTERN",
-            ticker=r.get("ticker", ""),
-            name=r.get("name", ""),
-            status="CONFIRMED",
-            score=r.get("selection_score", np.nan),
-            timing_score=r.get("timing_score", np.nan),
-            market=r.get("market", ""),
-            signal=r.get("candle_signal", ""),
-            pattern_type=r.get("pattern_type", ""),
-            source_file=path,
-        )
-        for h in MILESTONES:
-            value = _num(r.get(f"return_d{h}", np.nan))
-            row[f"D+{h}_Pct"] = value * 100.0 if pd.notna(value) else np.nan
-        rows.append(row)
-    return rows
-
-
 def _dedupe_within_analyzer(rows: list[dict]) -> list[dict]:
     """같은 Analyzer/날짜/종목의 중복만 제거한다.
 
     Analyzer 간 같은 종목은 절대 합치지 않는다. 서로 독립된 결과로 남긴다.
-    Bullish처럼 한 종목에 여러 패턴이 잡히면 score/timing이 가장 높은 한 행을 대표로 둔다.
     """
     best: dict[tuple[str, str, str], dict] = {}
     for row in rows:
@@ -193,7 +165,7 @@ def _dedupe_within_analyzer(rows: list[dict]) -> list[dict]:
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description="Collect independent CONFIRMED range signals from all analyzers")
+    parser = argparse.ArgumentParser(description="Collect independent CONFIRMED range signals from KJB and Swing analyzers")
     parser.add_argument("--date-range", required=True)
     args = parser.parse_args()
 
@@ -202,9 +174,8 @@ def main() -> int:
 
     kjb_path = ROOT / "KJBChartAnalyzer" / "results" / f"range_{range_key}" / "chart_range_events.csv"
     swing_path = ROOT / "SwingChartProbabilityAnalyzer" / "results" / f"range_{range_key}" / "range_all_results.csv"
-    bullish_path = ROOT / "BullishPatternAnalyzer" / "results" / f"range_{range_key}" / "range_all_detections.csv"
 
-    rows = _load_kjb(kjb_path) + _load_swing(swing_path) + _load_bullish(bullish_path)
+    rows = _load_kjb(kjb_path) + _load_swing(swing_path)
     rows = _dedupe_within_analyzer(rows)
 
     status_rank = {"STRONG_CONFIRMED": 0, "CONFIRMED": 1}
@@ -232,7 +203,7 @@ def main() -> int:
     print(f"[DONE] Independent confirmed candidates: {len(rows)} -> {out_path}")
     if rows:
         counts = pd.DataFrame(rows)["analyzer"].value_counts()
-        for analyzer in ("KJB", "SWING", "BULLISH_PATTERN"):
+        for analyzer in ("KJB", "SWING"):
             print(f"[INFO] {analyzer}: {int(counts.get(analyzer, 0))}")
     return 0
 

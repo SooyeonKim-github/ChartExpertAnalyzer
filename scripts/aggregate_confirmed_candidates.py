@@ -149,41 +149,10 @@ def _load_swing() -> list[dict[str, str]]:
     return rows
 
 
-def _load_bullish() -> list[dict[str, str]]:
-    result_dir = _latest_date_dir(ROOT / "BullishPatternAnalyzer" / "results")
-    if result_dir is None:
-        print("[WARN] Bullish result directory not found.")
-        return []
-    path = result_dir / "bullish_pattern_candidates.csv"
-    rows = []
-    for r in _read_csv(path):
-        status = _clean(r.get("decision_status")).upper()
-        if status != "CONFIRMED":
-            continue
-        rows.append(
-            _normalized_row(
-                scan_date=r.get("date", result_dir.name),
-                analyzer="BULLISH_PATTERN",
-                ticker=r.get("ticker", ""),
-                name=r.get("name", ""),
-                status=status,
-                score=r.get("selection_score", ""),
-                timing_score=r.get("timing_score", ""),
-                market=r.get("market", ""),
-                signal=r.get("candle_signal", ""),
-                pattern_type=r.get("pattern_type", ""),
-                entry_price=r.get("entry_price", ""),
-                source_file=path,
-            )
-        )
-    return rows
-
-
 def _dedupe(rows: list[dict[str, str]]) -> list[dict[str, str]]:
     """Analyzer별 동일 종목은 가장 강한 한 행만 남긴다.
 
     Analyzer 간 중복 종목은 합치지 않는다. 각 Analyzer는 독립 신호로 유지한다.
-    Bullish에서 한 종목에 여러 패턴이 잡히는 경우에만 selection/timing이 높은 행을 대표로 남긴다.
     """
     best: dict[tuple[str, str], dict[str, str]] = {}
     for row in rows:
@@ -205,7 +174,7 @@ def _sort_key(row: dict[str, str]):
 
 
 def main() -> int:
-    rows = _load_kjb() + _load_swing() + _load_bullish()
+    rows = _load_kjb() + _load_swing()
     rows = sorted(_dedupe(rows), key=_sort_key)
 
     OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
@@ -219,7 +188,7 @@ def main() -> int:
         counts[row["analyzer"]] = counts.get(row["analyzer"], 0) + 1
 
     print(f"[DONE] Confirmed candidates: {len(rows)} -> {OUTPUT_FILE}")
-    for analyzer in ("KJB", "SWING", "BULLISH_PATTERN"):
+    for analyzer in ("KJB", "SWING"):
         print(f"[INFO] {analyzer}: {counts.get(analyzer, 0)}")
     return 0
 

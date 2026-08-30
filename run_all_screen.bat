@@ -56,8 +56,6 @@ if exist "%~dp0KJBChartAnalyzer\.venv\Scripts\python.exe" (
     set "AGG_PYTHON=%~dp0KJBChartAnalyzer\.venv\Scripts\python.exe"
 ) else if exist "%~dp0SwingChartProbabilityAnalyzer\.venv\Scripts\python.exe" (
     set "AGG_PYTHON=%~dp0SwingChartProbabilityAnalyzer\.venv\Scripts\python.exe"
-) else if exist "%~dp0BullishPatternAnalyzer\.venv\Scripts\python.exe" (
-    set "AGG_PYTHON=%~dp0BullishPatternAnalyzer\.venv\Scripts\python.exe"
 ) else (
     where py >nul 2>nul
     if not errorlevel 1 (
@@ -98,12 +96,6 @@ echo [Siyoon Agent]
 echo   SwingChartProbabilityAnalyzer\results\YYYYMMDD\agent\candidates.json
 echo   SwingChartProbabilityAnalyzer\results\YYYYMMDD\agent\candidates.md
 echo   STRONG_CONFIRMED is ranked first in candidates/charts.
-echo.
-echo [Bullish Pattern]
-echo   BullishPatternAnalyzer\results\YYYYMMDD\bullish_pattern_all.csv
-echo   BullishPatternAnalyzer\results\YYYYMMDD\bullish_pattern_candidates.csv
-echo   BullishPatternAnalyzer\results\YYYYMMDD\bullish_pattern_watchlist.csv
-echo   BullishPatternAnalyzer\results\YYYYMMDD\summary.md
 echo ============================================
 pause
 exit /b 0
