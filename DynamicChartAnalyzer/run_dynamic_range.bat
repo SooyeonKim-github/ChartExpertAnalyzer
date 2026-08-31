@@ -8,7 +8,7 @@ set "TOP_N=%~2"
 set "SORT_BY=%~3"
 
 if "%DATE_RANGE%"=="" (
-    echo Example: 20260401~20260531
+    echo Example: 20230401~20260831
     set /p "DATE_RANGE=Date range YYYYMMDD~YYYYMMDD: "
 )
 
@@ -48,10 +48,12 @@ echo [INFO] Project folder: %CD%
 echo [INFO] Date range: %DATE_RANGE%
 echo [INFO] Top N: %TOP_N%
 echo [INFO] Sort by: %SORT_BY%
+echo [INFO] Mode: Dynamic LONG V2 quality research
 echo [INFO] Market universe: KJB TickerUniverseService + KOSPI_Info.xlsx
 echo [INFO] Stock OHLCV: per-ticker get_market_ohlcv_by_date + cache
-echo [INFO] Capital: 10,000,000 KRW
-echo [INFO] Entry split: Stage1 10%% / Stage2 20%% / Stage3 70%% = 1:2:7
+echo [INFO] Market proxy: KOSPI=069500 / KOSDAQ=229200
+echo [INFO] Entry split unchanged: Stage1 10%% / Stage2 20%% / Stage3 70%% = 1:2:7
+echo [INFO] V2 labels: CONFIRMED ^>= 70 / WATCH ^>= 55 / else REJECT
 echo [INFO] Forward performance: D+1 ~ D+60 trading bars
 echo.
 
@@ -60,18 +62,22 @@ echo.
     --top-n "%TOP_N%" ^
     --sort-by "%SORT_BY%" ^
     --forward-bars 60 ^
-    --capital 10000000
+    --capital 10000000 ^
+    --v2-confirmed-score 70 ^
+    --v2-watch-score 55
 
 if errorlevel 1 (
     echo.
-    echo [ERROR] Dynamic range backtest failed.
+    echo [ERROR] Dynamic LONG V2 range backtest failed.
     pause
     exit /b 1
 )
 
 echo.
-echo [DONE] Dynamic range backtest finished.
-echo [DONE] Check results\range_YYYYMMDD_YYYYMMDD\dynamic_range_backtest.xlsx
-echo [DONE] Detail CSV: results\range_YYYYMMDD_YYYYMMDD\dynamic_range_events.csv
+echo [DONE] Dynamic LONG V2 range backtest finished.
+echo [DONE] Workbook: results\range_YYYYMMDD_YYYYMMDD\dynamic_range_backtest.xlsx
+echo [DONE] Events + V2 features: results\range_YYYYMMDD_YYYYMMDD\dynamic_range_events.csv
+echo [DONE] V2 summary: results\range_YYYYMMDD_YYYYMMDD\dynamic_long_v2_summary.csv
+echo [DONE] V2 candidates: results\range_YYYYMMDD_YYYYMMDD\dynamic_long_v2_candidates.csv
 pause
 exit /b 0
