@@ -1,10 +1,12 @@
 from __future__ import annotations
 
-"""Dynamic V2 range runner using the same KRX universe flow as KJB/Swing analyzers.
+"""Dynamic V2.1 range runner using the same KRX universe flow as KJB/Swing analyzers.
 
-The original V1 remains in main_range.py.  Korean range execution now routes to
-main_range_v2.py, while this wrapper still replaces only market/universe access so
-execution does not depend on pykrx's fragile all-ticker snapshot endpoint.
+The original V1 remains in main_range.py and V2 remains in main_range_v2.py.
+Korean range execution now routes to main_range_v21.py, which separates lecture
+confirmation from secondary LONG quality. This wrapper still replaces only
+market/universe access so execution does not depend on pykrx's fragile all-ticker
+snapshot endpoint.
 """
 
 import sys
@@ -12,7 +14,7 @@ from pathlib import Path
 
 import pandas as pd
 
-import main_range_v2 as core
+import main_range_v21 as core
 
 
 ROOT = Path(__file__).resolve().parent
