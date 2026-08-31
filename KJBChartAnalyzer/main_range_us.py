@@ -43,6 +43,8 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--min-timing", type=float, default=None)
     p.add_argument("--max-risk", type=float, default=None)
     p.add_argument("--no-cache", action="store_true")
+    p.add_argument("--download-batch-size", type=int, default=40)
+    p.add_argument("--analyze-progress-every", type=int, default=500)
     p.add_argument("--config", default=None)
     p.add_argument("--output-root", default=str(HERE / "results_us"))
     return p.parse_args()
@@ -77,7 +79,6 @@ def main() -> int:
 
     # RangeBacktester uses this module-level helper. Patch only this US process.
     range_engine._benchmark_for_market = lambda market: "^GSPC"
-    runner = RangeBacktester(analyzer, provider, universe_service)
 
     print("=" * 78)
     print("KJB US Range Backtest")
@@ -89,7 +90,67 @@ def main() -> int:
     print("[WARNING] Current TOP N snapshot is reused historically; this is not PIT market-cap membership.")
     print()
 
+    # First-run speed improvement: Yahoo Finance is much faster in multi-ticker
+    # batches than 300 sequential single-ticker requests. Prime the exact cache
+    # range that RangeBacktester will request, then its normal code reads memory.
+    preload_universe = universe_service.get_universe(
+        top_n=args.top_n,
+        sort_by="market_cap",
+        include_etf=False,
+    )
+    fetch_start = (start - pd.Timedelta(days=args.history_days)).strftime("%Y-%m-%d")
+    forward_calendar_days = max(120, int(args.forward_bars * 2.0))
+    fetch_end = (end + pd.Timedelta(days=forward_calendar_days)).strftime("%Y-%m-%d")
+    preload_tickers = [x.ticker for x in preload_universe] + ["^GSPC"]
+
+    print(
+        f"[US DATA] Preloading {len(preload_universe)} stocks + ^GSPC "
+        f"({fetch_start} ~ {fetch_end}) in batches of {max(1, args.download_batch_size)}...",
+        flush=True,
+    )
+    stats = provider.preload_ohlcv_by_date(
+        preload_tickers,
+        fetch_start,
+        fetch_end,
+        batch_size=max(1, args.download_batch_size),
+    )
+    print(
+        f"[US DATA] preload complete | ready={stats['ready']}/{stats['total']} "
+        f"downloaded={stats['downloaded']} batch_failed={stats['failed']}",
+        flush=True,
+    )
+    if stats["failed"]:
+        print(
+            "[US DATA] Failed batch symbols will be retried one-by-one by the normal provider.",
+            flush=True,
+        )
+
+    # The range engine intentionally replays the analyzer for each trading day.
+    # Expose heartbeat output so a long TOP300 run never looks frozen.
+    original_analyze = analyzer.analyze
+    progress = {"calls": 0}
+    progress_every = max(1, int(args.analyze_progress_every))
+    approx_days = len(pd.bdate_range(start, end))
+    approx_calls = approx_days * len(preload_universe)
+
+    def analyze_with_progress(*call_args, **call_kwargs):
+        progress["calls"] += 1
+        n = progress["calls"]
+        if n == 1 or n % progress_every == 0:
+            ticker = str(call_args[0]) if call_args else "?"
+            print(
+                f"[KJB ANALYZE] calls={n:,} / approx {approx_calls:,} | ticker={ticker}",
+                flush=True,
+            )
+        return original_analyze(*call_args, **call_kwargs)
+
+    analyzer.analyze = analyze_with_progress
+    runner = RangeBacktester(analyzer, provider, universe_service)
+
+    print("[KJB ANALYZE] Starting historical signal replay...", flush=True)
     events, summary, universe, errors = runner.run(params, include_etf=False)
+    print(f"[KJB ANALYZE] replay complete | analyze calls={progress['calls']:,}", flush=True)
+
     events = _apply_confirmation_status(events, cfg)
     status_summary = _build_status_summary(events, args.forward_bars)
 
