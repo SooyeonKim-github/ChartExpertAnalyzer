@@ -39,12 +39,13 @@ if "%PYTHON_EXE%"=="" (
     exit /b 1
 )
 
-echo [INFO] MA V2 range backtest
+echo [INFO] MA V3 range backtest
 echo [INFO] Date range : %DATE_RANGE%
 echo [INFO] Forward    : D+60 trading bars
-echo [INFO] Entry      : D+1 open
-echo [INFO] Exit       : signal-low stop / MA20 close / time exit
-echo [INFO] Cooldown   : 10 trading bars
+echo [INFO] Entry      : stateful 3-stage scale-in, every fill at next open
+echo [INFO] Allocation : 34%% / 33%% / 33%%
+echo [INFO] Cooldown   : REMOVED
+echo [INFO] Exit       : raised signal-low stop / MA20 close / time exit
 if defined LIQUIDITY_MEMBERSHIP_CSV (
     echo [INFO] Universe   : point-in-time liquidity TOP %LIQUIDITY_TOP_N%
     echo [INFO] Membership : %LIQUIDITY_MEMBERSHIP_CSV%
@@ -54,16 +55,14 @@ if defined LIQUIDITY_MEMBERSHIP_CSV (
         --membership-csv "%LIQUIDITY_MEMBERSHIP_CSV%" ^
         --top-n 0 ^
         --sort-by "market_cap" ^
-        --forward-bars 60 ^
-        --cooldown-bars 10
+        --forward-bars 60
 ) else (
     echo [INFO] Universe   : static TOP %TOP_N% by %SORT_BY%
     "%PYTHON_EXE%" %PYTHON_PREFIX% main_range.py ^
         --date-range "%DATE_RANGE%" ^
         --top-n "%TOP_N%" ^
         --sort-by "%SORT_BY%" ^
-        --forward-bars 60 ^
-        --cooldown-bars 10
+        --forward-bars 60
 )
 
 if errorlevel 1 (
@@ -74,8 +73,10 @@ if errorlevel 1 (
 )
 
 echo.
-echo [DONE] MA V2 range backtest finished.
+echo [DONE] MA V3 range backtest finished.
 echo [DONE] results\range_YYYYMMDD_YYYYMMDD\range_all_results.csv
+echo [DONE] results\range_YYYYMMDD_YYYYMMDD\range_candidates.csv
+echo [DONE] results\range_YYYYMMDD_YYYYMMDD\position_entries.csv
 echo [DONE] results\range_YYYYMMDD_YYYYMMDD\trade_events.csv
 echo [DONE] results\range_YYYYMMDD_YYYYMMDD\ma_range_backtest.xlsx
 if /I not "%NO_PAUSE%"=="1" pause
