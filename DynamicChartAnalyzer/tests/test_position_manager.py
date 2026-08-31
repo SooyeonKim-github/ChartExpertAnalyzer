@@ -46,3 +46,15 @@ def test_full_entry_then_1_2_7_exit_realizes_profit():
     state.exit_part(3, "e3", 130)
     assert state.side is None
     assert state.realized_pnl_krw > 0
+
+
+def test_stage_ratios_are_fixed_to_1_2_7():
+    cfg = StrategyConfig(total_capital=10_000_000)
+    assert (cfg.stage1_ratio, cfg.stage2_ratio, cfg.stage3_ratio) == (0.10, 0.20, 0.70)
+
+    try:
+        StrategyConfig(stage1_ratio=0.11)
+    except TypeError:
+        pass
+    else:
+        raise AssertionError("Stage ratios must not be configurable; this analyzer is fixed at 1:2:7")
