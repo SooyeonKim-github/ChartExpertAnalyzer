@@ -1,4 +1,4 @@
-# MAChartAnalyzer V2
+# MAChartAnalyzer V3
 
 사용자가 제공한 이동평균 매매 강의를 기반으로 만든 **독립 BUY 판단 Analyzer**입니다.
 
@@ -6,51 +6,56 @@
 
 ## 전략 구조
 
-`Direction -> Setup -> Confirmation -> Sideways Filter -> Risk -> Trade Management`
+`Direction -> Setup -> Confirmation -> Sideways Filter -> Risk -> Stateful Position Management`
 
 - 장기 방향: 200MA 위치 + 기울기
 - 단기 타점: 단기 MA(기본 20) 눌림/재돌파
-- Squeeze: 단기/장기 MA 압축을 Setup으로 감시
+- Squeeze: 단기/장기 MA 압축을 WATCH Setup으로 감시
 - 핵심 매수: 상승 방향에서의 강한 박스 상단 돌파
-- 돌파 확인: 장대 양봉 / MA와 캔들 완전 분리 / 직전 고점 몸통 돌파
-- 횡보 회피: 가격/이평의 반복 교차
-- 실제 Retest: 돌파 당일이 아니라 과거 1~5봉 전 박스 돌파 레벨을 다시 지지하는지 확인
+- 실제 Retest: 과거 1~5봉 전 박스 돌파 레벨 재지지
+- Pullback: 일반 눌림은 WATCH, 강한 재상승 확인만 CONFIRMED
 - 추격 방지: 단기 MA 대비 과도한 이격 제한
-- 위험 신호: 장기 MA의 명확한 하향 훼손
+- 청산: 보호 Stop -> MA20 종가 이탈 -> 최대 보유기간
 
 강의 규칙과 코드 매핑은 `RULE_MAPPING.md` 참고.
 
-## V2에서 바뀐 점
+## V3 핵심 변경
 
-V1 기간 백테스트 결과를 바탕으로 다음을 수정했습니다.
+V2 최신 백테스트에서 10거래일 cooldown이 좋은 `BOX_RETEST_CONFIRMED` 신호를 많이 제거한 문제가 확인되어, **매매 의사결정에서 cooldown을 완전히 제거**했습니다.
 
-1. `BOX_BREAKOUT`을 핵심 CONFIRMED 트리거로 유지.
-2. 일반 `PULLBACK_RECLAIM`은 WATCH로 강등.
-3. Pullback은 **장대 양봉 + MA 위 완전 분리**가 함께 확인되어야 `PULLBACK_STRONG_CONFIRMATION`으로 CONFIRMED 가능.
-4. `SQUEEZE_BREAKOUT`은 단독 매수신호가 아니라 WATCH Setup으로 사용.
-5. 20봉 박스 돌파와 20봉 전고점 돌파의 중복 점수 제거.
-6. 같은 돌파봉이 `Box_Retest_Hold`로 동시에 잡히던 오류 제거.
-7. Retest는 **과거 1~5봉 전 실제 돌파 이후** 현재 가격이 그 레벨을 다시 확인하고 지지해야 인정.
-8. 상태를 `STRONG_CONFIRMED / CONFIRMED / WATCH / REJECTED`로 세분화.
-9. 기간 백테스트의 진입가격을 신호일 종가가 아니라 **D+1 시가**로 변경.
-10. 실제 포지션 시뮬레이션 추가: `신호봉 저가 손절 -> 단기 MA 종가 이탈 -> 최대 보유기간 청산`.
-11. 같은 종목 확정신호는 기본 10거래일 cooldown 적용.
-12. 루트 통합 백테스트에서는 **각 신호일 당시 KOSPI+KOSDAQ 최근 20거래일 평균 거래대금 TOP N** point-in-time Universe 사용.
+대신 같은 종목을 독립 신호 여러 개로 반복 매수하지 않고 **하나의 Position 상태**로 관리합니다.
+
+### 3단계 분할진입
+
+계획자금 100%를 다음처럼 나눕니다.
+
+1. **1차 34%**: 포지션이 없을 때 첫 `STRONG_CONFIRMED / CONFIRMED` 신호
+2. **2차 33%**: 1차 보유 중 `BOX_RETEST_CONFIRMED`
+3. **3차 33%**: 2차까지 보유한 뒤 새로운 `BOX_BREAKOUT / PRIOR_HIGH_BREAKOUT / PULLBACK_STRONG_CONFIRMATION`
+
+같은 단계의 반복 신호는 `IGNORED_REPEAT_OR_STAGE_NOT_READY`로 기록하고 추가매수하지 않습니다.
+
+모든 진입은 신호가 확정된 **다음 거래일 시가**에 체결합니다.
+
+추가진입 시 보호 Stop은 새 신호봉 저가를 반영하되 기존 Stop보다 낮추지 않습니다.
+
+```text
+new_stop = max(old_stop, new_signal_low)
+```
+
+즉 추가매수한다고 손절선을 다시 아래로 넓히지 않습니다.
 
 ## 상태 판정
 
 ### STRONG_CONFIRMED
 
-확정 매수 Trigger를 충족하고 기본적으로:
-
+- 확정 Trigger 존재
 - `Score >= 80`
 - `Timing_Score >= 70`
 
-인 강한 후보입니다.
-
 ### CONFIRMED
 
-장기 상승 방향이 유효하고 다음 중 하나의 확정 Trigger가 있으며 추격위험/횡보 차단 조건을 통과한 후보입니다.
+확정 Trigger:
 
 - `BOX_BREAKOUT`
 - `BOX_RETEST_CONFIRMED`
@@ -64,8 +69,6 @@ V1 기간 백테스트 결과를 바탕으로 다음을 수정했습니다.
 
 ### WATCH
 
-방향은 유효하지만 확정 매수까지 한 단계 부족한 Setup입니다.
-
 - `SQUEEZE_SETUP_WATCH`
 - `SQUEEZE_BREAKOUT_WATCH`
 - `PULLBACK_RECLAIM_WATCH`
@@ -73,11 +76,9 @@ V1 기간 백테스트 결과를 바탕으로 다음을 수정했습니다.
 
 ### REJECTED
 
-대표적으로:
-
 - 장기 매수 방향 미확인
 - 200MA 명확한 하향 훼손
-- 반복 교차 횡보인데 박스 이탈/Retest 확인 없음
+- 반복 교차 횡보
 - 추격 이격 과다
 - 진입조건 미완성
 
@@ -87,42 +88,29 @@ V1 기간 백테스트 결과를 바탕으로 다음을 수정했습니다.
 MAChartAnalyzer\run_screen.bat 100
 ```
 
-프로젝트 루트의 전체 스크리닝:
+전체 스크리닝:
 
 ```bat
 run_all_screen.bat
 ```
 
-결과:
-
-```text
-MAChartAnalyzer/results/YYYYMMDD/
-  scan_results.csv
-  candidates.csv
-  ma_candidates.xlsx
-```
+일일 스크리닝은 신호 자체를 출력합니다. 실제 1/2/3차 진입 여부는 보유 Position 상태와 함께 판단해야 합니다.
 
 ## 기간 백테스트
 
-MA만 단독 실행:
+MA 단독:
 
 ```bat
 MAChartAnalyzer\run_ma_range.bat 20260101~20260821 100 market_cap
 ```
 
-KJB/Swing/MA를 동일한 point-in-time Universe로 실행:
+KJB/Swing/MA 통합 point-in-time Universe:
 
 ```bat
 run_combined_range.bat 20260101~20260821 100
 ```
 
-루트 통합 실행에서는 `TOP_N=100`이면 각 신호일 당시:
-
-- KOSPI + KOSDAQ
-- 최근 20거래일 평균 거래대금
-- 상위 100종목
-
-만 평가합니다. 현재 시점의 시가총액 TOP100을 과거 전체 기간에 소급 적용하지 않습니다.
+루트 통합 실행에서는 각 신호일 당시 KOSPI+KOSDAQ 최근 20거래일 평균 거래대금 TOP N만 사용합니다.
 
 ## 기간 결과
 
@@ -130,47 +118,80 @@ run_combined_range.bat 20260101~20260821 100
 MAChartAnalyzer/results/range_YYYYMMDD_YYYYMMDD/
   range_all_results.csv
   range_candidates.csv
+  position_entries.csv
   trade_events.csv
   ma_range_backtest.xlsx
 ```
 
-`ma_range_backtest.xlsx`에는 다음 시트가 생성됩니다.
+### `range_all_results.csv`
 
-- `AllResults`: 모든 일별 판정
-- `Candidates`: cooldown 반영 확정후보 + WATCH
-- `TradeEvents`: 실제 매매 시뮬레이션 대상
-- `Summary`: 상태별 통계
-- `TradeSummary`: 신호별 실제 매매 성과
-- `Config`: 사용한 임계값/실행조건
+모든 일별 신호와 다음 Position 필드가 추가됩니다.
 
-## 실제 매매 백테스트 기준
+- `Position_ID`
+- `Position_Action`
+- `Entry_Stage`
+- `Entry_Allocation_Pct`
+- `Entry_Fill_Date`
+- `Entry_Fill_Price`
 
-확정 신호일을 D0라고 할 때:
+### `position_entries.csv`
 
-1. **D+1 시가 진입**
-2. 신호봉 저가 아래로 Gap 발생 시 D+1 이후 해당 시가에서 손절
-3. 장중 신호봉 저가 이탈 시 신호봉 저가 가격으로 손절 처리
-4. 그 전에 손절되지 않았다면 종가가 단기 MA 아래로 내려오는 첫 날 종가 청산
-5. 끝까지 청산되지 않으면 `forward_bars` 시점 종가로 TIME EXIT
+실제로 체결된 1/2/3차 진입을 한 행씩 저장합니다.
+
+### `trade_events.csv`
+
+**한 Position당 한 행**입니다. 여러 신호를 별도 거래로 중복 계산하지 않습니다.
 
 주요 필드:
 
-- `Entry_Price_D1_Open`
-- `Cooldown_Eligible`
-- `Trade_Return_Pct`
+- `Filled_Stages`
+- `Invested_Weight_Pct`
+- `Avg_Entry_Price`
+- `Stage1/2/3_Entry_Date`
+- `Stage1/2/3_Entry_Price`
+- `Trade_Return_Pct`: 실제 투입된 자금만 기준으로 계산한 수익률
+- `Portfolio_Return_Pct`: 미투입 현금을 0% 수익으로 포함한 계획자금 100% 기준 수익률
 - `Trade_Exit_Reason`
 - `Trade_Holding_Bars`
 - `Trade_MFE_Pct`
 - `Trade_MAE_Pct`
-- `Universe_Rank`
-- `Avg_Trading_Value_20D`
 
-기존 신호일 종가 기준 D+N 성과도 비교용으로 `Signal_D+N_Close_Return_Pct`에 남겨 둡니다.
+## 실제 포지션 청산
+
+우선순위:
+
+1. 시가가 현재 Position Stop 아래로 Gap 하락 -> 시가 청산
+2. 장중 현재 Position Stop 터치/이탈 -> Stop 가격 청산
+3. 종가가 MA20 아래로 내려옴 -> 종가 청산
+4. 최대 `forward_bars` 도달 -> TIME EXIT
+
+추가진입 시 Stop은 위로만 조정되며 절대 완화하지 않습니다.
+
+## V2와 다른 점
+
+V2:
+
+```text
+확정 신호 -> 10봉 cooldown -> 각 신호를 독립 Trade로 평가
+```
+
+V3:
+
+```text
+확정 신호 -> cooldown 없음
+         -> 포지션 없으면 1차
+         -> Retest면 2차
+         -> 재돌파/강한 눌림이면 3차
+         -> 동일 단계 반복은 무시
+         -> 한 Position으로 통합 평가
+```
+
+즉 **시간으로 신호를 막는 대신 Position 상태와 신호 의미로 중복을 제어**합니다.
 
 ## 주의
 
-강의 자동자막은 단기 이동평균 값이 `20`, `22`처럼 혼재합니다. 구현 기본값은 20이며 `config.py`에서 변경할 수 있습니다.
+강의 자동자막의 단기 이동평균 값은 `20`, `22`처럼 혼재합니다. 기본값은 20이며 설정 가능합니다.
 
-또한 Squeeze 간격, 장대봉 배수, 횡보 교차 횟수 등의 숫자는 강의에서 직접 제시된 값이 아니라 정성적 설명을 백테스트 가능하게 만든 구현 파라미터입니다.
+Squeeze 간격, 장대봉 배수, 횡보 교차 횟수 등 강의에서 숫자로 제시되지 않은 값은 백테스트를 위한 구현 파라미터입니다.
 
-강의 후반의 이른바 `세력 지표`는 정확한 산식이 공개되지 않았으므로 임의 구현하지 않았습니다.
+강의 후반의 이른바 `세력 지표`는 정확한 산식이 공개되지 않아 임의 구현하지 않았습니다.
