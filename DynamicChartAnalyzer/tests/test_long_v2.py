@@ -32,6 +32,7 @@ def _synthetic_analyzed():
     out["cloud_top"] = close.rolling(52).mean()
     out["cloud_bottom"] = out["cloud_top"] * 0.98
     out["cloud_width"] = out["cloud_top"] - out["cloud_bottom"]
+    out["chikou_reference_price"] = close.shift(26)
     out["cloud_retest_hold"] = False
     out["long_stop_reference"] = out["low"].rolling(5).min().shift(1)
     return out
@@ -67,7 +68,7 @@ def test_rs_percentiles_use_full_cross_section():
     assert out.loc[out["ticker"].eq("A"), "rs_percentile_60"].iloc[0] == 1.0
 
 
-def test_long_quality_score_and_rank():
+def test_long_quality_score_is_lecture_first_and_ranked():
     analyzed = _synthetic_analyzed()
     market = prepare_market_features(
         pd.DataFrame(
@@ -80,19 +81,34 @@ def test_long_quality_score_and_rank():
 
     events = pd.DataFrame(
         {
-            "signal_date": [enriched.index[-1], enriched.index[-1]],
-            "ticker": ["A", "B"],
-            "source_rank": [2, 1],
-            "side": ["LONG", "LONG"],
-            "stage": [1, 2],
+            "signal_date": [enriched.index[-1]] * 3,
+            "ticker": ["A", "B", "C"],
+            "source_rank": [3, 2, 1],
+            "side": ["LONG", "LONG", "LONG"],
+            "stage": [1, 2, 3],
         }
     )
     for col in BASE_EVENT_FEATURE_COLUMNS:
-        events[col] = [row[col], row[col]]
-    events["rs_percentile_20"] = [0.9, 0.7]
-    events["rs_percentile_60"] = [0.9, 0.7]
+        events[col] = [row[col], row[col], row[col]]
+    events["rs_percentile_20"] = [0.9, 0.9, 0.9]
+    events["rs_percentile_60"] = [0.9, 0.9, 0.9]
 
     out = score_long_events(events)
     assert out["long_quality_score"].between(0, 100).all()
+    assert out["lecture_score"].between(0, 60).all()
+    assert out["lecture_rsi_score"].between(0, 15).all()
+    assert out["lecture_macd_score"].between(0, 20).all()
+    assert out["lecture_ichimoku_score"].between(0, 25).all()
+    assert out["quality_enhancement_score"].between(0, 40).all()
+    assert np.allclose(
+        out["long_quality_score"],
+        out["lecture_score"] + out["quality_enhancement_score"],
+    )
     assert set(out["long_quality_label"]).issubset({"CONFIRMED", "WATCH", "REJECT"})
-    assert sorted(out["daily_long_rank"].astype(int).tolist()) == [1, 2]
+    assert sorted(out["daily_long_rank"].astype(int).tolist()) == [1, 2, 3]
+
+    # With otherwise identical features, chronological lecture confirmation should
+    # never make a later stage score lower than Stage1.
+    scores = out.set_index("stage")["lecture_score"]
+    assert scores.loc[2] >= scores.loc[1]
+    assert scores.loc[3] >= scores.loc[2]
