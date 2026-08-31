@@ -49,62 +49,156 @@ def _import_pykrx():
     return stock
 
 
-def _latest_market_date(stock, requested: pd.Timestamp, max_lookback_days: int = 14) -> str:
+def _latest_market_date(stock, requested: pd.Timestamp, max_lookback_days: int = 30) -> str:
+    """Resolve the latest real KRX trading date at or before ``requested``.
+
+    Do not use the market-cap snapshot endpoint as the trading-calendar source.
+    That endpoint can fail independently even on valid trading days. A long-lived
+    Samsung Electronics daily series is a much more reliable calendar proxy and
+    is the same approach used by the repository's shared liquidity-universe code.
+    """
+    requested = pd.Timestamp(requested).normalize()
+    start = requested - pd.Timedelta(days=max_lookback_days)
+    errors: list[str] = []
+
+    try:
+        cal = stock.get_market_ohlcv_by_date(
+            start.strftime("%Y%m%d"),
+            requested.strftime("%Y%m%d"),
+            "005930",
+            adjusted=True,
+        )
+        if cal is not None and not cal.empty:
+            dates = pd.to_datetime(cal.index, errors="coerce")
+            dates = dates[dates.notna()]
+            dates = dates[dates.normalize() <= requested]
+            if len(dates):
+                return pd.Timestamp(dates.max()).strftime("%Y%m%d")
+    except Exception as exc:
+        errors.append(f"005930 calendar: {type(exc).__name__}: {exc}")
+
+    # Secondary fallback: query the more stable all-ticker OHLCV snapshot endpoint
+    # while walking backward. KOSPI is enough to determine whether the exchange
+    # traded that day.
     for i in range(max_lookback_days + 1):
         d = requested - pd.Timedelta(days=i)
         ds = d.strftime("%Y%m%d")
         try:
-            cap = stock.get_market_cap_by_ticker(ds, market="ALL")
-            if cap is not None and not cap.empty:
+            daily = stock.get_market_ohlcv_by_ticker(ds, market="KOSPI")
+            if daily is not None and not daily.empty:
                 return ds
-        except Exception:
-            pass
-    raise RuntimeError(f"Could not resolve a KRX trading date near {requested.date()}")
+        except Exception as exc:
+            if len(errors) < 4:
+                errors.append(f"{ds} KOSPI snapshot: {type(exc).__name__}: {exc}")
+
+    detail = " | ".join(errors) if errors else "no data returned"
+    raise RuntimeError(
+        f"Could not resolve a KRX trading date at/before {requested.date()} "
+        f"within {max_lookback_days} days. pykrx/KRX detail: {detail}"
+    )
 
 
 def _get_universe(snapshot_date: str, top_n: int, sort_by: str) -> pd.DataFrame:
+    """Build the KOSPI+KOSDAQ TOP-N universe with endpoint fallbacks.
+
+    The all-ticker OHLCV endpoint is preferred because the repository already uses
+    it successfully for shared liquidity snapshots. Recent pykrx versions also
+    expose market cap in that snapshot. If the installed version does not, the
+    market-cap endpoint is used only to fill that column.
+    """
     stock = _import_pykrx()
-    cap = stock.get_market_cap_by_ticker(snapshot_date, market="ALL").copy()
-    if cap.empty:
-        raise RuntimeError(f"No market-cap data returned for {snapshot_date}")
+    frames: list[pd.DataFrame] = []
+    fetch_errors: list[str] = []
 
-    cap.index = cap.index.astype(str).str.zfill(6)
-    cap.index.name = "ticker"
-    cap = cap.rename(columns={"시가총액": "market_cap", "상장주식수": "shares"})
+    for market in ("KOSPI", "KOSDAQ"):
+        try:
+            daily = stock.get_market_ohlcv_by_ticker(snapshot_date, market=market).copy()
+            if daily is None or daily.empty:
+                fetch_errors.append(f"{market}: empty OHLCV snapshot")
+                continue
+            daily.index = daily.index.astype(str).str.zfill(6)
+            daily.index.name = "ticker"
+            daily["market"] = market
+            daily = daily.rename(columns={
+                "시가총액": "market_cap",
+                "상장주식수": "shares",
+                "거래량": "volume",
+                "거래대금": "trading_value",
+                "종가": "close",
+            })
+            frames.append(daily)
+        except Exception as exc:
+            fetch_errors.append(f"{market} OHLCV: {type(exc).__name__}: {exc}")
 
-    try:
-        daily = stock.get_market_ohlcv_by_ticker(snapshot_date, market="ALL").copy()
-        daily.index = daily.index.astype(str).str.zfill(6)
-        daily = daily.rename(columns={"거래량": "volume", "거래대금": "trading_value", "종가": "close"})
-        keep = [c for c in ["volume", "trading_value", "close"] if c in daily.columns]
-        if keep:
-            cap = cap.join(daily[keep], how="left")
-    except Exception:
-        pass
+    if not frames:
+        detail = " | ".join(fetch_errors) if fetch_errors else "no data returned"
+        raise RuntimeError(
+            f"No KRX all-ticker OHLCV snapshot returned for {snapshot_date}. "
+            f"pykrx/KRX detail: {detail}"
+        )
+
+    universe = pd.concat(frames, axis=0, sort=False)
+    universe = universe[~universe.index.duplicated(keep="first")].copy()
+
+    # Older pykrx builds may not include market cap in get_market_ohlcv_by_ticker.
+    # Fill it from the dedicated endpoint only when it is actually needed/missing.
+    if "market_cap" not in universe.columns or pd.to_numeric(
+        universe.get("market_cap"), errors="coerce"
+    ).fillna(0).le(0).all():
+        cap_frames: list[pd.DataFrame] = []
+        for market in ("KOSPI", "KOSDAQ"):
+            try:
+                cap = stock.get_market_cap_by_ticker(snapshot_date, market=market).copy()
+                if cap is None or cap.empty:
+                    continue
+                cap.index = cap.index.astype(str).str.zfill(6)
+                cap.index.name = "ticker"
+                cap = cap.rename(columns={"시가총액": "market_cap", "상장주식수": "shares"})
+                keep = [c for c in ["market_cap", "shares"] if c in cap.columns]
+                if keep:
+                    cap_frames.append(cap[keep])
+            except Exception as exc:
+                fetch_errors.append(f"{market} market-cap: {type(exc).__name__}: {exc}")
+        if cap_frames:
+            cap_all = pd.concat(cap_frames, axis=0)
+            cap_all = cap_all[~cap_all.index.duplicated(keep="first")]
+            for col in cap_all.columns:
+                if col not in universe.columns:
+                    universe[col] = cap_all[col]
+                else:
+                    current = pd.to_numeric(universe[col], errors="coerce")
+                    universe[col] = current.where(current.notna() & current.ne(0), cap_all[col])
 
     sort_column = {
         "market_cap": "market_cap",
         "trading_value": "trading_value",
         "volume": "volume",
     }[sort_by]
-    if sort_column not in cap.columns:
-        raise RuntimeError(f"Sort column '{sort_column}' is unavailable from pykrx on {snapshot_date}")
+    if sort_column not in universe.columns:
+        detail = " | ".join(fetch_errors) if fetch_errors else "column not returned by installed pykrx"
+        raise RuntimeError(
+            f"Sort column '{sort_column}' is unavailable on {snapshot_date}. "
+            f"pykrx/KRX detail: {detail}"
+        )
 
-    cap[sort_column] = pd.to_numeric(cap[sort_column], errors="coerce")
-    cap = cap.dropna(subset=[sort_column])
-    cap = cap[cap[sort_column] > 0].sort_values(sort_column, ascending=False)
+    universe[sort_column] = pd.to_numeric(universe[sort_column], errors="coerce")
+    universe = universe.dropna(subset=[sort_column])
+    universe = universe[universe[sort_column] > 0].sort_values(sort_column, ascending=False)
     if top_n > 0:
-        cap = cap.head(top_n)
+        universe = universe.head(top_n)
+
+    if universe.empty:
+        raise RuntimeError(f"TOP-N universe is empty for {snapshot_date} sort_by={sort_by}")
 
     names = []
-    for ticker in cap.index:
+    for ticker in universe.index:
         try:
             names.append(stock.get_market_ticker_name(ticker))
         except Exception:
             names.append("")
-    cap.insert(0, "name", names)
-    cap.insert(0, "source_rank", range(1, len(cap) + 1))
-    return cap.reset_index()
+    universe.insert(0, "name", names)
+    universe.insert(0, "source_rank", range(1, len(universe) + 1))
+    return universe.reset_index()
 
 
 def _normalize_ohlcv(df: pd.DataFrame) -> pd.DataFrame:
@@ -128,6 +222,8 @@ def _add_forward_metrics(
     entry = float(out["entry_price"])
     direction = int(out["direction"])
 
+    # Use the first row whose date equals the signal date. DynamicChartAnalyzer enters
+    # at the signal bar close, so D+1 starts from the following trading bar.
     positions = np.flatnonzero(price_df.index.normalize() == signal_date.normalize())
     if len(positions) == 0 or not math.isfinite(entry) or entry <= 0:
         for h in range(1, forward_bars + 1):
@@ -219,6 +315,7 @@ def run_range(args) -> int:
     universe = _get_universe(snapshot, params.top_n, params.sort_by)
 
     history_start = (start - pd.Timedelta(days=params.history_days)).strftime("%Y%m%d")
+    # Calendar padding is intentionally generous because D+60 means trading bars.
     forward_end = (end + pd.Timedelta(days=max(120, params.forward_bars * 3))).strftime("%Y%m%d")
 
     cfg = StrategyConfig(
