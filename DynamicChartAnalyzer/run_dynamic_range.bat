@@ -48,12 +48,15 @@ echo [INFO] Project folder: %CD%
 echo [INFO] Date range: %DATE_RANGE%
 echo [INFO] Top N: %TOP_N%
 echo [INFO] Sort by: %SORT_BY%
-echo [INFO] Mode: Dynamic LONG V2 quality research
+echo [INFO] Mode: Dynamic LONG V2.1 lecture/quality split
+echo [INFO] Lecture score: RSI + MACD + Ichimoku, normalized 0~100
+echo [INFO] Quality score: Trend + RS + Volume + Price Structure + Market + Risk, normalized 0~100
 echo [INFO] Market universe: KJB TickerUniverseService + KOSPI_Info.xlsx
 echo [INFO] Stock OHLCV: per-ticker get_market_ohlcv_by_date + cache
 echo [INFO] Market proxy: KOSPI=069500 / KOSDAQ=229200
 echo [INFO] Entry split unchanged: Stage1 10%% / Stage2 20%% / Stage3 70%% = 1:2:7
-echo [INFO] V2 labels: CONFIRMED ^>= 70 / WATCH ^>= 55 / else REJECT
+echo [INFO] Quality labels: CONFIRMED ^>= 70 / WATCH ^>= 55 / else REJECT
+echo [INFO] Daily LONG rank: quality_score first, lecture_score tie-breaker
 echo [INFO] Forward performance: D+1 ~ D+60 trading bars
 echo.
 
@@ -68,16 +71,16 @@ echo.
 
 if errorlevel 1 (
     echo.
-    echo [ERROR] Dynamic LONG V2 range backtest failed.
+    echo [ERROR] Dynamic LONG V2.1 range backtest failed.
     pause
     exit /b 1
 )
 
 echo.
-echo [DONE] Dynamic LONG V2 range backtest finished.
+echo [DONE] Dynamic LONG V2.1 range backtest finished.
 echo [DONE] Workbook: results\range_YYYYMMDD_YYYYMMDD\dynamic_range_backtest.xlsx
-echo [DONE] Events + V2 features: results\range_YYYYMMDD_YYYYMMDD\dynamic_range_events.csv
-echo [DONE] V2 summary: results\range_YYYYMMDD_YYYYMMDD\dynamic_long_v2_summary.csv
-echo [DONE] V2 candidates: results\range_YYYYMMDD_YYYYMMDD\dynamic_long_v2_candidates.csv
+echo [DONE] Events + V2.1 features: results\range_YYYYMMDD_YYYYMMDD\dynamic_range_events.csv
+echo [DONE] V2.1 summary: results\range_YYYYMMDD_YYYYMMDD\dynamic_long_v2_summary.csv
+echo [DONE] V2.1 candidates: results\range_YYYYMMDD_YYYYMMDD\dynamic_long_v2_candidates.csv
 pause
 exit /b 0
