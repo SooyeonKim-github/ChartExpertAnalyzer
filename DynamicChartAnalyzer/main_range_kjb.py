@@ -1,10 +1,10 @@
 from __future__ import annotations
 
-"""Dynamic range runner using the same KRX universe flow as KJB/Swing analyzers.
+"""Dynamic V2 range runner using the same KRX universe flow as KJB/Swing analyzers.
 
-The Dynamic strategy logic remains in main_range.py.  This runner only replaces
-market/universe access so range execution does not depend on pykrx's fragile
-all-ticker OHLCV snapshot endpoint.
+The original V1 remains in main_range.py.  Korean range execution now routes to
+main_range_v2.py, while this wrapper still replaces only market/universe access so
+execution does not depend on pykrx's fragile all-ticker snapshot endpoint.
 """
 
 import sys
@@ -12,7 +12,7 @@ from pathlib import Path
 
 import pandas as pd
 
-import main_range as core
+import main_range_v2 as core
 
 
 ROOT = Path(__file__).resolve().parent
@@ -120,7 +120,7 @@ def _get_universe_from_kjb(
     return universe
 
 
-# Keep Dynamic strategy/backtest code unchanged; replace only market access points.
+# Keep Dynamic strategy state machine unchanged; replace only market access points.
 core._latest_market_date = _latest_market_date_from_stock_series
 core._get_universe = _get_universe_from_kjb
 
