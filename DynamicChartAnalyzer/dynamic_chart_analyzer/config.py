@@ -1,4 +1,4 @@
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 
 @dataclass(frozen=True)
@@ -12,9 +12,12 @@ class StrategyConfig:
 
     # Capital / staged entry (lecture: 1 : 2 : 7)
     total_capital: float = 10_000_000.0
-    stage1_ratio: float = 0.10
-    stage2_ratio: float = 0.20
-    stage3_ratio: float = 0.70
+    # Project decision: the staged allocation is fixed at 1:2:7.
+    # These fields are intentionally not constructor arguments so supporting
+    # lecture variants such as 1:2:6 cannot silently change this analyzer.
+    stage1_ratio: float = field(default=0.10, init=False)
+    stage2_ratio: float = field(default=0.20, init=False)
+    stage3_ratio: float = field(default=0.70, init=False)
 
     # RSI (lecture defaults)
     rsi_period: int = 14
@@ -69,9 +72,9 @@ class StrategyConfig:
     max_account_risk_ratio: float = 0.02
 
     def validate(self) -> None:
-        ratios = self.stage1_ratio + self.stage2_ratio + self.stage3_ratio
-        if abs(ratios - 1.0) > 1e-9:
-            raise ValueError(f"Stage ratios must sum to 1.0, got {ratios}")
+        ratios = (self.stage1_ratio, self.stage2_ratio, self.stage3_ratio)
+        if ratios != (0.10, 0.20, 0.70):
+            raise ValueError(f"DynamicChartAnalyzer allocation is fixed at 1:2:7, got {ratios}")
         if self.total_capital <= 0:
             raise ValueError("total_capital must be positive")
         if not (0 < self.max_account_risk_ratio < 1):
