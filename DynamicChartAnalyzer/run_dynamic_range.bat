@@ -48,12 +48,14 @@ echo [INFO] Project folder: %CD%
 echo [INFO] Date range: %DATE_RANGE%
 echo [INFO] Top N: %TOP_N%
 echo [INFO] Sort by: %SORT_BY%
+echo [INFO] Market universe: KJB TickerUniverseService + KOSPI_Info.xlsx
+echo [INFO] Stock OHLCV: per-ticker get_market_ohlcv_by_date + cache
 echo [INFO] Capital: 10,000,000 KRW
 echo [INFO] Entry split: Stage1 10%% / Stage2 20%% / Stage3 70%% = 1:2:7
 echo [INFO] Forward performance: D+1 ~ D+60 trading bars
 echo.
 
-"%PYTHON_EXE%" %PYTHON_PREFIX% main_range.py ^
+"%PYTHON_EXE%" %PYTHON_PREFIX% main_range_kjb.py ^
     --date-range "%DATE_RANGE%" ^
     --top-n "%TOP_N%" ^
     --sort-by "%SORT_BY%" ^
