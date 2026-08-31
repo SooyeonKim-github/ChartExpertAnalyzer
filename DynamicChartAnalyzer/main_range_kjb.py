@@ -1,12 +1,11 @@
 from __future__ import annotations
 
-"""Dynamic V2.1 range runner using the same KRX universe flow as KJB/Swing analyzers.
+"""Dynamic V2.2 range runner using the same KRX universe flow as KJB/Swing analyzers.
 
-The original V1 remains in main_range.py and V2 remains in main_range_v2.py.
-Korean range execution now routes to main_range_v21.py, which separates lecture
-confirmation from secondary LONG quality. This wrapper still replaces only
-market/universe access so execution does not depend on pykrx's fragile all-ticker
-snapshot endpoint.
+The original V1/V2/V2.1 remain available for comparison. Korean range execution
+now routes to main_range_v22.py, which preserves the lecture timing axis and changes
+only the secondary LONG quality overlay. This wrapper replaces only market/universe
+access so execution does not depend on pykrx's fragile all-ticker snapshot endpoint.
 """
 
 import sys
@@ -14,7 +13,7 @@ from pathlib import Path
 
 import pandas as pd
 
-import main_range_v21 as core
+import main_range_v22 as core
 
 
 ROOT = Path(__file__).resolve().parent
@@ -42,11 +41,7 @@ def _latest_market_date_from_stock_series(
     requested: pd.Timestamp,
     max_lookback_days: int = 30,
 ) -> str:
-    """Resolve the latest KRX date only from Samsung Electronics daily OHLCV.
-
-    KJB/Swing use per-symbol date-range data instead of the all-ticker snapshot.
-    Keep the same rule here so get_market_ohlcv_by_ticker() is never needed.
-    """
+    """Resolve the latest KRX date only from Samsung Electronics daily OHLCV."""
     requested = min(
         pd.Timestamp(requested).normalize(),
         pd.Timestamp.today().normalize(),
