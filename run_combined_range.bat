@@ -75,18 +75,22 @@ echo [4/7] Applying Swing point-in-time membership...
 if errorlevel 1 goto RUN_FAILED
 
 echo.
-echo [5/7] Running MA V2 with point-in-time membership...
+echo [5/7] Running MA V3 stateful scale-in backtest...
 call "%ROOT%MAChartAnalyzer\run_ma_range.bat" "%DATE_RANGE%" "%TOP_N%" "%SORT_BY%"
 if errorlevel 1 goto RUN_FAILED
 cd /d "%ROOT%"
 
 echo.
-echo [6/7] Validating MA V2 outputs...
+echo [6/7] Validating MA V3 outputs...
 if not exist "%ROOT%MAChartAnalyzer\results\range_%DATE_RANGE:~0,8%_%DATE_RANGE:~-8%\trade_events.csv" (
     echo [ERROR] MA trade_events.csv was not created.
     goto RUN_FAILED
 )
-echo [OK] MA V2 trade events created.
+if not exist "%ROOT%MAChartAnalyzer\results\range_%DATE_RANGE:~0,8%_%DATE_RANGE:~-8%\position_entries.csv" (
+    echo [ERROR] MA position_entries.csv was not created.
+    goto RUN_FAILED
+)
+echo [OK] MA V3 position/trade events created.
 
 echo.
 echo [7/7] Collecting independent confirmed signals...
@@ -104,9 +108,10 @@ echo.
 echo [Confirmed summary]
 echo   results\range_YYYYMMDD_YYYYMMDD\confirmed_candidates.csv
 echo.
-echo [MA V2]
+echo [MA V3]
 echo   MAChartAnalyzer\results\range_YYYYMMDD_YYYYMMDD\range_all_results.csv
 echo   MAChartAnalyzer\results\range_YYYYMMDD_YYYYMMDD\range_candidates.csv
+echo   MAChartAnalyzer\results\range_YYYYMMDD_YYYYMMDD\position_entries.csv
 echo   MAChartAnalyzer\results\range_YYYYMMDD_YYYYMMDD\trade_events.csv
 echo   MAChartAnalyzer\results\range_YYYYMMDD_YYYYMMDD\ma_range_backtest.xlsx
 echo.
