@@ -27,10 +27,11 @@ if "%PYTHON_EXE%"=="" (
 )
 
 echo ============================================
-echo   MA Chart Analyzer V2 Screening
+echo   MA Chart Analyzer V3 Screening
 echo ============================================
 echo   STATUS: STRONG_CONFIRMED ^> CONFIRMED ^> WATCH ^> REJECTED
 echo   CORE  : 200MA direction + box breakout / true retest / strong pullback
+echo   TRADE : cooldown removed; range backtest uses stateful 3-stage scale-in
 echo   WATCH : squeeze and ordinary pullback remain setup-only
 echo.
 
