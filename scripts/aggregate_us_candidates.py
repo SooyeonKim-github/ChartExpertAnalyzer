@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import argparse
 import csv
-from datetime import datetime
 from pathlib import Path
 
 
@@ -80,7 +79,7 @@ def _row(
         "ticker": _ticker(raw.get(ticker_key, "")),
         "name": _clean(raw.get(name_key, "")),
         "status": _clean(raw.get(status_key, "")).upper(),
-        "score": _clean(raw.get(score_key, "")),
+        "score": _clean(raw.get(score_key, "")) if score_key else "",
         "timing_score": _clean(raw.get(timing_key, "")) if timing_key else "",
         "market": "US",
         "signal": _clean(raw.get(signal_key, "")) if signal_key else "",
@@ -134,6 +133,21 @@ def _screen_rows() -> list[dict[str, str]]:
                     signal_key="Primary_Signal", entry_key="Close",
                 )
             )
+
+    dynamic_dir = _latest_date_dir(ROOT / "DynamicChartAnalyzer" / "results_us")
+    if dynamic_dir:
+        dynamic = dynamic_dir / "scan_results.csv"
+        for raw in _read(dynamic):
+            if _clean(raw.get("Status")).upper() != "CONFIRMED":
+                continue
+            rows.append(
+                _row(
+                    "DYNAMIC", dynamic, raw,
+                    date_key="Actual_Date", ticker_key="Ticker", name_key="Name",
+                    status_key="Status", score_key="", signal_key="Primary_Signal",
+                    entry_key="Close",
+                )
+            )
     return rows
 
 
@@ -155,6 +169,11 @@ def _range_rows(date_range: str) -> list[dict[str, str]]:
             "MA",
             ROOT / "MAChartAnalyzer" / "results_us" / key / "range_candidates.csv",
             "Actual_Date", "Ticker", "Name", "Status", "Score", "Timing_Score", "Primary_Signal", "Close",
+        ),
+        (
+            "DYNAMIC",
+            ROOT / "DynamicChartAnalyzer" / "results_us" / key / "range_candidates.csv",
+            "Actual_Date", "Ticker", "Name", "Status", "", "", "Primary_Signal", "Close",
         ),
     ]
     rows: list[dict[str, str]] = []
@@ -224,7 +243,7 @@ def main() -> int:
     for row in rows:
         counts[row["analyzer"]] = counts.get(row["analyzer"], 0) + 1
     print(f"[DONE] US confirmed candidates: {len(rows)} -> {out}")
-    for analyzer in ("KJB", "SWING", "MA"):
+    for analyzer in ("KJB", "SWING", "MA", "DYNAMIC"):
         print(f"[INFO] {analyzer}: {counts.get(analyzer, 0)}")
     return 0
 
