@@ -11,11 +11,11 @@ DEFAULT_INFO_EXCEL = PROJECT_ROOT.parent / "SwingChartProbabilityAnalyzer" / "KO
 
 @dataclass(frozen=True)
 class MAConfig:
-    """Moving-average lecture strategy configuration (V2).
+    """Moving-average lecture strategy configuration (V3).
 
-    The lecture supplies the strategy structure. Thresholds that the lecture did
-    not quantify remain explicit engineering parameters so they can be tuned by
-    backtest without changing the strategy meaning.
+    V3 keeps the V2 signal rules but removes time-based cooldown from trade
+    decisions. Repeated confirmed signals are handled by one stateful position
+    with at most three staged entries.
     """
 
     short_ma_period: int = 20
@@ -27,7 +27,7 @@ class MAConfig:
     slope_lookback_bars: int = 10
     flat_long_slope_abs_pct: float = 0.15
 
-    # Squeeze setup (V2: setup/watch only, never enough by itself for CONFIRMED)
+    # Squeeze setup (watch only)
     squeeze_lookback_bars: int = 15
     squeeze_recent_bars: int = 5
     squeeze_gap_max_pct: float = 4.0
@@ -54,17 +54,17 @@ class MAConfig:
     # Risk
     max_ma20_distance_pct: float = 10.0
 
-    # Classification. V1 backtest showed the best separation around stronger
-    # timing and score cohorts, but V2 removes duplicated box/prior-high/retest
-    # points before applying these thresholds.
+    # Classification
     strong_confirmed_score: int = 80
     strong_timing_score: int = 70
     confirmed_score: int = 70
     confirmed_timing_score: int = 50
     watch_score: int = 50
 
-    # Range backtest
-    cooldown_bars: int = 10
+    # Stateful 3-stage entry plan. Percentages sum to 100% of planned capital.
+    stage1_allocation_pct: float = 34.0
+    stage2_allocation_pct: float = 33.0
+    stage3_allocation_pct: float = 33.0
 
     def to_dict(self) -> dict:
         return asdict(self)
