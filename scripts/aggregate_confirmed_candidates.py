@@ -141,27 +141,6 @@ def _load_dynamic() -> list[dict[str, str]]:
     return rows
 
 
-def _load_pullback() -> list[dict[str, str]]:
-    result_dir = _latest_date_dir(ROOT / "PullbackAnalyzer" / "results")
-    if result_dir is None:
-        print("[WARN] Pullback result directory not found.")
-        return []
-    path = result_dir / "scan_results.csv"
-    rows = []
-    for r in _read_csv(path):
-        status = _clean(r.get("Status")).upper()
-        if status != "CONFIRMED":
-            continue
-        rows.append(_normalized_row(
-            scan_date=r.get("Actual_Date", result_dir.name), analyzer="PULLBACK",
-            ticker=r.get("Ticker", ""), name=r.get("Name", ""), status=status,
-            score=r.get("Score", ""), timing_score=r.get("Timing_Score", ""),
-            market=r.get("Market", ""), signal=r.get("Primary_Signal", ""),
-            pattern_type=r.get("Pullback_Type", ""), entry_price=r.get("Close", ""), source_file=path,
-        ))
-    return rows
-
-
 def _dedupe(rows: list[dict[str, str]]) -> list[dict[str, str]]:
     best: dict[tuple[str, str], dict[str, str]] = {}
     for row in rows:
@@ -178,7 +157,7 @@ def _sort_key(row: dict[str, str]):
 
 
 def main() -> int:
-    rows = _load_kjb() + _load_swing() + _load_ma() + _load_dynamic() + _load_pullback()
+    rows = _load_kjb() + _load_swing() + _load_ma() + _load_dynamic()
     rows = sorted(_dedupe(rows), key=_sort_key)
     OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
     with OUTPUT_FILE.open("w", encoding="utf-8-sig", newline="") as f:
@@ -190,7 +169,7 @@ def main() -> int:
     for row in rows:
         counts[row["analyzer"]] = counts.get(row["analyzer"], 0) + 1
     print(f"[DONE] Confirmed candidates: {len(rows)} -> {OUTPUT_FILE}")
-    for analyzer in ("KJB", "SWING", "MA", "DYNAMIC", "PULLBACK"):
+    for analyzer in ("KJB", "SWING", "MA", "DYNAMIC"):
         print(f"[INFO] {analyzer}: {counts.get(analyzer, 0)}")
     return 0
 
