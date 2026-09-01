@@ -12,17 +12,25 @@ def classify(d: pd.DataFrame, impulse: ImpulseContext, pullback: PullbackContext
              risk: dict, cfg: PullbackConfig):
     warnings: list[str] = []
     close = float(d["Close"].iloc[-1])
+    ma20 = float(d["MA20"].iloc[-1]) if pd.notna(d["MA20"].iloc[-1]) else float("nan")
     ma60 = float(d["MA60"].iloc[-1]) if pd.notna(d["MA60"].iloc[-1]) else float("nan")
     major_low = float(d["Low"].shift(1).tail(cfg.major_low_lookback_bars).min())
     decisive_ma60_break = bool(math.isfinite(ma60) and close < ma60 * (1 - cfg.decisive_ma60_break_pct / 100.0))
     major_low_break = bool(math.isfinite(major_low) and close < major_low)
+    distribution_break = bool(
+        pullback.high_volume_breakdown
+        and (
+            (math.isfinite(ma20) and close < ma20)
+            or (math.isfinite(impulse.breakout_level) and close < impulse.breakout_level)
+        )
+    )
 
     hard_rejects = []
     if not impulse.available:
         hard_rejects.append("NO_VALID_PRIOR_IMPULSE")
     if pullback.available and math.isfinite(pullback.retracement_ratio) and pullback.retracement_ratio > cfg.hard_retracement_max:
         hard_rejects.append("PULLBACK_TOO_DEEP")
-    if pullback.high_volume_breakdown and (support.nearest_level != support.nearest_level or close < support.nearest_level):
+    if distribution_break:
         hard_rejects.append("HIGH_VOLUME_BREAKDOWN")
     if decisive_ma60_break:
         hard_rejects.append("MA60_DECISIVE_BREAK")
