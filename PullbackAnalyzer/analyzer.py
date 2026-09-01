@@ -44,18 +44,43 @@ class PullbackAnalyzer:
     def __init__(self, cfg: PullbackConfig) -> None:
         self.cfg = cfg
 
+    def _insufficient_result(self, ticker: str, name: str, market: str, requested_date: str,
+                             stock_df: pd.DataFrame) -> PullbackAnalysisResult:
+        actual_date = stock_df.index[-1].strftime("%Y-%m-%d") if len(stock_df) else ""
+        return PullbackAnalysisResult(
+            ticker=ticker, name=name, market=market, requested_date=requested_date,
+            actual_date=actual_date, status="REJECT", score=0, timing_score=0,
+            primary_signal="INSUFFICIENT_HISTORY", pullback_type="NONE",
+            warnings=[f"히스토리 부족: {len(stock_df)} < {self.cfg.min_history_bars}"],
+        )
+
     def analyze(self, ticker: str, name: str, market: str, requested_date: str,
                 stock_df: pd.DataFrame, market_df: pd.DataFrame | None = None) -> PullbackAnalysisResult:
-        actual_date = stock_df.index[-1].strftime("%Y-%m-%d") if len(stock_df) else ""
+        """Analyze one date using the normal path used by screen/explain commands."""
         if len(stock_df) < self.cfg.min_history_bars:
-            return PullbackAnalysisResult(
-                ticker=ticker, name=name, market=market, requested_date=requested_date,
-                actual_date=actual_date, status="REJECT", score=0, timing_score=0,
-                primary_signal="INSUFFICIENT_HISTORY", pullback_type="NONE",
-                warnings=[f"히스토리 부족: {len(stock_df)} < {self.cfg.min_history_bars}"],
-            )
-
+            return self._insufficient_result(ticker, name, market, requested_date, stock_df)
         d = build_indicators(stock_df, self.cfg)
+        return self._analyze_ready(ticker, name, market, requested_date, stock_df, d, market_df)
+
+    def analyze_precomputed(self, ticker: str, name: str, market: str, requested_date: str,
+                            stock_df: pd.DataFrame, indicator_df: pd.DataFrame,
+                            market_df: pd.DataFrame | None = None) -> PullbackAnalysisResult:
+        """Analyze using indicators already calculated for the full ticker history.
+
+        Rolling indicators are backward-looking, so slicing a once-precomputed frame at a
+        historical position is equivalent to recalculating the same indicators for every
+        prefix. This path is used by range backtests to avoid repeated MA/ATR/BB work.
+        """
+        if len(stock_df) < self.cfg.min_history_bars:
+            return self._insufficient_result(ticker, name, market, requested_date, stock_df)
+        if len(indicator_df) != len(stock_df) or not indicator_df.index.equals(stock_df.index):
+            raise ValueError("stock_df와 indicator_df의 길이/인덱스가 일치해야 합니다.")
+        return self._analyze_ready(ticker, name, market, requested_date, stock_df, indicator_df, market_df)
+
+    def _analyze_ready(self, ticker: str, name: str, market: str, requested_date: str,
+                       stock_df: pd.DataFrame, d: pd.DataFrame,
+                       market_df: pd.DataFrame | None = None) -> PullbackAnalysisResult:
+        actual_date = stock_df.index[-1].strftime("%Y-%m-%d") if len(stock_df) else ""
         impulse = detect_impulse(d, self.cfg)
         pullback = detect_pullback(d, impulse, self.cfg)
         support = detect_support(d, impulse, pullback, self.cfg)
