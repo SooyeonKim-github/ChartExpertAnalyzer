@@ -1,0 +1,157 @@
+@echo off
+setlocal EnableExtensions
+chcp 65001 > nul
+
+set "ROOT=%~dp0"
+cd /d "%ROOT%"
+
+set "TOP_N=%~1"
+set "CHARTS=%~2"
+if "%TOP_N%"=="" set "TOP_N=100"
+if "%CHARTS%"=="" set "CHARTS=30"
+set "LOOKBACK=20"
+
+set "PYTHON_EXE="
+set "PYTHON_PREFIX="
+if exist "%ROOT%KJBChartAnalyzer\.venv\Scripts\python.exe" (
+    set "PYTHON_EXE=%ROOT%KJBChartAnalyzer\.venv\Scripts\python.exe"
+) else if exist "%ROOT%SwingChartProbabilityAnalyzer\.venv\Scripts\python.exe" (
+    set "PYTHON_EXE=%ROOT%SwingChartProbabilityAnalyzer\.venv\Scripts\python.exe"
+) else if exist "%ROOT%MAChartAnalyzer\.venv\Scripts\python.exe" (
+    set "PYTHON_EXE=%ROOT%MAChartAnalyzer\.venv\Scripts\python.exe"
+) else if exist "%ROOT%DynamicChartAnalyzer\.venv\Scripts\python.exe" (
+    set "PYTHON_EXE=%ROOT%DynamicChartAnalyzer\.venv\Scripts\python.exe"
+) else (
+    where py >nul 2>nul
+    if not errorlevel 1 (
+        set "PYTHON_EXE=py"
+        set "PYTHON_PREFIX=-3"
+    ) else (
+        where python >nul 2>nul
+        if not errorlevel 1 set "PYTHON_EXE=python"
+    )
+)
+
+if "%PYTHON_EXE%"=="" (
+    echo [ERROR] Python was not found.
+    pause
+    exit /b 1
+)
+
+"%PYTHON_EXE%" %PYTHON_PREFIX% -c "import pandas, numpy, matplotlib, openpyxl, yaml, pykrx" >nul 2>nul
+if errorlevel 1 (
+    echo [ERROR] Required Python packages are missing.
+    echo Run the requirements install for one of the analyzer environments.
+    pause
+    exit /b 1
+)
+
+set "NO_PAUSE=1"
+
+echo ============================================
+echo   KR Stock Screening - Independent Analyzers
+echo ============================================
+echo Universe : recent %LOOKBACK%-trading-day avg trading-value TOP %TOP_N%
+echo Markets  : KOSPI + KOSDAQ
+echo KJB / Swing / MA / Dynamic are evaluated independently.
+echo Dynamic CONFIRMED = active LONG Stage 3.
+echo ============================================
+echo.
+
+echo [0/5] Building shared KR trading-value universe...
+call "%ROOT%prepare_liquidity_universe.bat" screen "" "%TOP_N%" "%LOOKBACK%"
+if errorlevel 1 goto RUN_FAILED
+if not defined LIQUIDITY_UNIVERSE_XLSX goto RUN_FAILED
+if not exist "%LIQUIDITY_UNIVERSE_XLSX%" goto RUN_FAILED
+
+echo.
+echo [1/5] KJB KR screen...
+pushd "%ROOT%KJBChartAnalyzer"
+"%PYTHON_EXE%" %PYTHON_PREFIX% app.py screen-top100 ^
+    --provider pykrx ^
+    --info-excel "%LIQUIDITY_UNIVERSE_XLSX%" ^
+    --top-n %TOP_N% ^
+    --sort-by trading_value ^
+    --period 5y ^
+    --agent-top-n 30 ^
+    --out output\top100_screen.csv ^
+    --universe-out output\top100_universe.csv ^
+    --report output\top100_screen.html
+if errorlevel 1 (
+    popd
+    goto RUN_FAILED
+)
+popd
+
+echo.
+echo [2/5] Swing KR screen...
+pushd "%ROOT%SwingChartProbabilityAnalyzer"
+"%PYTHON_EXE%" %PYTHON_PREFIX% main.py scan ^
+    --info-excel "%LIQUIDITY_UNIVERSE_XLSX%" ^
+    --top-n %TOP_N% ^
+    --sort-by trading_value ^
+    --charts %CHARTS% ^
+    --agent-top-n 30
+if errorlevel 1 (
+    popd
+    goto RUN_FAILED
+)
+popd
+
+echo.
+echo [3/5] MA KR screen...
+pushd "%ROOT%MAChartAnalyzer"
+"%PYTHON_EXE%" %PYTHON_PREFIX% main.py scan ^
+    --info-excel "%LIQUIDITY_UNIVERSE_XLSX%" ^
+    --top-n %TOP_N% ^
+    --sort-by trading_value
+if errorlevel 1 (
+    popd
+    goto RUN_FAILED
+)
+popd
+
+echo.
+echo [4/5] Dynamic KR screen...
+pushd "%ROOT%DynamicChartAnalyzer"
+"%PYTHON_EXE%" %PYTHON_PREFIX% main_screen_kr.py ^
+    --info-excel "%LIQUIDITY_UNIVERSE_XLSX%" ^
+    --top-n %TOP_N% ^
+    --sort-by trading_value ^
+    --years 5
+if errorlevel 1 (
+    popd
+    goto RUN_FAILED
+)
+popd
+
+echo.
+echo [5/5] Aggregating confirmed KR candidates...
+"%PYTHON_EXE%" %PYTHON_PREFIX% "%ROOT%scripts\aggregate_confirmed_candidates.py"
+if errorlevel 1 goto RUN_FAILED
+
+set "NO_PAUSE="
+echo.
+echo ============================================
+echo [DONE] KR screening finished.
+echo ============================================
+echo Universe : %LIQUIDITY_UNIVERSE_XLSX%
+echo KJB      : KJBChartAnalyzer\output\top100_screen.csv
+echo Swing    : SwingChartProbabilityAnalyzer\results\YYYYMMDD\
+echo MA       : MAChartAnalyzer\results\YYYYMMDD\
+echo Dynamic  : DynamicChartAnalyzer\results\YYYYMMDD\
+echo Summary  : results\confirmed_candidates.csv
+echo.
+echo [INFO] All analyzers used the same recent %LOOKBACK%-day avg trading-value TOP %TOP_N% universe.
+echo ============================================
+pause
+exit /b 0
+
+:RUN_FAILED
+set "NO_PAUSE="
+echo.
+echo ============================================
+echo [FAILED] KR screening stopped because one step failed.
+echo ============================================
+pause
+exit /b 1
