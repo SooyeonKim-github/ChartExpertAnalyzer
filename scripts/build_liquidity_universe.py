@@ -155,7 +155,7 @@ def _add_names(stock, daily: pd.DataFrame) -> pd.DataFrame:
 
 
 def build_liquidity_universe(start: pd.Timestamp, end: pd.Timestamp, top_n: int = 200, lookback: int = 20,
-                             markets: tuple[str, ...] = ("KOSPI", "KOSDAQ", "ETF"),
+                             markets: tuple[str, ...] = ("KOSPI", "ETF"),
                              cache_dir: Path = DEFAULT_CACHE_DIR) -> pd.DataFrame:
     if top_n <= 0:
         raise ValueError("top_n은 1 이상이어야 합니다.")
@@ -221,7 +221,7 @@ def main() -> int:
     mode.add_argument("--as-of", default="")
     p.add_argument("--top-n", type=int, default=200)
     p.add_argument("--lookback", type=int, default=20)
-    p.add_argument("--markets", default="KOSPI,KOSDAQ,ETF")
+    p.add_argument("--markets", default="KOSPI,ETF")
     p.add_argument("--cache-dir", default=str(DEFAULT_CACHE_DIR))
     p.add_argument("--output-dir", default="")
     args = p.parse_args()
