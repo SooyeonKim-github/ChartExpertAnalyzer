@@ -1,4 +1,5 @@
 import pandas as pd
+import pytest
 
 import main_range
 from main_range import _add_forward_metrics, _latest_market_date, parse_date_range
@@ -40,6 +41,6 @@ def test_forward_metrics_start_from_next_trading_bar():
         "direction": 1,
     }
     out = _add_forward_metrics(event, prices, forward_bars=2)
-    assert out["D+1"] == 0.10
-    assert out["D+2"] == 0.20
+    assert out["D+1"] == pytest.approx(0.10)
+    assert out["D+2"] == pytest.approx(0.20)
     assert out["forward_complete"] is True
