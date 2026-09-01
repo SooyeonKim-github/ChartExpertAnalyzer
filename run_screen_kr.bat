@@ -54,12 +54,12 @@ echo ============================================
 echo   KR Stock Screening - Independent Analyzers
 echo ============================================
 echo Universe : recent %LOOKBACK%-trading-day avg trading-value TOP %TOP_N%
-echo Markets  : KOSPI + KOSDAQ + ETF
+echo Markets  : KOSPI + ETF
 echo KJB / Swing / MA / Dynamic / Pullback are evaluated independently.
 echo ============================================
 echo.
 
-echo [0/6] Building shared KR stock + ETF universe...
+echo [0/6] Building shared KOSPI + ETF universe...
 call "%ROOT%prepare_liquidity_universe.bat" screen "" "%TOP_N%" "%LOOKBACK%"
 if errorlevel 1 goto RUN_FAILED
 if not defined LIQUIDITY_UNIVERSE_XLSX goto RUN_FAILED
@@ -136,7 +136,7 @@ echo ============================================
 echo [DONE] KR screening finished.
 echo ============================================
 echo Universe : %LIQUIDITY_UNIVERSE_XLSX%
-echo [INFO] Stock + ETF, recent %LOOKBACK%-day avg trading-value TOP %TOP_N%.
+echo [INFO] KOSPI + ETF, recent %LOOKBACK%-day avg trading-value TOP %TOP_N%.
 echo ============================================
 pause
 exit /b 0
