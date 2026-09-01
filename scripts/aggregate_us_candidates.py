@@ -2,10 +2,12 @@ from __future__ import annotations
 
 import argparse
 import csv
+import math
 from pathlib import Path
 
 
 ROOT = Path(__file__).resolve().parents[1]
+MILESTONES = (5, 10, 20, 60)
 COLUMNS = [
     "scan_date",
     "analyzer",
@@ -17,6 +19,10 @@ COLUMNS = [
     "market",
     "signal",
     "entry_price",
+    "D+5_Pct",
+    "D+10_Pct",
+    "D+20_Pct",
+    "D+60_Pct",
     "source_file",
 ]
 
@@ -48,6 +54,19 @@ def _float(value) -> float:
         return float("-inf")
 
 
+def _pct(value, multiplier: float = 1.0) -> str:
+    text = _clean(value)
+    if not text:
+        return ""
+    try:
+        number = float(text.replace(",", ""))
+    except (TypeError, ValueError):
+        return ""
+    if not math.isfinite(number):
+        return ""
+    return f"{number * multiplier:.10g}"
+
+
 def _latest_date_dir(base: Path) -> Path | None:
     if not base.exists():
         return None
@@ -73,7 +92,7 @@ def _row(
     signal_key: str = "",
     entry_key: str = "",
 ) -> dict[str, str]:
-    return {
+    row = {
         "scan_date": _clean(raw.get(date_key, "")),
         "analyzer": analyzer,
         "ticker": _ticker(raw.get(ticker_key, "")),
@@ -86,6 +105,9 @@ def _row(
         "entry_price": _clean(raw.get(entry_key, "")) if entry_key else "",
         "source_file": str(source.relative_to(ROOT)),
     }
+    for h in MILESTONES:
+        row[f"D+{h}_Pct"] = ""
+    return row
 
 
 def _screen_rows() -> list[dict[str, str]]:
@@ -182,13 +204,19 @@ def _range_rows(date_range: str) -> list[dict[str, str]]:
             status = _clean(raw.get(sk)).upper()
             if status not in {"STRONG_CONFIRMED", "CONFIRMED"}:
                 continue
-            rows.append(
-                _row(
-                    analyzer, path, raw,
-                    date_key=dk, ticker_key=tk, name_key=nk, status_key=sk,
-                    score_key=sc, timing_key=tim, signal_key=sig, entry_key=entry,
-                )
+            row = _row(
+                analyzer, path, raw,
+                date_key=dk, ticker_key=tk, name_key=nk, status_key=sk,
+                score_key=sc, timing_key=tim, signal_key=sig, entry_key=entry,
             )
+            for h in MILESTONES:
+                if analyzer in {"KJB", "DYNAMIC"}:
+                    # KJB/Dynamic store forward returns as decimal fractions.
+                    row[f"D+{h}_Pct"] = _pct(raw.get(f"D+{h}", ""), 100.0)
+                else:
+                    # Swing/MA already store forward returns in percentage points.
+                    row[f"D+{h}_Pct"] = _pct(raw.get(f"D+{h}_Close_Return_Pct", ""))
+            rows.append(row)
     return rows
 
 
