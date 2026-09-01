@@ -19,6 +19,8 @@ if exist "%ROOT%KJBChartAnalyzer\.venv\Scripts\python.exe" (
     set "PYTHON_EXE=%ROOT%SwingChartProbabilityAnalyzer\.venv\Scripts\python.exe"
 ) else if exist "%ROOT%MAChartAnalyzer\.venv\Scripts\python.exe" (
     set "PYTHON_EXE=%ROOT%MAChartAnalyzer\.venv\Scripts\python.exe"
+) else if exist "%ROOT%PullbackAnalyzer\.venv\Scripts\python.exe" (
+    set "PYTHON_EXE=%ROOT%PullbackAnalyzer\.venv\Scripts\python.exe"
 ) else if exist "%ROOT%DynamicChartAnalyzer\.venv\Scripts\python.exe" (
     set "PYTHON_EXE=%ROOT%DynamicChartAnalyzer\.venv\Scripts\python.exe"
 ) else (
@@ -53,19 +55,20 @@ echo   KR Stock Screening - Independent Analyzers
 echo ============================================
 echo Universe : recent %LOOKBACK%-trading-day avg trading-value TOP %TOP_N%
 echo Markets  : KOSPI + KOSDAQ
-echo KJB / Swing / MA / Dynamic are evaluated independently.
+echo KJB / Swing / MA / Dynamic / Pullback are evaluated independently.
 echo Dynamic CONFIRMED = active LONG Stage 3.
+echo Pullback CONFIRMED = quality + timing confirmation with no hard reject.
 echo ============================================
 echo.
 
-echo [0/5] Building shared KR trading-value universe...
+echo [0/6] Building shared KR trading-value universe...
 call "%ROOT%prepare_liquidity_universe.bat" screen "" "%TOP_N%" "%LOOKBACK%"
 if errorlevel 1 goto RUN_FAILED
 if not defined LIQUIDITY_UNIVERSE_XLSX goto RUN_FAILED
 if not exist "%LIQUIDITY_UNIVERSE_XLSX%" goto RUN_FAILED
 
 echo.
-echo [1/5] KJB KR screen...
+echo [1/6] KJB KR screen...
 pushd "%ROOT%KJBChartAnalyzer"
 "%PYTHON_EXE%" %PYTHON_PREFIX% app.py screen-top100 ^
     --provider pykrx ^
@@ -84,7 +87,7 @@ if errorlevel 1 (
 popd
 
 echo.
-echo [2/5] Swing KR screen...
+echo [2/6] Swing KR screen...
 pushd "%ROOT%SwingChartProbabilityAnalyzer"
 "%PYTHON_EXE%" %PYTHON_PREFIX% main.py scan ^
     --info-excel "%LIQUIDITY_UNIVERSE_XLSX%" ^
@@ -99,7 +102,7 @@ if errorlevel 1 (
 popd
 
 echo.
-echo [3/5] MA KR screen...
+echo [3/6] MA KR screen...
 pushd "%ROOT%MAChartAnalyzer"
 "%PYTHON_EXE%" %PYTHON_PREFIX% main.py scan ^
     --info-excel "%LIQUIDITY_UNIVERSE_XLSX%" ^
@@ -112,7 +115,7 @@ if errorlevel 1 (
 popd
 
 echo.
-echo [4/5] Dynamic KR screen...
+echo [4/6] Dynamic KR screen...
 pushd "%ROOT%DynamicChartAnalyzer"
 "%PYTHON_EXE%" %PYTHON_PREFIX% main_screen_kr.py ^
     --info-excel "%LIQUIDITY_UNIVERSE_XLSX%" ^
@@ -126,7 +129,20 @@ if errorlevel 1 (
 popd
 
 echo.
-echo [5/5] Aggregating confirmed KR candidates...
+echo [5/6] Pullback KR screen...
+pushd "%ROOT%PullbackAnalyzer"
+"%PYTHON_EXE%" %PYTHON_PREFIX% main.py scan ^
+    --info-excel "%LIQUIDITY_UNIVERSE_XLSX%" ^
+    --top-n %TOP_N% ^
+    --sort-by trading_value
+if errorlevel 1 (
+    popd
+    goto RUN_FAILED
+)
+popd
+
+echo.
+echo [6/6] Aggregating confirmed KR candidates...
 "%PYTHON_EXE%" %PYTHON_PREFIX% "%ROOT%scripts\aggregate_confirmed_candidates.py"
 if errorlevel 1 goto RUN_FAILED
 
@@ -140,6 +156,7 @@ echo KJB      : KJBChartAnalyzer\output\top100_screen.csv
 echo Swing    : SwingChartProbabilityAnalyzer\results\YYYYMMDD\
 echo MA       : MAChartAnalyzer\results\YYYYMMDD\
 echo Dynamic  : DynamicChartAnalyzer\results\YYYYMMDD\
+echo Pullback : PullbackAnalyzer\results\YYYYMMDD\
 echo Summary  : results\confirmed_candidates.csv
 echo.
 echo [INFO] All analyzers used the same recent %LOOKBACK%-day avg trading-value TOP %TOP_N% universe.
