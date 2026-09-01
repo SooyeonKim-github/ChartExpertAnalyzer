@@ -81,17 +81,35 @@ if errorlevel 1 (
 )
 
 :LOAD_ENV
-if not exist "%LIQ_OUT_DIR%\liquidity_universe.env" (
-    echo [ERROR] Liquidity environment file was not created.
+set "LIQ_ENV_FILE=%LIQ_OUT_DIR%\liquidity_universe.env"
+if not exist "%LIQ_ENV_FILE%" (
+    echo [ERROR] Liquidity environment file was not created: %LIQ_ENV_FILE%
     exit /b 1
 )
-call "%LIQ_OUT_DIR%\liquidity_universe.env"
+
+REM .env is a plain text file, not an executable .bat/.cmd file.
+REM Read and execute each SET line explicitly so Windows CMD loads the variables reliably.
+set "LIQUIDITY_UNIVERSE_XLSX="
+set "LIQUIDITY_MEMBERSHIP_CSV="
+set "LIQUIDITY_AS_OF="
+set "LIQUIDITY_TOP_N="
+set "LIQUIDITY_LOOKBACK="
+for /f "usebackq delims=" %%L in ("%LIQ_ENV_FILE%") do call %%L
+
+if not defined LIQUIDITY_UNIVERSE_XLSX (
+    echo [ERROR] LIQUIDITY_UNIVERSE_XLSX was not loaded from %LIQ_ENV_FILE%.
+    exit /b 1
+)
+if not defined LIQUIDITY_MEMBERSHIP_CSV (
+    echo [ERROR] LIQUIDITY_MEMBERSHIP_CSV was not loaded from %LIQ_ENV_FILE%.
+    exit /b 1
+)
 if not exist "%LIQUIDITY_UNIVERSE_XLSX%" (
-    echo [ERROR] Liquidity union Excel was not created.
+    echo [ERROR] Liquidity union Excel was not created: %LIQUIDITY_UNIVERSE_XLSX%
     exit /b 1
 )
 if not exist "%LIQUIDITY_MEMBERSHIP_CSV%" (
-    echo [ERROR] Liquidity membership CSV was not created.
+    echo [ERROR] Liquidity membership CSV was not created: %LIQUIDITY_MEMBERSHIP_CSV%
     exit /b 1
 )
 echo [LIQUIDITY] Universe : recent %LIQUIDITY_LOOKBACK%-day avg trading value TOP %LIQUIDITY_TOP_N%
