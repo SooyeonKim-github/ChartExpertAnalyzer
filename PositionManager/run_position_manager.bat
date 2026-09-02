@@ -26,10 +26,11 @@ if exist "%ROOT%\KJBChartAnalyzer\.venv\Scripts\python.exe" (
 if "%PYTHON_EXE%"=="" exit /b 1
 
 echo ============================================
-echo   Dynamic PositionManager - Daily Plans
+echo   PositionManager V3 - Add On Strength
 echo ============================================
-echo CONFIRMED signals are re-evaluated using only known daily closes.
-echo READY_BUY is executed on the following trading-day open.
+echo CONFIRMED starts with a 20%% position on the next trading-day open.
+echo Additional 30%% / 50%% buys require a new bullish strength confirmation.
+echo No CHASE_RISK wait, no EXPIRED entry, no pullback averaging-down limit.
 echo ============================================
 "%PYTHON_EXE%" %PYTHON_PREFIX% "%HERE%main.py" screen
 if errorlevel 1 (
