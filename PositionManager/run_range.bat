@@ -32,9 +32,11 @@ if exist "%ROOT%\KJBChartAnalyzer\.venv\Scripts\python.exe" (
 if "%PYTHON_EXE%"=="" exit /b 1
 
 echo ============================================
-echo   PositionManager - Range Backtest
+echo   Dynamic PositionManager - Range Backtest
 echo ============================================
 echo Date range: %DATE_RANGE%
+echo Daily close decisions gate Stage 1/2/3 entries.
+echo ============================================
 "%PYTHON_EXE%" %PYTHON_PREFIX% "%HERE%main.py" range --date-range "%DATE_RANGE%"
 if errorlevel 1 (
     echo [FAILED] PositionManager range failed.
