@@ -49,13 +49,13 @@ exit /b 1
 :SCREEN_MODE
 set "LIQ_OUT_DIR=%LIQ_ROOT%results\liquidity_universe\screen_latest"
 echo.
-echo [LIQUIDITY] Building KOSPI + ETF recent %LIQ_LOOKBACK%-day average trading-value TOP %LIQ_TOP_N%...
+echo [LIQUIDITY] Building KOSPI + KOSDAQ recent %LIQ_LOOKBACK%-day average trading-value TOP %LIQ_TOP_N%...
 if "%LIQ_TARGET%"=="" (
     "%LIQ_PYTHON_EXE%" %LIQ_PYTHON_PREFIX% "%LIQ_ROOT%scripts\build_liquidity_universe.py" ^
-        --top-n %LIQ_TOP_N% --lookback %LIQ_LOOKBACK% --markets KOSPI,ETF --output-dir "%LIQ_OUT_DIR%"
+        --top-n %LIQ_TOP_N% --lookback %LIQ_LOOKBACK% --markets KOSPI,KOSDAQ --output-dir "%LIQ_OUT_DIR%"
 ) else (
     "%LIQ_PYTHON_EXE%" %LIQ_PYTHON_PREFIX% "%LIQ_ROOT%scripts\build_liquidity_universe.py" ^
-        --as-of "%LIQ_TARGET%" --top-n %LIQ_TOP_N% --lookback %LIQ_LOOKBACK% --markets KOSPI,ETF --output-dir "%LIQ_OUT_DIR%"
+        --as-of "%LIQ_TARGET%" --top-n %LIQ_TOP_N% --lookback %LIQ_LOOKBACK% --markets KOSPI,KOSDAQ --output-dir "%LIQ_OUT_DIR%"
 )
 if errorlevel 1 (
     echo [ERROR] Liquidity screen universe preparation failed.
@@ -72,9 +72,9 @@ set "LIQ_RANGE_START=%LIQ_TARGET:~0,8%"
 set "LIQ_RANGE_END=%LIQ_TARGET:~-8%"
 set "LIQ_OUT_DIR=%LIQ_ROOT%results\liquidity_universe\range_%LIQ_RANGE_START%_%LIQ_RANGE_END%"
 echo.
-echo [LIQUIDITY] Building KOSPI + ETF point-in-time recent %LIQ_LOOKBACK%-day average trading-value TOP %LIQ_TOP_N%...
+echo [LIQUIDITY] Building KOSPI + KOSDAQ point-in-time recent %LIQ_LOOKBACK%-day average trading-value TOP %LIQ_TOP_N%...
 "%LIQ_PYTHON_EXE%" %LIQ_PYTHON_PREFIX% "%LIQ_ROOT%scripts\build_liquidity_universe.py" ^
-    --date-range "%LIQ_TARGET%" --top-n %LIQ_TOP_N% --lookback %LIQ_LOOKBACK% --markets KOSPI,ETF --output-dir "%LIQ_OUT_DIR%"
+    --date-range "%LIQ_TARGET%" --top-n %LIQ_TOP_N% --lookback %LIQ_LOOKBACK% --markets KOSPI,KOSDAQ --output-dir "%LIQ_OUT_DIR%"
 if errorlevel 1 (
     echo [ERROR] Liquidity range universe preparation failed.
     exit /b 1
@@ -112,7 +112,7 @@ if not exist "%LIQUIDITY_MEMBERSHIP_CSV%" (
     echo [ERROR] Liquidity membership CSV was not created: %LIQUIDITY_MEMBERSHIP_CSV%
     exit /b 1
 )
-echo [LIQUIDITY] Universe : KOSPI + ETF, recent %LIQUIDITY_LOOKBACK%-day avg trading value TOP %LIQUIDITY_TOP_N%
+echo [LIQUIDITY] Universe : KOSPI + KOSDAQ, recent %LIQUIDITY_LOOKBACK%-day avg trading value TOP %LIQUIDITY_TOP_N%
 echo [LIQUIDITY] Excel    : %LIQUIDITY_UNIVERSE_XLSX%
 echo [LIQUIDITY] Daily CSV: %LIQUIDITY_MEMBERSHIP_CSV%
 exit /b 0
