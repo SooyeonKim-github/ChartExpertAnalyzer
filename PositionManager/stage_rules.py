@@ -3,20 +3,12 @@ from __future__ import annotations
 import pandas as pd
 
 
-def stage2_limit_price(stage1_price: float, pullback_pct: float) -> float:
-    return stage1_price * (1.0 - pullback_pct)
+def bullish_rebound_confirmed(current: pd.Series, previous: pd.Series) -> bool:
+    """Confirmation used for every V3 add-on buy.
 
-
-def stage2_touched(bar: pd.Series, limit_price: float) -> bool:
-    return float(bar["Low"]) <= limit_price
-
-
-def stage2_fill_price(bar: pd.Series, limit_price: float) -> float:
-    # Buy limit: if the market gaps below the limit, assume the open is obtained.
-    return min(float(bar["Open"]), limit_price)
-
-
-def stage3_rebound_confirmed(current: pd.Series, previous: pd.Series) -> bool:
+    The add is approved only after a bullish close that breaks the previous high
+    and finishes above MA5. The actual buy happens on the next trading-day open.
+    """
     required = ("Open", "Close", "High", "MA5")
     if any(pd.isna(current.get(col)) for col in required):
         return False
@@ -27,3 +19,11 @@ def stage3_rebound_confirmed(current: pd.Series, previous: pd.Series) -> bool:
         and float(current["Close"]) > float(previous["High"])
         and float(current["Close"]) > float(current["MA5"])
     )
+
+
+def stage2_rebound_confirmed(current: pd.Series, previous: pd.Series) -> bool:
+    return bullish_rebound_confirmed(current, previous)
+
+
+def stage3_rebound_confirmed(current: pd.Series, previous: pd.Series) -> bool:
+    return bullish_rebound_confirmed(current, previous)
