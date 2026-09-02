@@ -1,0 +1,33 @@
+category,query,enabled
+policy,정부 투자,1
+policy,정책 발표,1
+policy,규제 완화,1
+policy,지원 확대,1
+policy,산업 육성,1
+event,발표 예정,1
+event,공청회 예정,1
+event,간담회 개최,1
+event,정상회담,1
+event,대통령 방문,1
+deal,대규모 수주,1
+deal,공급 계약,1
+deal,지분 투자,1
+deal,인수 합병,1
+technology,세계 최초 개발,1
+technology,국내 최초 개발,1
+technology,상용화 성공,1
+technology,기술이전,1
+supply,공급 부족,1
+supply,수출 제한,1
+supply,가격 인상,1
+industry,반도체 투자,1
+industry,AI 투자,1
+industry,로봇 투자,1
+industry,자율주행 정책,1
+industry,원전 수주,1
+industry,방산 수주,1
+industry,우크라이나 재건,1
+industry,탄소중립 투자,1
+industry,해상풍력,1
+industry,저출산 대책,1
+industry,바이오 임상 승인,1
