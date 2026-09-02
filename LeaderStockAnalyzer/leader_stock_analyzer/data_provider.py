@@ -1,12 +1,73 @@
 from __future__ import annotations
 
+import contextlib
+import io
 import os
 from pathlib import Path
 from typing import Iterable
 
 import pandas as pd
+import requests
 
 from .naver_index_provider import fetch_naver_index_ohlcv
+
+
+_KRX_USER_AGENT = (
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+    "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/151.0.0.0 Safari/537.36"
+)
+_KRX_REFERER = "https://data.krx.co.kr/contents/MDC/MDI/outerLoader/index.cmd"
+_KRX_HTTP_SESSION: requests.Session | None = None
+
+
+def _new_krx_http_session() -> requests.Session:
+    session = requests.Session()
+    session.headers.update(
+        {
+            "User-Agent": _KRX_USER_AGENT,
+            "Referer": _KRX_REFERER,
+            "X-Requested-With": "XMLHttpRequest",
+        }
+    )
+    try:
+        session.get(_KRX_REFERER, timeout=10)
+    except requests.RequestException:
+        pass
+    return session
+
+
+def _reset_krx_http_session() -> requests.Session:
+    global _KRX_HTTP_SESSION
+    if _KRX_HTTP_SESSION is not None:
+        try:
+            _KRX_HTTP_SESSION.close()
+        except Exception:
+            pass
+    _KRX_HTTP_SESSION = _new_krx_http_session()
+    return _KRX_HTTP_SESSION
+
+
+def _install_shared_pykrx_transport(webio) -> None:
+    _reset_krx_http_session()
+
+    def _session_post_read(self, **params):
+        session = _KRX_HTTP_SESSION or _reset_krx_http_session()
+        headers = dict(getattr(self, "headers", {}) or {})
+        headers.setdefault("User-Agent", _KRX_USER_AGENT)
+        headers.setdefault("Referer", _KRX_REFERER)
+        headers.setdefault("X-Requested-With", "XMLHttpRequest")
+        return session.post(self.url, headers=headers, data=params, timeout=30)
+
+    def _session_get_read(self, **params):
+        session = _KRX_HTTP_SESSION or _reset_krx_http_session()
+        headers = dict(getattr(self, "headers", {}) or {})
+        headers.setdefault("User-Agent", _KRX_USER_AGENT)
+        headers.setdefault("Referer", _KRX_REFERER)
+        headers.setdefault("X-Requested-With", "XMLHttpRequest")
+        return session.get(self.url, headers=headers, params=params, timeout=30)
+
+    webio.Post.read = _session_post_read
+    webio.Get.read = _session_get_read
 
 
 class PyKrxLeaderDataProvider:
@@ -24,33 +85,38 @@ class PyKrxLeaderDataProvider:
         if cls._stock_module is not None:
             return cls._stock_module
 
-        # pykrx 1.2.x initializes a KRX login session at import time whenever
-        # KRX_ID/KRX_PW are present. LeaderStockAnalyzer only uses public stock,
-        # market-cap and index APIs, so an unrelated login failure must not stop
-        # the analyzer before those public APIs can even be called.
-        #
-        # Removing these variables affects only this Python child process; it does
-        # not delete the credentials from the parent Command Prompt environment.
-        disabled_auto_login = False
-        for key in ("KRX_ID", "KRX_PW"):
-            if os.environ.pop(key, None) is not None:
-                disabled_auto_login = True
-        if disabled_auto_login:
-            print(
-                "[INFO] LeaderStockAnalyzer: pykrx KRX auto-login disabled; "
-                "using public stock-data APIs.",
-                flush=True,
-            )
-
+        # pykrx 1.2.x can try KRX login while importing when credentials are
+        # present. LeaderStockAnalyzer does not need that import-time login, and
+        # malformed login responses can abort before public stock APIs are used.
+        saved_env = {key: os.environ.get(key) for key in ("KRX_ID", "KRX_PW")}
+        for key in saved_env:
+            os.environ.pop(key, None)
         try:
-            from pykrx import stock
+            import_output = io.StringIO()
+            with contextlib.redirect_stdout(import_output):
+                from pykrx import stock
+                from pykrx.website.comm import webio
         except ImportError as exc:
             raise RuntimeError("pykrx is not installed. Run: pip install -r requirements.txt") from exc
         except Exception as exc:
             raise RuntimeError(
-                "pykrx initialization failed before market-data lookup. "
-                "LeaderStockAnalyzer disabled KRX auto-login, but pykrx still failed to initialize."
+                "pykrx initialization failed before market-data lookup."
             ) from exc
+        finally:
+            for key, value in saved_env.items():
+                if value is not None:
+                    os.environ[key] = value
+
+        # KRX changed access/session behavior in 2026. Keep one warmed-up
+        # requests.Session for all pykrx KRX calls instead of a new session per
+        # request. This is the same transport hardening used by the shared range
+        # liquidity-universe builder.
+        _install_shared_pykrx_transport(webio)
+        print(
+            "[INFO] LeaderStockAnalyzer: shared KRX requests.Session enabled; "
+            "pykrx import-time auto-login bypassed.",
+            flush=True,
+        )
 
         cls._stock_module = stock
         return stock
@@ -83,6 +149,7 @@ class PyKrxLeaderDataProvider:
                     return d
             except Exception as exc:
                 last_error = exc
+                _reset_krx_http_session()
                 continue
         if last_error is not None:
             raise RuntimeError(
@@ -96,9 +163,14 @@ class PyKrxLeaderDataProvider:
         try:
             snap = stock.get_market_ohlcv_by_ticker(scan_date, market="ALL")
         except Exception as exc:
-            raise RuntimeError(
-                f"KRX market snapshot failed for {scan_date}: {type(exc).__name__}: {exc}"
-            ) from exc
+            _reset_krx_http_session()
+            try:
+                snap = stock.get_market_ohlcv_by_ticker(scan_date, market="ALL")
+            except Exception as retry_exc:
+                raise RuntimeError(
+                    f"KRX market snapshot failed for {scan_date}: "
+                    f"{type(retry_exc).__name__}: {retry_exc}"
+                ) from retry_exc
         if snap is None or snap.empty:
             raise RuntimeError(f"No market snapshot for {scan_date}")
         df = snap.rename(columns={"종가": "price", "거래량": "volume", "거래대금": "trading_value", "등락률": "return_pct"}).copy()
