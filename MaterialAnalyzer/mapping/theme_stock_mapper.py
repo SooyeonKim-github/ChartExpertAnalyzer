@@ -29,7 +29,7 @@ class ThemeStockMapper:
                 if enabled in {"0", "false", "n", "no"}:
                     continue
                 theme = str(row.get("theme", "")).strip()
-                ticker = str(row.get("ticker", "")).strip().zfill(6)
+                ticker_raw = str(row.get("ticker", "")).strip()
                 name = str(row.get("name", "")).strip()
                 relation_type = str(row.get("relation_type", "DIRECT")).strip().upper() or "DIRECT"
                 reason = str(row.get("reason", "")).strip()
@@ -37,8 +37,9 @@ class ThemeStockMapper:
                     relevance = float(row.get("relevance", 0.0))
                 except (TypeError, ValueError):
                     continue
-                if not theme or not ticker or not name:
+                if not theme or not ticker_raw or not name:
                     continue
+                ticker = ticker_raw.zfill(6)
                 out.append(
                     StockThemeMatch(
                         theme=theme,
