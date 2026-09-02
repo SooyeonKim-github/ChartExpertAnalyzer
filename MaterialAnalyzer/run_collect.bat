@@ -24,9 +24,9 @@ echo ============================================
 echo   MaterialAnalyzer V1 - Collector
 echo ============================================
 echo News   : Naver Search API
-necho Policy : Korea Policy Briefing
-necho Filing : OpenDART
-necho ============================================
+echo Policy : Korea Policy Briefing
+echo Filing : OpenDART
+echo ============================================
 echo.
 
 if "%TARGET_DATE%"=="" (
