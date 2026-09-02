@@ -62,16 +62,22 @@ class MaterialCollector:
         query_limit: int | None = None,
     ) -> CollectionReport:
         selected = {s.strip().lower() for s in sources if s.strip()}
+        unknown = selected - {"naver", "policy", "dart"}
         collected_at = datetime.now().astimezone().isoformat()
         raw_items: list[CollectedItem] = []
         warnings: list[str] = []
         source_counts: dict[str, int] = {}
 
+        if unknown:
+            warnings.append(f"Unknown sources ignored: {', '.join(sorted(unknown))}")
+
         if "naver" in selected:
             if self.naver.available():
                 try:
                     queries = self.load_queries(limit=query_limit)
-                    rows = self.naver.collect(queries, collected_at)
+                    if not queries:
+                        warnings.append("NAVER skipped: no enabled queries in data/news_queries.csv")
+                    rows = self.naver.collect(queries, collected_at, target_date, days)
                     raw_items.extend(rows)
                     source_counts["naver"] = len(rows)
                 except Exception as exc:  # keep other sources alive
@@ -81,7 +87,7 @@ class MaterialCollector:
 
         if "policy" in selected:
             try:
-                rows = self.policy.collect(collected_at)
+                rows = self.policy.collect(target_date, days, collected_at)
                 raw_items.extend(rows)
                 source_counts["policy"] = len(rows)
             except Exception as exc:
