@@ -23,6 +23,14 @@ class BacktestResult:
     score: Optional[float]
     timing_score: Optional[float]
 
+    entry_validation_date: str = ""
+    entry_validation_score: Optional[float] = None
+    entry_decision: str = ""
+    entry_decision_reason: str = ""
+    wait_bars_before_entry: Optional[int] = None
+    entry_cancel_reason: str = ""
+    scale_in_cancel_reason: str = ""
+
     stage1_date: str = ""
     stage1_price: Optional[float] = None
     stage2_date: str = ""
