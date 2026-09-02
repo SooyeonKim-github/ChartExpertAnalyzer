@@ -1,21 +1,111 @@
 from __future__ import annotations
 
 import argparse
+import contextlib
+import io
+import os
 import time
 from pathlib import Path
 
 import pandas as pd
+import requests
 
 ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_CACHE_DIR = ROOT / "cache" / "liquidity_universe"
 DEFAULT_OUTPUT_ROOT = ROOT / "results" / "liquidity_universe"
 
+_KRX_USER_AGENT = (
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+    "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/151.0.0.0 Safari/537.36"
+)
+_KRX_REFERER = "https://data.krx.co.kr/contents/MDC/MDI/outerLoader/index.cmd"
+_KRX_HTTP_SESSION: requests.Session | None = None
+_PYKRX_STOCK = None
+
+
+def _new_krx_http_session() -> requests.Session:
+    session = requests.Session()
+    session.headers.update(
+        {
+            "User-Agent": _KRX_USER_AGENT,
+            "Referer": _KRX_REFERER,
+            "X-Requested-With": "XMLHttpRequest",
+        }
+    )
+    # Since the 2026 KRX access-policy change, reusing one warmed-up session is
+    # materially more reliable than letting pykrx create a fresh Session for
+    # every request. The warm-up is best-effort; the actual API call will still
+    # surface a useful error if KRX itself is unavailable.
+    try:
+        session.get(_KRX_REFERER, timeout=10)
+    except requests.RequestException:
+        pass
+    return session
+
+
+def _reset_krx_http_session() -> requests.Session:
+    global _KRX_HTTP_SESSION
+    if _KRX_HTTP_SESSION is not None:
+        try:
+            _KRX_HTTP_SESSION.close()
+        except Exception:
+            pass
+    _KRX_HTTP_SESSION = _new_krx_http_session()
+    return _KRX_HTTP_SESSION
+
+
+def _install_shared_pykrx_transport(webio) -> None:
+    _reset_krx_http_session()
+
+    def _session_post_read(self, **params):
+        session = _KRX_HTTP_SESSION or _reset_krx_http_session()
+        headers = dict(getattr(self, "headers", {}) or {})
+        headers.setdefault("User-Agent", _KRX_USER_AGENT)
+        headers.setdefault("Referer", _KRX_REFERER)
+        headers.setdefault("X-Requested-With", "XMLHttpRequest")
+        return session.post(self.url, headers=headers, data=params, timeout=30)
+
+    def _session_get_read(self, **params):
+        session = _KRX_HTTP_SESSION or _reset_krx_http_session()
+        headers = dict(getattr(self, "headers", {}) or {})
+        headers.setdefault("User-Agent", _KRX_USER_AGENT)
+        headers.setdefault("Referer", _KRX_REFERER)
+        headers.setdefault("X-Requested-With", "XMLHttpRequest")
+        return session.get(self.url, headers=headers, params=params, timeout=30)
+
+    # KrxWebIo/KrxFutureIo call super().read(), so replacing these two base
+    # methods is enough to keep all KRX requests in one HTTP session.
+    webio.Post.read = _session_post_read
+    webio.Get.read = _session_get_read
+
 
 def _load_pykrx():
+    global _PYKRX_STOCK
+    if _PYKRX_STOCK is not None:
+        return _PYKRX_STOCK
+
+    # pykrx 1.2.x may attempt KRX login at import time when credentials are in
+    # the environment. That login is unrelated to this stock-liquidity builder
+    # and a malformed login response can abort the import itself. Temporarily
+    # hide credentials only during import, then restore the process environment.
+    saved_env = {key: os.environ.get(key) for key in ("KRX_ID", "KRX_PW")}
+    for key in saved_env:
+        os.environ.pop(key, None)
     try:
-        from pykrx import stock
+        import_output = io.StringIO()
+        with contextlib.redirect_stdout(import_output):
+            from pykrx import stock
+            from pykrx.website.comm import webio
     except ImportError as exc:
         raise RuntimeError("pykrx가 필요합니다. 각 Analyzer의 requirements.txt를 설치하세요.") from exc
+    finally:
+        for key, value in saved_env.items():
+            if value is not None:
+                os.environ[key] = value
+
+    _install_shared_pykrx_transport(webio)
+    _PYKRX_STOCK = stock
+    print("[INFO] KRX transport: shared requests.Session enabled (pykrx auto-login bypassed).")
     return stock
 
 
@@ -108,8 +198,12 @@ def _fetch_snapshot(stock, date: pd.Timestamp, market: str, cache_dir: Path, ret
         except Exception as exc:
             last_exc = exc
             if attempt < retries:
-                time.sleep(0.5 * attempt)
-    raise RuntimeError(f"{market} {date:%Y-%m-%d} 거래대금 snapshot 조회 실패") from last_exc
+                _reset_krx_http_session()
+                time.sleep(0.7 * attempt)
+    raise RuntimeError(
+        f"{market} {date:%Y-%m-%d} 거래대금 snapshot 조회 실패 after {retries} attempts: "
+        f"{type(last_exc).__name__}: {last_exc}"
+    ) from last_exc
 
 
 def _trading_dates(stock, start: pd.Timestamp, end: pd.Timestamp, lookback: int) -> list[pd.Timestamp]:
@@ -135,7 +229,7 @@ def _trading_dates(stock, start: pd.Timestamp, end: pd.Timestamp, lookback: int)
             warm_start = first_idx - lookback + 1
             last_idx = dates.index(target[-1].to_datetime64())
             return [pd.Timestamp(d) for d in dates[warm_start:last_idx + 1]]
-    raise RuntimeError("거래일 캘린더를 확보하지 못했습니다. pykrx 조회 상태를 확인하세요.")
+    raise RuntimeError("거래일 캘린더를 확보하지 못했습니다. pykrx/Naver 조회 상태를 확인하세요.")
 
 
 def _add_names(stock, daily: pd.DataFrame) -> pd.DataFrame:
