@@ -24,5 +24,8 @@ cache/
 reports/self-improvement/
 .self_improvement_state.json
 
+MaterialAnalyzer/results/
+MaterialAnalyzer/data/material_items.csv
+
 Thumbs.db
 .DS_Store
