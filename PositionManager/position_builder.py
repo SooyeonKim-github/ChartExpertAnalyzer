@@ -7,9 +7,9 @@ import numpy as np
 import pandas as pd
 
 from config import StrategyConfig
-from daily_decision_engine import evaluate_daily_entry
+from daily_decision_engine import evaluate_daily_scale_in, scale_in_allowed
 from data_provider import fetch_ohlcv, today_yyyymmdd
-from stage_rules import stage2_limit_price
+from stage_rules import bullish_rebound_confirmed
 from stop_loss import initial_stop_price
 
 
@@ -76,75 +76,71 @@ def build_position_plans(input_path: Path, output_path: Path, cfg: StrategyConfi
             "Close": signal_price,
         })
         signal_close = float(signal_bar["Close"]) if not history.empty else float(signal_price)
+
+        # V3: CONFIRMED itself is enough for a small starter position.
+        if not future.empty:
+            first_bar = future.iloc[0]
+            actual_trigger_date = future.index[0].strftime("%Y%m%d")
+            actual_trigger_price = float(first_bar["Open"])
+            stage1_reference = actual_trigger_price
+            stage1_status = "TRIGGERED_HISTORY"
+            decision_name = "STAGE1_TRIGGERED_HISTORY"
+            decision_reason = "CONFIRMED_NEXT_OPEN"
+        else:
+            actual_trigger_date = ""
+            actual_trigger_price = np.nan
+            stage1_reference = signal_close
+            stage1_status = "NEXT_OPEN_PENDING"
+            decision_name = "STAGE1_NEXT_OPEN_PENDING"
+            decision_reason = "CONFIRMED_NEXT_OPEN"
+
+        stop_history = history if future.empty else ohlcv.loc[ohlcv.index < future.index[0]]
         stop = initial_stop_price(
-            history=history,
-            stage1_price=signal_close,
+            history=stop_history,
+            stage1_price=stage1_reference,
             lookback_bars=cfg.structural_lookback_bars,
             structural_buffer_pct=cfg.structural_stop_buffer_pct,
             max_stop_pct=cfg.max_stop_pct,
         )
 
-        decision_name = "WATCHING_D1"
-        decision_reason = "WAIT_FOR_D1_CLOSE"
-        decision_score = np.nan
         evaluation_date = ""
-        actual_trigger_date = ""
-        actual_trigger_price = np.nan
-        last_decision = None
+        decision_score = np.nan
+        daily_return_pct = np.nan
+        signal_gain_pct = np.nan
+        volume_ratio_20 = np.nan
+        ma20_distance_pct = np.nan
+        scale_in_decision = "WAIT_FOR_CLOSE_CONFIRMATION"
+        scale_in_reason = "NO_COMPLETED_POST_SIGNAL_BAR"
+        add_confirmation = False
 
-        for pos in range(min(len(future), cfg.entry_watch_bars + 1)):
-            bar_date = future.index[pos]
-            history_today = ohlcv.loc[ohlcv.index <= bar_date]
-            decision = evaluate_daily_entry(
+        if not future.empty:
+            latest_date_idx = future.index[-1]
+            history_today = ohlcv.loc[ohlcv.index <= latest_date_idx]
+            scale_decision = evaluate_daily_scale_in(
                 history=history_today,
                 signal_bar=signal_bar,
                 structural_stop=stop,
                 signal_close=signal_close,
-                bars_since_signal=pos + 1,
+                bars_since_signal=len(future),
                 cfg=cfg,
             )
-            last_decision = decision
-            decision_name = decision.decision
-            decision_reason = decision.reason
-            decision_score = decision.score.total_score
-            evaluation_date = decision.evaluation_date
+            evaluation_date = scale_decision.evaluation_date
+            decision_score = scale_decision.score.total_score
+            daily_return_pct = scale_decision.score.daily_return_pct
+            signal_gain_pct = scale_decision.score.signal_gain_pct
+            volume_ratio_20 = scale_decision.score.volume_ratio_20
+            ma20_distance_pct = scale_decision.score.ma20_distance_pct
+            scale_in_decision = scale_decision.decision
+            scale_in_reason = scale_decision.reason
 
-            if decision.decision in {"CANCEL", "EXPIRED"}:
-                break
-            if decision.decision == "READY_BUY":
-                if pos + 1 < len(future):
-                    next_bar = future.iloc[pos + 1]
-                    actual_trigger_date = future.index[pos + 1].strftime("%Y%m%d")
-                    actual_trigger_price = float(next_bar["Open"])
-                    decision_name = "ENTRY_TRIGGERED_HISTORY"
-                    decision_reason = "PRIOR_READY_BUY_NEXT_OPEN"
-                else:
-                    decision_name = "BUY_NEXT_OPEN"
-                    decision_reason = "LATEST_CLOSE_READY_BUY"
-                break
-
-        if last_decision is not None:
-            signal_gain_pct = last_decision.score.signal_gain_pct
-            volume_ratio_20 = last_decision.score.volume_ratio_20
-            ma20_distance_pct = last_decision.score.ma20_distance_pct
-            daily_return_pct = last_decision.score.daily_return_pct
-        else:
-            signal_gain_pct = np.nan
-            volume_ratio_20 = np.nan
-            ma20_distance_pct = np.nan
-            daily_return_pct = np.nan
-
-        if pd.notna(actual_trigger_price):
-            stage1_reference = actual_trigger_price
-            stage1_status = "TRIGGERED_HISTORY"
-        elif decision_name == "BUY_NEXT_OPEN":
-            stage1_reference = float(future.iloc[-1]["Close"]) if not future.empty else signal_close
-            stage1_status = "NEXT_OPEN_PENDING"
-        else:
-            stage1_reference = signal_close
-            stage1_status = "NOT_APPROVED_YET"
-
-        stage2_target = stage2_limit_price(stage1_reference, cfg.stage2_pullback_pct)
+            if len(future) >= 2:
+                add_confirmation = (
+                    scale_in_allowed(scale_decision, cfg.stage2_min_daily_score)
+                    and bullish_rebound_confirmed(future.iloc[-1], future.iloc[-2])
+                )
+                if add_confirmation:
+                    scale_in_decision = "ADD_NEXT_OPEN"
+                    scale_in_reason = "SCORE_AND_BULLISH_REBOUND_CONFIRMED"
 
         rows.append({
             "signal_date": signal_date,
@@ -162,21 +158,24 @@ def build_position_plans(input_path: Path, output_path: Path, cfg: StrategyConfi
             "volume_ratio_20": volume_ratio_20,
             "ma20_distance_pct": ma20_distance_pct,
             "stage1_weight_pct": cfg.stage1_weight * 100.0,
-            "stage1_entry_rule": "D+1_AND_LATER_DAILY_CLOSE_GATE_THEN_NEXT_OPEN",
+            "stage1_entry_rule": "CONFIRMED_THEN_NEXT_TRADING_DAY_OPEN",
             "stage1_reference_price": stage1_reference,
             "stage1_status": stage1_status,
             "actual_trigger_date": actual_trigger_date,
             "actual_trigger_open": actual_trigger_price,
+            "scale_in_decision": scale_in_decision,
+            "scale_in_reason": scale_in_reason,
+            "add_confirmation": add_confirmation,
             "stage2_weight_pct": cfg.stage2_weight * 100.0,
             "stage2_entry_rule": (
                 f"PRIOR_DAY_SCORE>={cfg.stage2_min_daily_score:.0f} + "
-                f"LIMIT_{cfg.stage2_pullback_pct * 100:.2f}%_BELOW_STAGE1"
+                "BULLISH + CLOSE_ABOVE_PREV_HIGH + CLOSE_ABOVE_MA5, THEN NEXT_OPEN"
             ),
-            "stage2_target_price": stage2_target,
+            "stage2_target_price": np.nan,
             "stage3_weight_pct": cfg.stage3_weight * 100.0,
             "stage3_entry_rule": (
-                f"PRIOR_DAY_SCORE>={cfg.stage3_min_daily_score:.0f} + "
-                "BULLISH + CLOSE_ABOVE_PREV_HIGH + CLOSE_ABOVE_MA5, THEN NEXT_OPEN"
+                f"AFTER_STAGE2, NEW_PRIOR_DAY_SCORE>={cfg.stage3_min_daily_score:.0f} + "
+                "NEW_BULLISH_BREAKOUT_CONFIRMATION, THEN NEXT_OPEN"
             ),
             "stop_price": stop,
             "trailing_rule": (
