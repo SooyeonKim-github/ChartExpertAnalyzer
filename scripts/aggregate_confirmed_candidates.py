@@ -13,6 +13,7 @@ OUTPUT_DIR = ROOT / "results"
 OUTPUT_FILE = OUTPUT_DIR / "confirmed_candidates.csv"
 TODAY = datetime.now().strftime("%Y%m%d")
 HORIZONS = (1, 5, 10, 20, 40, 60)
+DISPLAY_LIMIT = 20
 
 BASE_COLUMNS = [
     "scan_date", "analyzer", "ticker", "name", "status", "score", "timing_score",
@@ -300,6 +301,39 @@ def _sort_key(row: dict[str, str]):
     )
 
 
+def _fmt_pct(value: str | None) -> str:
+    text = _clean(value)
+    if not text:
+        return "-"
+    try:
+        return f"{float(text):+.2f}%"
+    except ValueError:
+        return text
+
+
+def _display_recent(rows: list[dict[str, str]], limit: int = DISPLAY_LIMIT) -> None:
+    recent = rows[:limit]
+    print()
+    print("=" * 102)
+    print(f"  RECENT CONFIRMED HISTORY (latest {len(recent)} / total {len(rows)})")
+    print("=" * 102)
+    print(f"{'scan_date':<10} {'analyzer':<9} {'ticker':<8} {'name':<16} {'D+5':>9} {'D+20':>9} {'D+60':>9} {'current':>9}")
+    print("-" * 102)
+    for row in recent:
+        name = _clean(row.get("name"))[:14]
+        print(
+            f"{row.get('scan_date', ''):<10} "
+            f"{row.get('analyzer', ''):<9} "
+            f"{row.get('ticker', ''):<8} "
+            f"{name:<16} "
+            f"{_fmt_pct(row.get('D+5_close_return_pct')):>9} "
+            f"{_fmt_pct(row.get('D+20_close_return_pct')):>9} "
+            f"{_fmt_pct(row.get('D+60_close_return_pct')):>9} "
+            f"{_fmt_pct(row.get('current_return_pct')):>9}"
+        )
+    print("=" * 102)
+
+
 def main() -> int:
     current = _load_kjb() + _load_swing() + _load_ma() + _load_dynamic()
 
@@ -337,6 +371,7 @@ def main() -> int:
     print(f"[DONE] Confirmed history + returns: {len(rows)} -> {OUTPUT_FILE}")
     for analyzer in ("KJB", "SWING", "MA", "DYNAMIC"):
         print(f"[INFO] Today {analyzer}: {counts.get(analyzer, 0)}")
+    _display_recent(rows)
     return 0
 
 
