@@ -10,7 +10,11 @@ set "CHARTS=%~2"
 if "%TOP_N%"=="" set "TOP_N=200"
 if "%CHARTS%"=="" set "CHARTS=30"
 set "LOOKBACK=20"
-set "INCLUDE_ETF=1"
+
+REM KR stock screening uses KOSPI + KOSDAQ only. Disable pykrx import-time login
+REM inside this setlocal scope so malformed KRX login responses cannot abort startup.
+set "KRX_ID="
+set "KRX_PW="
 
 set "PYTHON_EXE="
 set "PYTHON_PREFIX="
@@ -52,12 +56,13 @@ echo ============================================
 echo   KR Stock Screening - Independent Analyzers
 echo ============================================
 echo Universe : recent %LOOKBACK%-trading-day avg trading-value TOP %TOP_N%
-echo Markets  : KOSPI + ETF
+echo Markets  : KOSPI + KOSDAQ
 echo KJB / Swing / MA / Dynamic are evaluated independently.
+echo Dynamic status uses the same V2.2 quality rules as Dynamic range.
 echo ============================================
 echo.
 
-echo [0/5] Building shared KOSPI + ETF universe...
+echo [0/5] Building shared KOSPI + KOSDAQ universe...
 call "%ROOT%prepare_liquidity_universe.bat" screen "" "%TOP_N%" "%LOOKBACK%"
 if errorlevel 1 goto RUN_FAILED
 if not defined LIQUIDITY_UNIVERSE_XLSX goto RUN_FAILED
@@ -71,7 +76,6 @@ pushd "%ROOT%KJBChartAnalyzer"
     --info-excel "%LIQUIDITY_UNIVERSE_XLSX%" ^
     --top-n %TOP_N% ^
     --sort-by trading_value ^
-    --include-etf ^
     --period 5y ^
     --agent-top-n 30 ^
     --out output\top100_screen.csv ^
@@ -103,13 +107,15 @@ if errorlevel 1 ( popd & goto RUN_FAILED )
 popd
 
 echo.
-echo [4/5] Dynamic KR screen...
+echo [4/5] Dynamic KR screen ^(same V2.2 CONFIRMED/WATCH rules as range^)...
 pushd "%ROOT%DynamicChartAnalyzer"
 "%PYTHON_EXE%" %PYTHON_PREFIX% main_screen_kr.py ^
     --info-excel "%LIQUIDITY_UNIVERSE_XLSX%" ^
     --top-n %TOP_N% ^
     --sort-by trading_value ^
-    --years 5
+    --years 5 ^
+    --confirmed-score 70 ^
+    --watch-score 55
 if errorlevel 1 ( popd & goto RUN_FAILED )
 popd
 
@@ -125,7 +131,7 @@ echo [DONE] KR screening finished.
 echo ============================================
 echo Universe : %LIQUIDITY_UNIVERSE_XLSX%
 echo History  : %ROOT%results\confirmed_candidates.csv
-echo [INFO] KOSPI + ETF, recent %LOOKBACK%-day avg trading-value TOP %TOP_N%.
+echo [INFO] KOSPI + KOSDAQ, recent %LOOKBACK%-day avg trading-value TOP %TOP_N%.
 echo ============================================
 pause
 exit /b 0
