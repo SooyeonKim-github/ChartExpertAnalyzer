@@ -129,8 +129,8 @@ def score_daily_state(
         price_structure += 7.0
     if np.isfinite(ma20) and close >= ma20:
         price_structure += 5.0
-    recent_low = _safe_float(pd.to_numeric(history["Low"], errors="coerce").iloc[-5:].min(), low)
-    if close >= recent_low:
+    prior_lows = pd.to_numeric(history["Low"], errors="coerce").iloc[-6:-1].dropna()
+    if prior_lows.empty or close >= float(prior_lows.min()):
         price_structure += 5.0
 
     # 2) Trend: 20
