@@ -1,80 +1,92 @@
-# PositionManager
+# PositionManager V3
 
-`CONFIRMED` 신호 이후의 실제 진입 시점, 분할매수, 손절, 트레일링, 기간청산을 Analyzer와 독립적으로 관리한다.
+`CONFIRMED` 이후의 실제 진입, 추가매수, 손절, 트레일링, 기간청산을 Analyzer와 독립적으로 관리한다.
 
-핵심 원칙은 **오늘 종가까지 확정된 정보로 판단하고 실제 주문은 다음 거래일부터 실행**하는 것이다.
+V3의 핵심 원칙은 **처음부터 크게 들어가지 않고, CONFIRMED 다음 거래일 시가에 소액으로 시작한 뒤 강도가 다시 확인될 때만 비중을 추가하는 것**이다.
 
-## Dynamic Daily Decision V2
-
-`CONFIRMED = 즉시 매수`로 취급하지 않는다.
+## V3 핵심 흐름
 
 ```text
 D0 CONFIRMED
-  -> D+1 종가 평가
-  -> READY_BUY / WAIT_PULLBACK / WAIT_REBOUND / CANCEL
-  -> READY_BUY일 때만 다음 거래일 시가 Stage 1
-  -> 이후에도 매일 종가를 다시 평가하여 추가매수 허용 여부 결정
+  -> 다음 거래일 시가 Stage 1 20%
+  -> 매일 종가 재평가
+  -> 강한 재상승 확인 시 다음 거래일 시가 Stage 2 30%
+  -> 이후 새로운 강한 재상승이 다시 확인되면 다음 거래일 시가 Stage 3 50%
 ```
 
-### Daily Score 100점
+이전 V2에서 성과가 좋지 않았던 다음 로직은 제거했다.
 
-- 가격 구조: 25
-  - D0 저점/구조적 손절선 유지
-  - MA20 유지
-  - 최근 저점 구조 유지
-- 추세/MA: 20
-  - Close > MA5
-  - MA5 > MA10
-  - MA10 > MA20
-  - MA20 기울기
-- 캔들: 15
-  - 양봉
-  - 종가가 당일 고가권
-  - 전일 고가 돌파
-- 거래량: 15
-  - 상승+거래량 증가 우대
-  - 눌림+거래량 감소 우대
-  - 하락+거래량 폭증 감점
-- 과열/추격 위험: 15
-  - 신호가 대비 급등
-  - MA20 이격 과다
-- 변동성/리스크: 10
-  - 최근 평균 일중 변동폭 대비 현재 변동폭
-
-### Entry Decision
-
-기본값은 `config.py`에서 조정한다.
-
-- 80점 이상: `READY_BUY` -> 다음 거래일 시가 1차 매수
-- 65~79점: `WAIT_REBOUND`
-- 50~64점: 상황에 따라 `WAIT_REBOUND` 또는 `WAIT_PULLBACK`
-- 50점 미만: `CANCEL`
-- 최대 10거래일까지 관찰하고 미진입 시 `EXPIRED`
-- 과열 상태는 점수가 높더라도 `WAIT_PULLBACK`
-
-### Hard Cancel
-
-첫 매수 전 다음 상황이면 점수와 관계없이 후보를 폐기한다.
-
-- 종가가 구조적 손절선 아래
-- 종가가 CONFIRMED 당일 저점 아래
-- 일간 -5% 이상 급락
-- -4% 이상 하락 + 거래량 20일 평균 1.5배 이상
-- -5% 이상 갭하락 후 저가권 마감
+- `CHASE_RISK -> WAIT_PULLBACK`
+- 10거래일 후 `EXPIRED`
+- Stage 1 대비 -2.5% 하락 시 Stage 2 물타기
+- 단순 일간 급락만으로 후보를 폐기하는 `DAILY_CRASH`
+- 단순 갭하락만으로 후보를 폐기하는 `GAP_DOWN_FAILED_RECOVERY`
 
 ## 분할매수
 
-- Stage 1: Daily Decision이 `READY_BUY`가 된 **다음 거래일 시가**에 20%
-- Stage 2: 전일 Daily Score 65점 이상 + Stage 1 체결가 대비 -2.5% 지정가에 30%
-- Stage 3: 전일 Daily Score 75점 이상 + `양봉 + 종가가 전일 고가 상향 돌파 + 종가가 MA5 위` 확인 후 다음 거래일 시가에 50%
-- 매수 후 Hard Cancel 성격의 가격 훼손이 나오면 남은 추가매수는 중단한다.
+### Stage 1: 20%
+
+Analyzer에서 `CONFIRMED`가 나오면 **다음 거래일 시가**에 20% 진입한다.
+
+별도의 CHASE_RISK 대기나 READY_BUY 대기 없이 작은 비중으로 먼저 시작한다.
+
+### Stage 2: 30%
+
+아래 조건이 종가 기준으로 모두 확인되면 다음 거래일 시가에 30%를 추가한다.
+
+- Daily Score >= 75
+- 양봉
+- 종가가 전일 고가 돌파
+- 종가가 MA5 위
+- 구조 훼손 / 대량 매도 신호 없음
+
+즉, **가격이 내려왔기 때문에 추가하는 방식이 아니라 다시 강해졌기 때문에 추가한다.**
+
+### Stage 3: 50%
+
+Stage 2 체결 이후 별도의 새로운 재상승 확인이 다시 발생하면 다음 거래일 시가에 50%를 추가한다.
+
+조건은 Stage 2와 동일하게 다음을 요구한다.
+
+- Daily Score >= 75
+- 새로운 양봉
+- 새로운 전일 고가 돌파
+- MA5 위
+- 구조 훼손 없음
+
+Stage 2와 Stage 3는 같은 확인 신호에서 동시에 체결하지 않는다.
+
+## Daily Score 100점
+
+- 가격 구조: 25
+- 추세 / 이동평균: 20
+- 캔들: 15
+- 거래량: 15
+- Heat 슬롯: 15
+- 변동성 / 리스크: 10
+
+V3에서는 이미 상승했다는 이유만으로 감점하지 않는다. 기존 Heat / Chase 슬롯은 100점 체계 호환을 위해 유지하지만 기본 15점으로 처리한다.
+
+`signal_gain_pct`, `ma20_distance_pct`는 분석용 지표로 계속 출력한다.
+
+## 추가매수 중단 조건
+
+현재는 다음과 같은 구조 훼손 신호가 나오면 남은 추가매수를 중단한다.
+
+- 종가가 구조적 손절선 아래
+- 종가가 CONFIRMED 당일 저점 아래
+- -4% 이상 하락하면서 거래량이 20일 평균 1.5배 이상인 대량 매도
+
+이 조건은 기존 포지션을 즉시 시장가 청산하는 조건이 아니라 **추가매수를 막는 조건**이다. 실제 보유 포지션의 청산은 Hard Stop / Trailing Stop 로직이 담당한다.
 
 ## 매도
+
+기존 백테스트에서 상대적으로 잘 작동한 매도 로직은 유지한다.
 
 - Hard stop: 최근 10거래일 저점 아래 1%와 Stage 1 대비 -8% 중 더 타이트한 가격
 - Trailing stop: 평균단가 대비 +10% 도달 후 최고 종가 대비 -7%
 - Time exit: 실제 Stage 1 체결일부터 20거래일째 종가
-- Slippage: 매수/매도 각 5bp
+- Slippage: 매수 / 매도 각 5bp
 
 ## 최신 CONFIRMED 종목 계획
 
@@ -84,28 +96,32 @@ PositionManager\run_position_manager.bat
 
 입력:
 
-`results\confirmed_candidates.csv`
+```text
+results\confirmed_candidates.csv
+```
 
 출력:
 
-`PositionManager\results\position_plans.csv`
+```text
+PositionManager\results\position_plans.csv
+```
 
 주요 필드:
 
-- `daily_entry_decision`
+- `stage1_status`
+- `stage1_reference_price`
+- `scale_in_decision`
+- `scale_in_reason`
+- `add_confirmation`
 - `daily_entry_score`
-- `daily_entry_reason`
-- `evaluation_date`
 - `signal_gain_pct`
 - `volume_ratio_20`
 - `ma20_distance_pct`
-- `stage1_status`
+- `stop_price`
 
-신호 당일에는 아직 D+1 데이터가 없으므로 `WATCHING_D1` 상태가 정상이다.
+신호 당일에는 다음 거래일 데이터가 없으므로 `STAGE1_NEXT_OPEN_PENDING` 상태가 정상이다.
 
 ## Range backtest
-
-`run_combined_range.bat` 실행 시 최종 CONFIRMED 집계 후 Dynamic PositionManager 백테스트가 자동 실행된다.
 
 단독 실행:
 
@@ -115,28 +131,42 @@ PositionManager\run_range.bat 20260101~20260831
 
 입력:
 
-`results\range_YYYYMMDD_YYYYMMDD\confirmed_candidates.csv`
+```text
+results\range_YYYYMMDD_YYYYMMDD\confirmed_candidates.csv
+```
 
 출력:
 
-- `PositionManager\results\range_YYYYMMDD_YYYYMMDD\position_backtest.csv`
-- `PositionManager\results\range_YYYYMMDD_YYYYMMDD\daily_decisions.csv`
-- `PositionManager\results\range_YYYYMMDD_YYYYMMDD\position_backtest_summary.csv`
+```text
+PositionManager\results\range_YYYYMMDD_YYYYMMDD\position_backtest.csv
+PositionManager\results\range_YYYYMMDD_YYYYMMDD\daily_decisions.csv
+PositionManager\results\range_YYYYMMDD_YYYYMMDD\position_backtest_summary.csv
+```
 
-`daily_decisions.csv`는 각 CONFIRMED 신호에 대해 D+1, D+2, ... 매일 어떤 점수와 사유로 BUY/WAIT/CANCEL을 판단했는지 기록한다.
+`daily_decisions.csv`는 Stage 1 이후 각 거래일마다 추가매수가 가능한 상태였는지 기록한다.
 
-`strategy_return_on_planned_capital_pct`는 실제 체결 비중을 반영한 전체 계획자금 기준 수익률이다.
-`position_return_pct`는 실제 투입된 금액만 기준으로 한 포지션 수익률이다.
-`baseline_d20_pct`는 기존 Analyzer의 단순 D+20 수익률이다.
-`alpha_vs_baseline_d20_pct`는 Dynamic PositionManager 결과와 기존 D+20 결과의 차이다.
-
-매수를 취소하거나 신호가 만료된 경우 전략 수익률은 현금 보유 기준 0%로 두고, 해당 종목의 `baseline_d20_pct`도 계속 보존한다. 따라서 **취소한 종목이 실제로 이후 하락했는지, 혹은 좋은 수익 기회를 놓쳤는지** 검증할 수 있다.
+`position_backtest.csv`에서는 Stage 1 / Stage 2 / Stage 3 실제 체결일과 가격, 실제 투자 비중, 손절 / 트레일링 / 기간청산 결과를 확인할 수 있다.
 
 ## Look-ahead 방지
 
-- D+1 종가 판단은 D+2 시가부터 반영한다.
-- 모든 Daily Score는 해당 평가일 종가까지의 데이터만 사용한다.
-- Stage 2의 당일 체결 허용 여부는 전일 종가 점수로 결정한다.
-- Stage 3 조건은 종가로 확인한 뒤 다음 거래일 시가에 체결한다.
-- 트레일링 스탑도 전일까지 확정된 trailing level을 다음 봉부터 적용한다.
-- Stage 2와 stop이 같은 봉에 동시에 닿는 경우 stop을 우선한다.
+- CONFIRMED는 D0 종가까지 확정된 정보로 본다.
+- Stage 1은 D+1 시가에 체결한다.
+- Stage 2 / Stage 3 조건은 당일 종가로 확인하고 다음 거래일 시가에 체결한다.
+- 트레일링 스탑도 확정된 이전 종가 정보만 사용한다.
+- 추가매수 승인과 당일 저가를 동시에 이용해 체결하는 로직은 사용하지 않는다.
+
+## V3 설계 목적
+
+```text
+좋은 종목을 미리 너무 많이 걸러내지 않는다.
+        +
+처음에는 작게 진입한다.
+        +
+강도가 재확인될 때만 비중을 늘린다.
+        +
+구조가 깨지면 추가매수를 멈춘다.
+        +
+Hard Stop / Trailing으로 리스크를 관리한다.
+```
+
+즉 V3는 **선별을 더 강하게 하는 PositionManager가 아니라, Analyzer가 찾은 CONFIRMED 종목에 작게 들어가고 확인될수록 추가하는 PositionManager**다.
