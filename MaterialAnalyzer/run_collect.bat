@@ -23,9 +23,10 @@ echo.
 echo ============================================
 echo   MaterialAnalyzer V1 - Collector
 echo ============================================
-echo News   : Naver Search API
-echo Policy : Korea Policy Briefing
-echo Filing : OpenDART
+echo News     : Naver Search API
+echo Policy   : Korea Policy Briefing
+echo Filing   : OpenDART
+echo Schedule : Future date/time extraction
 echo ============================================
 echo.
 
@@ -46,5 +47,5 @@ if not "%EXIT_CODE%"=="0" (
 )
 
 echo.
-echo [DONE] Material collection completed.
+echo [DONE] Material + schedule collection completed.
 pause
