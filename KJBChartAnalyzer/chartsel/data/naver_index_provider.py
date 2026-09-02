@@ -1,186 +1,29 @@
 from __future__ import annotations
 
-import time
-from html.parser import HTMLParser
-from urllib.parse import urlencode
-from urllib.request import Request, urlopen
+import sys
+from pathlib import Path
 
-import pandas as pd
+REPO_ROOT = Path(__file__).resolve().parents[3]
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
 
-
-_INDEX_CODES = {
-    "^KS11": "KOSPI",
-    "KOSPI": "KOSPI",
-    "1001": "KOSPI",
-    "^KQ11": "KOSDAQ",
-    "KOSDAQ": "KOSDAQ",
-    "2001": "KOSDAQ",
-}
-
-_BASE_URL = "https://finance.naver.com/sise/sise_index_day.naver"
-_HEADERS = {
-    "User-Agent": (
-        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
-        "AppleWebKit/537.36 (KHTML, like Gecko) "
-        "Chrome/151.0.0.0 Safari/537.36"
-    ),
-    "Referer": "https://finance.naver.com/",
-}
+from MarketData.naver_index import (  # noqa: E402
+    fetch_naver_index_ohlcv as _fetch_shared,
+    normalize_index_code,
+)
 
 
-class _NaverTableParser(HTMLParser):
-    """네이버 지수 일별시세의 tr/td 텍스트만 가볍게 추출한다."""
-
-    def __init__(self) -> None:
-        super().__init__(convert_charrefs=True)
-        self.rows: list[list[str]] = []
-        self._in_tr = False
-        self._in_td = False
-        self._cells: list[str] = []
-        self._chunks: list[str] = []
-
-    def handle_starttag(self, tag: str, attrs) -> None:
-        tag = tag.lower()
-        if tag == "tr":
-            self._in_tr = True
-            self._cells = []
-        elif tag == "td" and self._in_tr:
-            self._in_td = True
-            self._chunks = []
-
-    def handle_data(self, data: str) -> None:
-        if self._in_td:
-            text = str(data or "").strip()
-            if text:
-                self._chunks.append(text)
-
-    def handle_endtag(self, tag: str) -> None:
-        tag = tag.lower()
-        if tag == "td" and self._in_td:
-            self._cells.append(" ".join(self._chunks).strip())
-            self._chunks = []
-            self._in_td = False
-        elif tag == "tr" and self._in_tr:
-            if self._cells:
-                self.rows.append(self._cells)
-            self._cells = []
-            self._in_tr = False
-            self._in_td = False
-
-
-def normalize_index_code(value: str) -> str:
-    key = str(value or "").strip().upper()
-    if key not in _INDEX_CODES:
-        raise ValueError(f"지원하지 않는 네이버 시장지수 코드입니다: {value}")
-    return _INDEX_CODES[key]
-
-
-def _number(text: str) -> float:
-    raw = str(text or "").replace(",", "").replace("%", "").strip()
-    return float(raw) if raw else float("nan")
-
-
-def _parse_page(html: str) -> pd.DataFrame:
-    parser = _NaverTableParser()
-    parser.feed(html)
-    rows: list[dict[str, object]] = []
-
-    for cells in parser.rows:
-        if len(cells) < 6:
-            continue
-        date_text = cells[0]
-        try:
-            dt = pd.to_datetime(date_text, format="%Y.%m.%d", errors="raise")
-        except Exception:
-            continue
-
-        close = _number(cells[1])
-        change_rate = _number(cells[3])
-        volume_thousand = _number(cells[4])
-        trading_value_million = _number(cells[5])
-        rows.append(
-            {
-                "Date": dt.normalize(),
-                "Close": close,
-                "Change_Rate": change_rate,
-                # 네이버 표 단위: 천주 / 백만원. 내부에서는 실제 단위로 환산한다.
-                "Volume": volume_thousand * 1_000.0,
-                "Trading_Value": trading_value_million * 1_000_000.0,
-            }
-        )
-
-    if not rows:
-        return pd.DataFrame(
-            columns=["Open", "High", "Low", "Close", "Volume", "Trading_Value", "Change_Rate"]
-        )
-
-    out = pd.DataFrame(rows).set_index("Date").sort_index()
-    out = out[~out.index.duplicated(keep="last")]
-
-    # 네이버의 index day 표는 일별 종가 중심 데이터다. KJB의 시장 레짐/상대강도는
-    # Close 이동평균과 수익률을 사용하므로 지수에 한해 OHLC를 Close로 채운다.
-    # 이 데이터는 개별 종목 캔들/고저가 분석에는 사용하지 않는다.
-    out["Open"] = out["Close"]
-    out["High"] = out["Close"]
-    out["Low"] = out["Close"]
-    return out[["Open", "High", "Low", "Close", "Volume", "Trading_Value", "Change_Rate"]]
-
-
-def _fetch_html(code: str, page: int, timeout: float) -> str:
-    query = urlencode({"code": code, "page": int(page)})
-    req = Request(f"{_BASE_URL}?{query}", headers=_HEADERS)
-    with urlopen(req, timeout=timeout) as response:
-        raw = response.read()
-        charset = response.headers.get_content_charset() or "euc-kr"
-    try:
-        return raw.decode(charset, errors="replace")
-    except LookupError:
-        return raw.decode("euc-kr", errors="replace")
-
-
-def fetch_naver_index_ohlcv(
-    index_code: str,
-    start_date: str,
-    end_date: str,
-    *,
-    timeout: float = 10.0,
-    sleep_sec: float = 0.03,
-    max_pages: int = 1000,
-) -> pd.DataFrame:
-    """네이버 금융 일별시세에서 KOSPI/KOSDAQ 종가 기반 시장 데이터를 조회한다.
-
-    페이지는 최신일에서 과거 방향으로 내려간다. 요청 시작일보다 오래된 행이
-    확인되면 추가 페이지 요청을 중단한다. 외부 크롤링 패키지 없이 Python
-    표준 라이브러리만 사용한다.
-    """
-    code = normalize_index_code(index_code)
-    start_ts = pd.Timestamp(start_date).normalize()
-    end_ts = pd.Timestamp(end_date).normalize()
-    if start_ts > end_ts:
-        raise ValueError(f"start_date > end_date: {start_date} > {end_date}")
-
-    frames: list[pd.DataFrame] = []
-
-    for page in range(1, max_pages + 1):
-        frame = _parse_page(_fetch_html(code, page, timeout))
-        if frame.empty:
-            break
-
-        frames.append(frame)
-        oldest = pd.Timestamp(frame.index.min()).normalize()
-        if oldest <= start_ts:
-            break
-        if sleep_sec > 0:
-            time.sleep(sleep_sec)
-
-    if not frames:
-        raise RuntimeError(f"네이버 시장지수 데이터가 비어 있습니다: {code}")
-
-    out = pd.concat(frames).sort_index()
-    out = out[~out.index.duplicated(keep="last")]
-    out = out.loc[(out.index >= start_ts) & (out.index <= end_ts)].copy()
-    if out.empty:
-        raise RuntimeError(
-            f"네이버 시장지수 요청 기간에 데이터가 없습니다: {code} {start_date}~{end_date}"
-        )
-    return out
+def fetch_naver_index_ohlcv(index_code: str, start_date: str, end_date: str, **kwargs):
+    """Compatibility wrapper returning KJB's historical uppercase column names."""
+    out = _fetch_shared(index_code, start_date, end_date, **kwargs).copy()
+    return out.rename(
+        columns={
+            "open": "Open",
+            "high": "High",
+            "low": "Low",
+            "close": "Close",
+            "volume": "Volume",
+            "trading_value": "Trading_Value",
+            "change_rate": "Change_Rate",
+        }
+    )[["Open", "High", "Low", "Close", "Volume", "Trading_Value", "Change_Rate"]]
