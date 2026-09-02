@@ -29,28 +29,29 @@ def _print_summary(summary: pd.DataFrame) -> None:
         print("[INFO] No position backtest rows.")
         return
     cols = [
-        "analyzer", "count", "closed_count", "win_rate_pct",
-        "avg_strategy_return_pct", "avg_invested_weight_pct",
-        "avg_baseline_d20_pct", "avg_alpha_vs_baseline_d20_pct",
+        "analyzer", "count", "entered_count", "entry_cancelled_count", "expired_count",
+        "entry_rate_pct", "win_rate_pct", "avg_strategy_return_pct",
+        "avg_invested_weight_pct", "avg_baseline_d20_pct",
+        "avg_alpha_vs_baseline_d20_pct", "cancelled_avg_baseline_d20_pct",
     ]
-    view = summary[cols].copy()
+    view = summary[[c for c in cols if c in summary.columns]].copy()
     print()
-    print("=" * 110)
-    print("  POSITION MANAGER BACKTEST SUMMARY")
-    print("=" * 110)
+    print("=" * 130)
+    print("  DYNAMIC POSITION MANAGER BACKTEST SUMMARY")
+    print("=" * 130)
     print(view.to_string(index=False, float_format=lambda x: f"{x:8.2f}"))
-    print("=" * 110)
+    print("=" * 130)
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description="Independent scale-in PositionManager")
+    parser = argparse.ArgumentParser(description="Dynamic daily-decision scale-in PositionManager")
     sub = parser.add_subparsers(dest="command", required=True)
 
-    screen = sub.add_parser("screen", help="Build plans for latest confirmed screening date")
+    screen = sub.add_parser("screen", help="Build dynamic plans for latest confirmed screening date")
     screen.add_argument("--input", default=str(ROOT / "results" / "confirmed_candidates.csv"))
     screen.add_argument("--output", default=str(HERE / "results" / "position_plans.csv"))
 
-    rng = sub.add_parser("range", help="Backtest PositionManager on range confirmed signals")
+    rng = sub.add_parser("range", help="Backtest dynamic PositionManager on range confirmed signals")
     rng.add_argument("--date-range", required=True)
 
     args = parser.parse_args()
@@ -59,14 +60,15 @@ def main() -> int:
 
     if args.command == "screen":
         out = build_position_plans(Path(args.input), Path(args.output), cfg)
-        print(f"[DONE] Position plans: {len(out)} -> {args.output}")
+        print(f"[DONE] Dynamic position plans: {len(out)} -> {args.output}")
         if not out.empty:
             cols = [
                 "signal_date", "analyzer", "ticker", "name",
-                "stage1_weight_pct", "stage2_target_price",
-                "stage3_weight_pct", "stop_price",
+                "evaluation_date", "daily_entry_decision", "daily_entry_score",
+                "stage1_status", "stage2_target_price", "stop_price",
             ]
-            print(out[cols].to_string(index=False))
+            view = out[[c for c in cols if c in out.columns]].copy()
+            print(view.to_string(index=False, float_format=lambda x: f"{x:8.2f}"))
         return 0
 
     start, end = _parse_range(args.date_range)
@@ -81,6 +83,7 @@ def main() -> int:
         end=end,
     )
     print(f"[DONE] Position backtest rows: {len(detail)} -> {output_dir / 'position_backtest.csv'}")
+    print(f"[DONE] Daily decision log -> {output_dir / 'daily_decisions.csv'}")
     print(f"[DONE] Position summary -> {output_dir / 'position_backtest_summary.csv'}")
     _print_summary(summary)
     return 0
