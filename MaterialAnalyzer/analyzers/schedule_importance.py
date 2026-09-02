@@ -11,7 +11,9 @@ from ..schedule_models import ScheduleItem
 
 
 _TOKEN_RE = re.compile(r"[가-힣A-Za-z0-9]{2,}")
-_MONEY_RE = re.compile(r"(?P<num>\d+(?:\.\d+)?)\s*(?P<unit>조|억|만)\s*원")
+_MONEY_RE = re.compile(
+    r"(?P<num>\d+(?:\.\d+)?)\s*(?P<unit>조|억|만)\s*(?:원)?(?=\s*(?:규모|투자|지원|예산|사업|펀드|기금|투입|확대|발표|계획|$|[,.)]))"
+)
 
 _AUTHORITY_RULES: tuple[tuple[int, tuple[str, ...]], ...] = (
     (15, ("대통령", "정상회담", "국무회의", "총리")),
