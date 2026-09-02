@@ -7,21 +7,11 @@ import numpy as np
 import pandas as pd
 
 from config import StrategyConfig
-from daily_decision_engine import (
-    decision_log_row,
-    evaluate_daily_entry,
-    evaluate_daily_scale_in,
-    scale_in_allowed,
-)
+from daily_decision_engine import decision_log_row, evaluate_daily_scale_in, scale_in_allowed
 from data_provider import fetch_ohlcv, today_yyyymmdd
 from models import BacktestResult, Fill
 from performance_tracker import summarize_backtests
-from stage_rules import (
-    stage2_fill_price,
-    stage2_limit_price,
-    stage2_touched,
-    stage3_rebound_confirmed,
-)
+from stage_rules import stage2_rebound_confirmed, stage3_rebound_confirmed
 from stop_loss import initial_stop_price, stop_fill_price
 
 
@@ -75,14 +65,6 @@ def _weighted_average(fills: list[Fill]) -> tuple[float, float, float]:
     return invested_weight, qty, avg
 
 
-def _finish_no_entry(result: BacktestResult, status: str, reason: str) -> None:
-    result.trade_status = status
-    result.entry_cancel_reason = reason
-    result.strategy_return_on_planned_capital_pct = 0.0
-    if result.baseline_d20_pct is not None:
-        result.alpha_vs_baseline_d20_pct = -float(result.baseline_d20_pct)
-
-
 def _simulate_row(
     row: pd.Series,
     ohlcv: pd.DataFrame,
@@ -127,15 +109,14 @@ def _simulate_row(
     result.initial_stop_price = provisional_stop
 
     fills: list[Fill] = []
-    pending_stage1 = not cfg.use_daily_entry_gate
-    stage2_allowed_next = False
+    stage2_pending = False
     stage2_filled = False
-    stage3_filled = False
     stage3_pending = False
+    stage3_filled = False
     scale_in_cancelled = False
     stage2_fill_holding_bar: int | None = None
+
     hard_stop = provisional_stop
-    stage2_target: float | None = None
     trailing_stop: float | None = None
     peak_close: float | None = None
     exit_date: pd.Timestamp | None = None
@@ -145,23 +126,25 @@ def _simulate_row(
     max_high: float | None = None
     min_low: float | None = None
 
+    # Stage 1 is always the next trading-day open. No CHASE_RISK / EXPIRED gate.
     loop_bars = min(
         len(future),
-        cfg.entry_watch_bars + cfg.max_holding_bars + cfg.stage3_window_bars + 5,
+        cfg.max_holding_bars + max(cfg.stage2_window_bars, cfg.stage3_window_bars) + 5,
     )
 
     for pos in range(loop_bars):
         bar_date = future.index[pos]
         bar = future.iloc[pos]
-        just_entered = False
 
-        # A READY_BUY decision is made only with the prior close. The fill is next open.
-        if not fills and pending_stage1:
+        if not fills:
             _add_fill(fills, 1, bar_date, float(bar["Open"]), cfg.stage1_weight, cfg)
             result.stage1_date = fills[-1].date
             result.stage1_price = fills[-1].price
-            result.wait_bars_before_entry = pos
-            just_entered = True
+            result.wait_bars_before_entry = 0
+            result.entry_validation_date = signal_date
+            result.entry_validation_score = None
+            result.entry_decision = "CONFIRMED_D1_OPEN"
+            result.entry_decision_reason = "START_SMALL_ADD_ONLY_ON_STRENGTH"
             holding_bars = 1
 
             pre_entry_history = ohlcv.loc[ohlcv.index < bar_date]
@@ -172,135 +155,67 @@ def _simulate_row(
                 structural_buffer_pct=cfg.structural_stop_buffer_pct,
                 max_stop_pct=cfg.max_stop_pct,
             )
-            stage2_target = stage2_limit_price(fills[-1].price, cfg.stage2_pullback_pct)
             result.initial_stop_price = hard_stop
-            result.stage2_target = stage2_target
-            pending_stage1 = False
+            result.stage2_target = None
             max_high = float(bar["High"])
             min_low = float(bar["Low"])
+        else:
+            holding_bars += 1
 
-            if not cfg.use_daily_entry_gate:
-                result.entry_validation_date = signal_date
-                result.entry_validation_score = None
-                result.entry_decision = "LEGACY_D1_OPEN"
-                result.entry_decision_reason = "DAILY_GATE_DISABLED"
+        # Add-on approvals are made at yesterday's close and execute at today's open.
+        if stage2_pending and not stage2_filled and not scale_in_cancelled:
+            _add_fill(fills, 2, bar_date, float(bar["Open"]), cfg.stage2_weight, cfg)
+            result.stage2_date = fills[-1].date
+            result.stage2_price = fills[-1].price
+            stage2_filled = True
+            stage2_pending = False
+            stage2_fill_holding_bar = holding_bars
 
-        if fills:
-            if not just_entered:
-                holding_bars += 1
+        if stage3_pending and not stage3_filled and not scale_in_cancelled:
+            _add_fill(fills, 3, bar_date, float(bar["Open"]), cfg.stage3_weight, cfg)
+            result.stage3_date = fills[-1].date
+            result.stage3_price = fills[-1].price
+            stage3_filled = True
+            stage3_pending = False
 
-            max_high = max(max_high if max_high is not None else float(bar["High"]), float(bar["High"]))
-            min_low = min(min_low if min_low is not None else float(bar["Low"]), float(bar["Low"]))
+        max_high = max(max_high if max_high is not None else float(bar["High"]), float(bar["High"]))
+        min_low = min(min_low if min_low is not None else float(bar["Low"]), float(bar["Low"]))
 
-            # Stage 3 was approved using yesterday's close, so it can fill at today's open.
-            if stage3_pending and not stage3_filled and not scale_in_cancelled:
-                _add_fill(fills, 3, bar_date, float(bar["Open"]), cfg.stage3_weight, cfg)
-                result.stage3_date = fills[-1].date
-                result.stage3_price = fills[-1].price
-                stage3_filled = True
-                stage3_pending = False
-
-            # Existing position risk is checked before any intraday Stage 2 limit fill.
-            active_stop = hard_stop if trailing_stop is None else max(hard_stop, trailing_stop)
-            stopped_at = stop_fill_price(bar, active_stop)
-            if stopped_at is not None:
-                exit_date = bar_date
-                exit_price = _sell_price(stopped_at, cfg.slippage_bps)
-                exit_reason = (
-                    "TRAILING_STOP"
-                    if trailing_stop is not None and active_stop == trailing_stop
-                    else "HARD_STOP"
-                )
-                break
-
-            if (
-                not stage2_filled
-                and not scale_in_cancelled
-                and stage2_allowed_next
-                and holding_bars <= cfg.stage2_window_bars
-                and stage2_target is not None
-                and stage2_touched(bar, stage2_target)
-            ):
-                _add_fill(
-                    fills,
-                    2,
-                    bar_date,
-                    stage2_fill_price(bar, stage2_target),
-                    cfg.stage2_weight,
-                    cfg,
-                )
-                result.stage2_date = fills[-1].date
-                result.stage2_price = fills[-1].price
-                stage2_filled = True
-                stage2_fill_holding_bar = holding_bars
-
-            invested_weight, total_qty, avg_entry = _weighted_average(fills)
-            if total_qty > 0:
-                close = float(bar["Close"])
-                if close >= avg_entry * (1.0 + cfg.trailing_activate_pct):
-                    peak_close = max(peak_close or close, close)
-                    trailing_stop = peak_close * (1.0 - cfg.trailing_stop_pct)
-                elif peak_close is not None:
-                    peak_close = max(peak_close, close)
-                    trailing_stop = peak_close * (1.0 - cfg.trailing_stop_pct)
-
-            if holding_bars >= cfg.max_holding_bars:
-                exit_date = bar_date
-                exit_price = _sell_price(float(bar["Close"]), cfg.slippage_bps)
-                exit_reason = "D20_TIME_EXIT"
-                break
-
-            # Re-score at today's close. This decision can only affect tomorrow or later.
-            history_today = ohlcv.loc[ohlcv.index <= bar_date]
-            scale_decision = evaluate_daily_scale_in(
-                history=history_today,
-                signal_bar=signal_bar,
-                structural_stop=hard_stop,
-                signal_close=signal_close,
-                bars_since_signal=pos + 1,
-                cfg=cfg,
+        # Keep the original hard stop / trailing stop logic.
+        active_stop = hard_stop if trailing_stop is None else max(hard_stop, trailing_stop)
+        stopped_at = stop_fill_price(bar, active_stop)
+        if stopped_at is not None:
+            exit_date = bar_date
+            exit_price = _sell_price(stopped_at, cfg.slippage_bps)
+            exit_reason = (
+                "TRAILING_STOP"
+                if trailing_stop is not None and active_stop == trailing_stop
+                else "HARD_STOP"
             )
-            logs.append(decision_log_row(
-                signal_date=signal_date,
-                analyzer=result.analyzer,
-                ticker=result.ticker,
-                name=result.name,
-                position_stage=len(fills),
-                decision=scale_decision,
-            ))
+            break
 
-            if scale_decision.score.hard_cancel_reason:
-                scale_in_cancelled = True
-                if not result.scale_in_cancel_reason:
-                    result.scale_in_cancel_reason = scale_decision.score.hard_cancel_reason
+        invested_weight, total_qty, avg_entry = _weighted_average(fills)
+        if total_qty > 0:
+            close = float(bar["Close"])
+            if close >= avg_entry * (1.0 + cfg.trailing_activate_pct):
+                peak_close = max(peak_close or close, close)
+                trailing_stop = peak_close * (1.0 - cfg.trailing_stop_pct)
+            elif peak_close is not None:
+                peak_close = max(peak_close, close)
+                trailing_stop = peak_close * (1.0 - cfg.trailing_stop_pct)
 
-            stage2_allowed_next = (
-                not stage2_filled
-                and not scale_in_cancelled
-                and scale_in_allowed(scale_decision, cfg.stage2_min_daily_score)
-            )
+        if holding_bars >= cfg.max_holding_bars:
+            exit_date = bar_date
+            exit_price = _sell_price(float(bar["Close"]), cfg.slippage_bps)
+            exit_reason = "D20_TIME_EXIT"
+            break
 
-            if (
-                stage2_filled
-                and not stage3_filled
-                and not stage3_pending
-                and not scale_in_cancelled
-                and pos >= 1
-                and stage2_fill_holding_bar is not None
-                and holding_bars - stage2_fill_holding_bar <= cfg.stage3_window_bars
-                and scale_in_allowed(scale_decision, cfg.stage3_min_daily_score)
-                and stage3_rebound_confirmed(bar, future.iloc[pos - 1])
-                and pos + 1 < loop_bars
-            ):
-                stage3_pending = True
-            continue
-
-        # No position yet: observe D+1, D+2, ... closes and decide whether tomorrow is buyable.
+        # Re-score at today's close. It may only approve an add for tomorrow's open.
         history_today = ohlcv.loc[ohlcv.index <= bar_date]
-        entry_decision = evaluate_daily_entry(
+        scale_decision = evaluate_daily_scale_in(
             history=history_today,
             signal_bar=signal_bar,
-            structural_stop=provisional_stop,
+            structural_stop=hard_stop,
             signal_close=signal_close,
             bars_since_signal=pos + 1,
             cfg=cfg,
@@ -310,26 +225,49 @@ def _simulate_row(
             analyzer=result.analyzer,
             ticker=result.ticker,
             name=result.name,
-            position_stage=0,
-            decision=entry_decision,
+            position_stage=len(fills),
+            decision=scale_decision,
         ))
-        result.entry_validation_date = entry_decision.evaluation_date
-        result.entry_validation_score = entry_decision.score.total_score
-        result.entry_decision = entry_decision.decision
-        result.entry_decision_reason = entry_decision.reason
 
-        if entry_decision.decision == "READY_BUY":
-            if pos + 1 < loop_bars:
-                pending_stage1 = True
-            else:
-                result.trade_status = "READY_BUY_NO_NEXT_BAR"
+        if scale_decision.score.hard_cancel_reason:
+            scale_in_cancelled = True
+            stage2_pending = False
+            stage3_pending = False
+            if not result.scale_in_cancel_reason:
+                result.scale_in_cancel_reason = scale_decision.score.hard_cancel_reason
             continue
-        if entry_decision.decision == "CANCEL":
-            _finish_no_entry(result, "ENTRY_CANCELLED", entry_decision.reason)
-            break
-        if entry_decision.decision == "EXPIRED":
-            _finish_no_entry(result, "SIGNAL_EXPIRED", entry_decision.reason)
-            break
+
+        if pos < 1 or pos + 1 >= loop_bars:
+            continue
+
+        previous_bar = future.iloc[pos - 1]
+
+        # V3 Stage 2: removed the -2.5% averaging-down limit.
+        # Add only after the same bullish rebound confirmation that worked well for Stage 3.
+        if (
+            not stage2_filled
+            and not stage2_pending
+            and not scale_in_cancelled
+            and holding_bars <= cfg.stage2_window_bars
+            and scale_in_allowed(scale_decision, cfg.stage2_min_daily_score)
+            and stage2_rebound_confirmed(bar, previous_bar)
+        ):
+            stage2_pending = True
+            continue
+
+        # Stage 3 requires a separate later confirmation after Stage 2 has already filled.
+        if (
+            stage2_filled
+            and not stage3_filled
+            and not stage3_pending
+            and not scale_in_cancelled
+            and stage2_fill_holding_bar is not None
+            and holding_bars > stage2_fill_holding_bar
+            and holding_bars - stage2_fill_holding_bar <= cfg.stage3_window_bars
+            and scale_in_allowed(scale_decision, cfg.stage3_min_daily_score)
+            and stage3_rebound_confirmed(bar, previous_bar)
+        ):
+            stage3_pending = True
 
     invested_weight, total_qty, avg_entry = _weighted_average(fills)
     result.invested_weight = invested_weight
@@ -368,11 +306,6 @@ def _simulate_row(
                 result.alpha_vs_baseline_d20_pct = (
                     result.strategy_return_on_planned_capital_pct - result.baseline_d20_pct
                 )
-    elif not result.trade_status:
-        result.trade_status = "WATCHING_INCOMPLETE"
-        result.strategy_return_on_planned_capital_pct = 0.0
-        if result.baseline_d20_pct is not None:
-            result.alpha_vs_baseline_d20_pct = -float(result.baseline_d20_pct)
 
     return result, logs
 
