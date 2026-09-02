@@ -35,6 +35,12 @@ def evaluate_daily_entry(
     bars_since_signal: int,
     cfg: StrategyConfig,
 ) -> DailyDecision:
+    """Compatibility helper for diagnostics.
+
+    V3 no longer uses this function to delay Stage 1. CHASE_RISK and EXPIRED
+    branches were intentionally removed. A CONFIRMED signal is started small on
+    the next trading-day open; this score is only useful for diagnostics.
+    """
     score = score_daily_state(
         history=history,
         signal_bar=signal_bar,
@@ -52,65 +58,19 @@ def evaluate_daily_entry(
             bars_since_signal=bars_since_signal,
             score=score,
         )
-
-    if bars_since_signal > cfg.entry_watch_bars:
-        return DailyDecision(
-            evaluation_date=evaluation_date,
-            decision="EXPIRED",
-            reason="ENTRY_WINDOW_EXPIRED",
-            bars_since_signal=bars_since_signal,
-            score=score,
-        )
-
-    overheated = (
-        score.signal_gain_pct >= cfg.chase_signal_gain_pct * 100.0
-        or (
-            score.ma20_distance_pct is not None
-            and score.ma20_distance_pct >= cfg.chase_ma20_distance_pct * 100.0
-        )
-        or score.heat_score <= cfg.min_heat_score_for_entry
-    )
-    if overheated:
-        return DailyDecision(
-            evaluation_date=evaluation_date,
-            decision="WAIT_PULLBACK",
-            reason="CHASE_RISK",
-            bars_since_signal=bars_since_signal,
-            score=score,
-        )
-
     if score.total_score >= cfg.entry_buy_score:
-        return DailyDecision(
-            evaluation_date=evaluation_date,
-            decision="READY_BUY",
-            reason="DAILY_SCORE_READY",
-            bars_since_signal=bars_since_signal,
-            score=score,
-        )
-
-    if score.total_score >= cfg.entry_wait_rebound_score:
-        return DailyDecision(
-            evaluation_date=evaluation_date,
-            decision="WAIT_REBOUND",
-            reason="NEEDS_STRONGER_REBOUND",
-            bars_since_signal=bars_since_signal,
-            score=score,
-        )
-
-    if score.total_score >= cfg.entry_cancel_score:
-        decision = "WAIT_PULLBACK" if score.signal_gain_pct > 0 else "WAIT_REBOUND"
-        return DailyDecision(
-            evaluation_date=evaluation_date,
-            decision=decision,
-            reason="ENTRY_SCORE_NOT_READY",
-            bars_since_signal=bars_since_signal,
-            score=score,
-        )
+        decision, reason = "READY_BUY", "DAILY_SCORE_READY"
+    elif score.total_score >= cfg.entry_wait_rebound_score:
+        decision, reason = "WAIT_REBOUND", "NEEDS_STRONGER_REBOUND"
+    elif score.total_score >= cfg.entry_cancel_score:
+        decision, reason = "WAIT_REBOUND", "ENTRY_SCORE_NOT_READY"
+    else:
+        decision, reason = "CANCEL", "DAILY_SCORE_TOO_LOW"
 
     return DailyDecision(
         evaluation_date=evaluation_date,
-        decision="CANCEL",
-        reason="DAILY_SCORE_TOO_LOW",
+        decision=decision,
+        reason=reason,
         bars_since_signal=bars_since_signal,
         score=score,
     )
