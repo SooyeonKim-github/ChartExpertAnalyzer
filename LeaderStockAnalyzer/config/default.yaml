@@ -1,0 +1,35 @@
+universe:
+  top_n: 100
+  min_price: 500
+  exclude_spac: true
+  market_cap_enabled: false
+  market_cap_min: 50000000000
+  market_cap_max: 3000000000000
+
+money_flow:
+  daily_value_min: 60000000000
+  daily_value_mid: 30000000000
+  daily_value_low: 10000000000
+  intraday_3m_min: 5000000000
+  intraday_10m_min: 5000000000
+
+weights:
+  money_flow: 30
+  price_strength: 20
+  daily_position: 20
+  intraday_strength: 15
+  relative_strength: 10
+  ma_structure: 5
+
+thresholds:
+  strong_confirmed_leader: 85
+  strong_confirmed_timing: 75
+  confirmed_leader: 75
+  confirmed_timing: 70
+  watch_leader: 65
+  max_confirmed_chase_risk: 60
+  strong_rank_max: 5
+data:
+  history_days: 420
+  intraday_root: data/intraday
+  cache_root: cache
