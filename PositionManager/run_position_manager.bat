@@ -26,7 +26,10 @@ if exist "%ROOT%\KJBChartAnalyzer\.venv\Scripts\python.exe" (
 if "%PYTHON_EXE%"=="" exit /b 1
 
 echo ============================================
-echo   PositionManager - Latest Confirmed Plans
+echo   Dynamic PositionManager - Daily Plans
+echo ============================================
+echo CONFIRMED signals are re-evaluated using only known daily closes.
+echo READY_BUY is executed on the following trading-day open.
 echo ============================================
 "%PYTHON_EXE%" %PYTHON_PREFIX% "%HERE%main.py" screen
 if errorlevel 1 (
