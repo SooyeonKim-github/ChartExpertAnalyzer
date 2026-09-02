@@ -1,12 +1,17 @@
 from __future__ import annotations
 
+import os
 from pathlib import Path
 from typing import Iterable
 
 import pandas as pd
 
+from .naver_index_provider import fetch_naver_index_ohlcv
+
 
 class PyKrxLeaderDataProvider:
+    _stock_module = None
+
     def __init__(self, cfg: dict, base_dir: str | Path):
         self.cfg = cfg
         self.base_dir = Path(base_dir)
@@ -14,12 +19,40 @@ class PyKrxLeaderDataProvider:
         self.cache_dir.mkdir(parents=True, exist_ok=True)
         self.intraday_root = self.base_dir / cfg["data"]["intraday_root"]
 
-    @staticmethod
-    def _stock():
+    @classmethod
+    def _stock(cls):
+        if cls._stock_module is not None:
+            return cls._stock_module
+
+        # pykrx 1.2.x initializes a KRX login session at import time whenever
+        # KRX_ID/KRX_PW are present. LeaderStockAnalyzer only uses public stock,
+        # market-cap and index APIs, so an unrelated login failure must not stop
+        # the analyzer before those public APIs can even be called.
+        #
+        # Removing these variables affects only this Python child process; it does
+        # not delete the credentials from the parent Command Prompt environment.
+        disabled_auto_login = False
+        for key in ("KRX_ID", "KRX_PW"):
+            if os.environ.pop(key, None) is not None:
+                disabled_auto_login = True
+        if disabled_auto_login:
+            print(
+                "[INFO] LeaderStockAnalyzer: pykrx KRX auto-login disabled; "
+                "using public stock-data APIs.",
+                flush=True,
+            )
+
         try:
             from pykrx import stock
         except ImportError as exc:
             raise RuntimeError("pykrx is not installed. Run: pip install -r requirements.txt") from exc
+        except Exception as exc:
+            raise RuntimeError(
+                "pykrx initialization failed before market-data lookup. "
+                "LeaderStockAnalyzer disabled KRX auto-login, but pykrx still failed to initialize."
+            ) from exc
+
+        cls._stock_module = stock
         return stock
 
     @staticmethod
@@ -41,19 +74,31 @@ class PyKrxLeaderDataProvider:
         stock = self._stock()
         ts = pd.Timestamp(requested) if requested else pd.Timestamp.today()
         ts = ts.normalize()
+        last_error: Exception | None = None
         for offset in range(0, 15):
             d = (ts - pd.Timedelta(days=offset)).strftime("%Y%m%d")
             try:
                 snap = stock.get_market_ohlcv_by_ticker(d, market="ALL")
                 if snap is not None and not snap.empty:
                     return d
-            except Exception:
+            except Exception as exc:
+                last_error = exc
                 continue
+        if last_error is not None:
+            raise RuntimeError(
+                f"Could not resolve a market date near {ts.date()}; "
+                f"last pykrx error: {type(last_error).__name__}: {last_error}"
+            ) from last_error
         raise RuntimeError(f"Could not resolve a market date near {ts.date()}")
 
     def build_universe(self, scan_date: str, top_n: int | None = None) -> pd.DataFrame:
         stock = self._stock()
-        snap = stock.get_market_ohlcv_by_ticker(scan_date, market="ALL")
+        try:
+            snap = stock.get_market_ohlcv_by_ticker(scan_date, market="ALL")
+        except Exception as exc:
+            raise RuntimeError(
+                f"KRX market snapshot failed for {scan_date}: {type(exc).__name__}: {exc}"
+            ) from exc
         if snap is None or snap.empty:
             raise RuntimeError(f"No market snapshot for {scan_date}")
         df = snap.rename(columns={"종가": "price", "거래량": "volume", "거래대금": "trading_value", "등락률": "return_pct"}).copy()
@@ -100,23 +145,37 @@ class PyKrxLeaderDataProvider:
         path = self.cache_dir / f"daily_{ticker}_{sk}_{ek}.csv"
         if path.exists():
             return self._normalize_daily(pd.read_csv(path, index_col=0, parse_dates=True))
-        raw = stock.get_market_ohlcv_by_date(sk, ek, str(ticker).zfill(6), adjusted=True)
+        try:
+            raw = stock.get_market_ohlcv_by_date(sk, ek, str(ticker).zfill(6), adjusted=True)
+        except Exception as exc:
+            raise RuntimeError(
+                f"KRX OHLCV failed: ticker={str(ticker).zfill(6)} range={sk}~{ek}: "
+                f"{type(exc).__name__}: {exc}"
+            ) from exc
         out = self._normalize_daily(raw)
         if not out.empty:
             out.to_csv(path, encoding="utf-8-sig")
         return out
 
     def get_market_return(self, market: str, scan_date: str) -> float | None:
-        stock = self._stock()
-        code = "1001" if market == "KOSPI" else "2001"
         start = (pd.Timestamp(scan_date) - pd.Timedelta(days=10)).strftime("%Y%m%d")
+
+        # KJBChartAnalyzer already uses Naver for KOSPI/KOSDAQ because pykrx
+        # index endpoints can intermittently return non-JSON responses.
         try:
-            raw = stock.get_index_ohlcv_by_date(start, scan_date, code)
+            raw = fetch_naver_index_ohlcv(market, start, scan_date)
+            close = pd.to_numeric(raw["Close"], errors="coerce").dropna()
         except Exception:
-            return None
-        if raw is None or raw.empty or "종가" not in raw.columns or len(raw) < 2:
-            return None
-        close = pd.to_numeric(raw["종가"], errors="coerce").dropna()
+            stock = self._stock()
+            code = "1001" if market == "KOSPI" else "2001"
+            try:
+                raw = stock.get_index_ohlcv_by_date(start, scan_date, code)
+            except Exception:
+                return None
+            if raw is None or raw.empty or "종가" not in raw.columns:
+                return None
+            close = pd.to_numeric(raw["종가"], errors="coerce").dropna()
+
         if len(close) < 2 or float(close.iloc[-2]) <= 0:
             return None
         return (float(close.iloc[-1]) / float(close.iloc[-2]) - 1.0) * 100.0
