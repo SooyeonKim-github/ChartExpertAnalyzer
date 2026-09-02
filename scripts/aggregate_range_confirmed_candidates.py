@@ -121,6 +121,32 @@ def _load_ma(path: Path) -> list[dict]:
     return rows
 
 
+def _load_dynamic(path: Path) -> list[dict]:
+    df = _read_csv(path)
+    if df.empty or "long_quality_label" not in df.columns:
+        return []
+    if "side" not in df.columns:
+        return []
+    selected = df[
+        df["side"].astype(str).str.upper().eq("LONG")
+        & df["long_quality_label"].astype(str).str.upper().eq("CONFIRMED")
+    ].copy()
+    rows = []
+    for _, r in selected.iterrows():
+        row = _base_row(
+            signal_date=r.get("signal_date", ""), analyzer="DYNAMIC", ticker=r.get("ticker", ""),
+            name=r.get("name", ""), status="CONFIRMED", score=r.get("quality_score", np.nan),
+            timing_score=r.get("lecture_score", np.nan), market=r.get("market", ""),
+            signal=r.get("action", ""), source_file=path,
+            position_action=r.get("action", ""), entry_stage=r.get("stage", np.nan),
+        )
+        for h in MILESTONES:
+            value = _num(r.get(f"D+{h}", np.nan))
+            row[f"D+{h}_Pct"] = value * 100.0 if pd.notna(value) else np.nan
+        rows.append(row)
+    return rows
+
+
 def _dedupe_within_analyzer(rows: list[dict]) -> list[dict]:
     best = {}
     for row in rows:
@@ -137,7 +163,7 @@ def _dedupe_within_analyzer(rows: list[dict]) -> list[dict]:
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description="Collect independent confirmed range signals from KJB, Swing, and MA")
+    parser = argparse.ArgumentParser(description="Collect independent confirmed range signals from KJB, Swing, MA, and Dynamic")
     parser.add_argument("--date-range", required=True)
     args = parser.parse_args()
     start, end = _parse_range(args.date_range)
@@ -145,7 +171,13 @@ def main() -> int:
     kjb_path = ROOT / "KJBChartAnalyzer" / "results" / f"range_{range_key}" / "chart_range_events.csv"
     swing_path = ROOT / "SwingChartProbabilityAnalyzer" / "results" / f"range_{range_key}" / "range_all_results.csv"
     ma_path = ROOT / "MAChartAnalyzer" / "results" / f"range_{range_key}" / "range_all_results.csv"
-    rows = _dedupe_within_analyzer(_load_kjb(kjb_path) + _load_swing(swing_path) + _load_ma(ma_path))
+    dynamic_path = ROOT / "DynamicChartAnalyzer" / "results" / f"range_{range_key}" / "dynamic_long_v2_candidates.csv"
+    rows = _dedupe_within_analyzer(
+        _load_kjb(kjb_path)
+        + _load_swing(swing_path)
+        + _load_ma(ma_path)
+        + _load_dynamic(dynamic_path)
+    )
     status_rank = {"STRONG_CONFIRMED": 0, "CONFIRMED": 1}
     rows.sort(key=lambda r: (r["signal_date"], status_rank.get(r["status"], 9), r["analyzer"], -(r["score"] if pd.notna(r["score"]) else -1e18), r["ticker"]))
     out_dir = ROOT / "results" / f"range_{range_key}"
@@ -157,7 +189,7 @@ def main() -> int:
     print(f"[DONE] Independent confirmed candidates: {len(rows)} -> {out_path}")
     if rows:
         counts = pd.DataFrame(rows)["analyzer"].value_counts()
-        for analyzer in ("KJB", "SWING", "MA"):
+        for analyzer in ("KJB", "SWING", "MA", "DYNAMIC"):
             print(f"[INFO] {analyzer}: {int(counts.get(analyzer, 0))}")
     return 0
 
