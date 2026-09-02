@@ -103,23 +103,20 @@ def score_daily_state(
     day_range = max(high - low, 0.0)
     close_location = (close - low) / day_range if day_range > 0 else 0.5
 
+    # V3 hard-cancel logic keeps only structural damage / distribution signals.
+    # DAILY_CRASH and GAP_DOWN_FAILED_RECOVERY were removed because the range test
+    # showed they could discard strong future performers.
     hard_cancel_reason = ""
     if np.isfinite(structural_stop) and close < structural_stop:
         hard_cancel_reason = "CLOSE_BELOW_STRUCTURAL_STOP"
     elif signal_low > 0 and close < signal_low:
         hard_cancel_reason = "CLOSE_BELOW_SIGNAL_LOW"
-    elif daily_ret <= -cfg.hard_cancel_daily_drop_pct:
-        hard_cancel_reason = "DAILY_CRASH"
     elif (
         daily_ret <= -cfg.hard_cancel_distribution_drop_pct
         and np.isfinite(volume_ratio)
         and volume_ratio >= cfg.hard_cancel_volume_ratio
     ):
         hard_cancel_reason = "HIGH_VOLUME_DISTRIBUTION"
-    else:
-        gap = open_ / prev_close - 1.0 if prev_close > 0 else 0.0
-        if gap <= -cfg.hard_cancel_gap_down_pct and close_location < 0.45:
-            hard_cancel_reason = "GAP_DOWN_FAILED_RECOVERY"
 
     # 1) Price structure: 25
     price_structure = 0.0
@@ -173,15 +170,10 @@ def score_daily_state(
     else:
         volume = 6.0
 
-    # 5) Heat / chase risk: 15. Higher is safer.
+    # 5) Heat / chase slot: 15
+    # V3 no longer penalizes a stock simply because it already moved strongly.
+    # Keep the slot at a neutral full score so the 100-point scale remains compatible.
     heat = 15.0
-    if signal_gain >= cfg.chase_signal_gain_pct:
-        heat -= 5.0
-    if signal_gain >= cfg.chase_extreme_signal_gain_pct:
-        heat -= 5.0
-    if np.isfinite(ma20_distance) and ma20_distance >= cfg.chase_ma20_distance_pct:
-        heat -= 5.0
-    heat = max(0.0, heat)
 
     # 6) Volatility / risk: 10. Higher is calmer.
     if not np.isfinite(range_ratio):
