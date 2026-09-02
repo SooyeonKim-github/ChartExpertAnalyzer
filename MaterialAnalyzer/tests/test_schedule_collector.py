@@ -49,6 +49,20 @@ def test_extract_relative_schedule() -> None:
     assert rows[0].schedule_kind == "간담회"
 
 
+def test_extract_bare_day_of_month_like_lecture_example() -> None:
+    collector = ScheduleCollector(DEFAULT_CONFIG)
+    rows = collector.collect(
+        [_material("통계청, 22일 올해 첫 월간 인구동향 발표 예정")],
+        date(2026, 9, 20),
+        lookahead_days=7,
+    )
+
+    assert len(rows) == 1
+    assert rows[0].event_date == "2026-09-22"
+    assert rows[0].schedule_kind == "통계발표"
+    assert rows[0].date_evidence == "22일"
+
+
 def test_reject_schedule_without_resolvable_date() -> None:
     collector = ScheduleCollector(DEFAULT_CONFIG)
     rows = collector.collect(
