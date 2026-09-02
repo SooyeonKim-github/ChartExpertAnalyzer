@@ -31,7 +31,8 @@ echo Markets         : KOSPI + KOSDAQ
 echo Forward bars    : 60
 echo.
 echo KJB, Swing, and MA are evaluated independently.
-echo PositionManager is applied only after CONFIRMED signals are collected.
+echo Dynamic PositionManager is applied only after CONFIRMED signals are collected.
+echo Daily decisions use only information known through each prior close.
 echo No analyzer scores are combined and no consensus/BOTH logic is used.
 echo ============================================
 echo.
@@ -99,7 +100,7 @@ echo [7/8] Collecting independent confirmed signals...
 if errorlevel 1 goto RUN_FAILED
 
 echo.
-echo [8/8] Backtesting PositionManager on CONFIRMED signals...
+echo [8/8] Backtesting Dynamic PositionManager on CONFIRMED signals...
 "%FILTER_PYTHON%" %FILTER_PREFIX% "%ROOT%PositionManager\main.py" range --date-range "%DATE_RANGE%"
 if errorlevel 1 goto RUN_FAILED
 
@@ -114,8 +115,9 @@ echo.
 echo [Confirmed summary]
 echo   results\range_YYYYMMDD_YYYYMMDD\confirmed_candidates.csv
 echo.
-echo [PositionManager]
+echo [Dynamic PositionManager]
 echo   PositionManager\results\range_YYYYMMDD_YYYYMMDD\position_backtest.csv
+echo   PositionManager\results\range_YYYYMMDD_YYYYMMDD\daily_decisions.csv
 echo   PositionManager\results\range_YYYYMMDD_YYYYMMDD\position_backtest_summary.csv
 echo.
 echo [MA V3]
@@ -125,7 +127,7 @@ echo   MAChartAnalyzer\results\range_YYYYMMDD_YYYYMMDD\position_entries.csv
 echo   MAChartAnalyzer\results\range_YYYYMMDD_YYYYMMDD\trade_events.csv
 echo   MAChartAnalyzer\results\range_YYYYMMDD_YYYYMMDD\ma_range_backtest.xlsx
 echo.
-echo [INFO] KJB, Swing, and MA remain independent; PositionManager is downstream only.
+echo [INFO] KJB, Swing, and MA remain independent; Dynamic PositionManager is downstream only.
 echo ============================================
 pause
 exit /b 0
