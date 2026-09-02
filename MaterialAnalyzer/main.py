@@ -12,14 +12,20 @@ except ModuleNotFoundError:
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Collect raw stock-material candidates")
     parser.add_argument("--date", default="", help="Target date YYYYMMDD. Default: today")
-    parser.add_argument("--days", type=int, default=2, help="OpenDART lookback calendar days")
+    parser.add_argument("--days", type=int, default=2, help="Raw-source lookback calendar days")
     parser.add_argument(
         "--sources",
-        default="naver,policy,dart",
-        help="Comma-separated sources: naver,policy,dart",
+        default="naver,policy,dart,schedule",
+        help="Comma-separated sources/stages: naver,policy,dart,schedule",
     )
     parser.add_argument("--query-limit", type=int, default=None, help="Limit Naver query rows for testing")
-    parser.add_argument("--no-history", action="store_true", help="Do not append to cumulative history CSV")
+    parser.add_argument(
+        "--schedule-lookahead",
+        type=int,
+        default=21,
+        help="Future calendar days retained by ScheduleCollector",
+    )
+    parser.add_argument("--no-history", action="store_true", help="Do not append to cumulative history CSVs")
     return parser.parse_args()
 
 
@@ -31,10 +37,11 @@ def main() -> int:
     print("============================================")
     print("  MaterialAnalyzer V1 - Material Collector")
     print("============================================")
-    print(f"Target date : {target_date:%Y-%m-%d}")
-    print(f"Sources     : {', '.join(sources)}")
-    print(f"DART days   : {args.days}")
-    print("Scoring     : disabled in collector V1")
+    print(f"Target date       : {target_date:%Y-%m-%d}")
+    print(f"Sources/stages    : {', '.join(sources)}")
+    print(f"Raw lookback days : {args.days}")
+    print(f"Schedule lookahead: {args.schedule_lookahead}")
+    print("Scoring           : disabled in collector V1")
     print("============================================")
 
     collector = MaterialCollector()
@@ -43,16 +50,18 @@ def main() -> int:
         days=max(args.days, 1),
         sources=sources,
         query_limit=args.query_limit,
+        schedule_lookahead_days=max(args.schedule_lookahead, 0),
     )
     collector.save(report, target_date, append_history=not args.no_history)
 
     print("\n[COLLECTED]")
     for source in sources:
-        print(f"  {source:<8}: {report.source_counts.get(source, 0):>5}")
-    print(f"  {'unique':<8}: {len(report.items):>5}")
+        print(f"  {source:<10}: {report.source_counts.get(source, 0):>5}")
+    print(f"  {'raw_unique':<10}: {len(report.items):>5}")
+    print(f"  {'schedules':<10}: {len(report.schedules):>5}")
 
     future_count = sum(1 for item in report.items if item.future_hint)
-    print(f"  {'future':<8}: {future_count:>5}")
+    print(f"  {'future_hint':<10}: {future_count:>5}")
 
     if report.warnings:
         print("\n[WARNINGS]")
@@ -60,9 +69,21 @@ def main() -> int:
             print(f"  - {warning}")
 
     print("\n[OUTPUT]")
-    print(f"  snapshot : {report.snapshot_file}")
+    print(f"  materials snapshot : {report.snapshot_file}")
+    print(f"  schedules snapshot : {report.schedule_snapshot_file}")
     if report.history_file:
-        print(f"  history  : {report.history_file}")
+        print(f"  materials history  : {report.history_file}")
+    if report.schedule_history_file:
+        print(f"  schedules history  : {report.schedule_history_file}")
+
+    if report.schedules:
+        print("\n[UPCOMING SCHEDULES]")
+        for idx, item in enumerate(report.schedules[:20], 1):
+            when = item.event_date + (f" {item.event_time}" if item.event_time else "")
+            print(
+                f"  {idx:>2}. {when:<16} {item.schedule_kind:<8} "
+                f"conf={item.confidence:.2f} {item.title[:90]}"
+            )
 
     if report.items:
         print("\n[TOP RAW MATERIALS]")
