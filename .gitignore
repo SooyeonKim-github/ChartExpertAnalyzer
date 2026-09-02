@@ -26,6 +26,7 @@ reports/self-improvement/
 
 MaterialAnalyzer/results/
 MaterialAnalyzer/data/material_items.csv
+MaterialAnalyzer/data/schedule_items.csv
 
 Thumbs.db
 .DS_Store
