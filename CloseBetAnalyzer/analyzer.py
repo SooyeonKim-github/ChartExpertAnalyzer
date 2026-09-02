@@ -35,6 +35,7 @@ SR_CFG = {
     "min_level_touches": 2,
     "breakout_buffer_pct": 0.005,
 }
+UNKNOWN_SECTORS = {"", "기타/미분류", "UNKNOWN", "NAN", "NONE"}
 
 
 def prepare_features(df: pd.DataFrame) -> pd.DataFrame:
@@ -56,9 +57,9 @@ def _num(value: Any, default: float = np.nan) -> float:
 def _market_score(regime: str) -> float:
     return {
         "uptrend": 85.0,
-        "range": 62.0,
+        "range": 58.0,
         "volatile": 48.0,
-        "downtrend": 32.0,
+        "downtrend": 30.0,
     }.get(str(regime), 50.0)
 
 
@@ -67,6 +68,29 @@ def _liquidity_score(source_rank: int | None, universe_size: int) -> float:
         return 50.0
     rank = max(1, min(int(source_rank), int(universe_size)))
     return round(100.0 - (rank - 1) / max(1, universe_size - 1) * 50.0, 2)
+
+
+def _sector_available(name: str, raw_score: float) -> bool:
+    normalized = str(name or "").strip()
+    if normalized.upper() in UNKNOWN_SECTORS or normalized in UNKNOWN_SECTORS:
+        return False
+    if normalized == "ETF/ETN":
+        return False
+    return np.isfinite(raw_score)
+
+
+def _weighted_score(components: list[tuple[float, float, bool]]) -> float:
+    """Normalize only over available evidence; missing sector never contributes fake 50."""
+    weighted = 0.0
+    weight_sum = 0.0
+    for value, weight, available in components:
+        if not available or not np.isfinite(value) or weight <= 0:
+            continue
+        weighted += float(value) * float(weight)
+        weight_sum += float(weight)
+    if weight_sum <= 0:
+        return 0.0
+    return round(max(0.0, min(100.0, weighted / weight_sum)), 2)
 
 
 def _structure_score(x: pd.DataFrame, cfg: CloseBetConfig) -> tuple[float, dict[str, Any], list[str], list[str]]:
@@ -104,10 +128,10 @@ def _structure_score(x: pd.DataFrame, cfg: CloseBetConfig) -> tuple[float, dict[
 
     if np.isfinite(distance_high):
         if distance_high >= -cfg.near_high_pct:
-            score += 12
+            score += 15
             reasons.append("60일 고점 근처")
-        elif distance_high < -0.20:
-            score -= 8
+        elif distance_high < -cfg.max_confirmed_distance_60d_high_pct:
+            score -= 20
             risks.append("고점과 거리 큼")
 
     if br.get("breakout_level"):
@@ -122,7 +146,7 @@ def _structure_score(x: pd.DataFrame, cfg: CloseBetConfig) -> tuple[float, dict[
 
     life_gap = _num(t.get("life_gap_pct"))
     if np.isfinite(life_gap) and life_gap >= cfg.overextended_ma20_pct:
-        score -= 15
+        score -= 3
         risks.append("20일선 과도 이격")
 
     candle = candle_features(row)
@@ -144,12 +168,65 @@ def _structure_score(x: pd.DataFrame, cfg: CloseBetConfig) -> tuple[float, dict[
     return round(max(0.0, min(100.0, score)), 2), details, reasons, risks
 
 
-class CloseBetAnalyzer:
-    """Pre-close candidate selector using reusable ChartExpertAnalyzer components.
+def _classify_status(
+    *,
+    score: float,
+    regime: str,
+    stock_rs_score: float,
+    structure_score: float,
+    sector_available: bool,
+    sector_score: float,
+    distance_60d_high_pct: float,
+    near_high_or_breakout: bool,
+    cfg: CloseBetConfig,
+) -> str:
+    far_from_high = (
+        np.isfinite(distance_60d_high_pct)
+        and distance_60d_high_pct < -cfg.max_confirmed_distance_60d_high_pct
+    )
+    sector_ok = (not sector_available) or sector_score >= cfg.min_sector_score
+    strong_sector_ok = (not sector_available) or sector_score >= cfg.strong_sector_score
 
-    V1 intentionally does not analyze the intended buy day's intraday chart.
-    It ranks candidates from already-completed daily data and emits a manual
-    buy-day price guide.
+    confirmed_score_needed = cfg.confirmed_score
+    rs_needed = cfg.min_stock_rs
+    if regime == "range":
+        confirmed_score_needed = max(confirmed_score_needed, cfg.range_confirmed_score)
+        rs_needed = max(rs_needed, cfg.range_min_stock_rs)
+    elif regime == "downtrend":
+        confirmed_score_needed = max(confirmed_score_needed, cfg.downtrend_confirmed_score)
+        rs_needed = max(rs_needed, cfg.downtrend_min_stock_rs)
+
+    confirmed_gate = (
+        score >= confirmed_score_needed
+        and stock_rs_score >= rs_needed
+        and structure_score >= cfg.min_structure_score
+        and sector_ok
+        and not far_from_high
+    )
+    strong_gate = (
+        confirmed_gate
+        and score >= cfg.strong_confirmed_score
+        and stock_rs_score >= cfg.strong_stock_rs
+        and structure_score >= cfg.strong_structure_score
+        and strong_sector_ok
+        and near_high_or_breakout
+        and regime != "downtrend"
+    )
+
+    if strong_gate:
+        return "STRONG_CONFIRMED"
+    if confirmed_gate:
+        return "CONFIRMED"
+    if score >= cfg.watch_score:
+        return "WATCH"
+    return "REJECTED"
+
+
+class CloseBetAnalyzer:
+    """Completed-daily-data selector + manual buy-day price guide.
+
+    The same analyzer/gates are used by both screen and range runs.
+    V2 intentionally does not auto-score the intended buy day's intraday chart.
     """
 
     def __init__(self, cfg: CloseBetConfig = DEFAULT_CONFIG):
@@ -170,6 +247,7 @@ class CloseBetAnalyzer:
     ) -> CloseBetResult:
         if stock_df is None or stock_df.empty or len(stock_df) < 130:
             raise ValueError("CloseBetAnalyzer requires at least 130 daily bars")
+
         x = prepare_features(stock_df)
         m = prepare_features(market_df)
         date = pd.Timestamp(x.index[-1]).strftime("%Y-%m-%d")
@@ -181,9 +259,11 @@ class CloseBetAnalyzer:
 
         sector_context = sector_context or {}
         sector_name = str(sector_context.get("sector_name", "기타/미분류"))
-        sector_score = _num(sector_context.get("sector_composite_score"), 50.0)
+        sector_score_raw = _num(sector_context.get("sector_composite_score"))
+        sector_available = _sector_available(sector_name, sector_score_raw)
+        sector_score = sector_score_raw if sector_available else np.nan
         sector_rank_raw = _num(sector_context.get("sector_composite_rank"))
-        sector_rank = None if not np.isfinite(sector_rank_raw) else sector_rank_raw
+        sector_rank = None if (not sector_available or not np.isfinite(sector_rank_raw)) else sector_rank_raw
 
         liquidity_score = _liquidity_score(source_rank, universe_size)
         structure_score, structure, reasons, risks = _structure_score(x, self.cfg)
@@ -192,10 +272,10 @@ class CloseBetAnalyzer:
         rel_vol = _num(v.get("relative_volume"))
         volume_score = 50.0
         if v.get("bullish_confirm"):
-            volume_score += 20.0
+            volume_score += 5.0
             reasons.append("상승 거래량 확인")
         if v.get("dry_volume"):
-            volume_score -= 8.0
+            volume_score -= 3.0
         if v.get("distribution_hint"):
             volume_score -= 25.0
             risks.append("고거래량 윗꼬리 분배 위험")
@@ -204,42 +284,48 @@ class CloseBetAnalyzer:
             risks.append("고거래량 가격 정체")
         volume_score = round(max(0.0, min(100.0, volume_score)), 2)
 
-        score = (
-            market_score * self.cfg.market_weight
-            + sector_score * self.cfg.sector_weight
-            + stock_rs_score * self.cfg.stock_rs_weight
-            + liquidity_score * self.cfg.liquidity_weight
-            + structure_score * self.cfg.structure_weight
-            + volume_score * self.cfg.volume_weight
+        score = _weighted_score(
+            [
+                (market_score, self.cfg.market_weight, True),
+                (sector_score, self.cfg.sector_weight, sector_available),
+                (stock_rs_score, self.cfg.stock_rs_weight, True),
+                (liquidity_score, self.cfg.liquidity_weight, True),
+                (structure_score, self.cfg.structure_weight, True),
+                (volume_score, self.cfg.volume_weight, True),
+            ]
         )
-        score = round(max(0.0, min(100.0, score)), 2)
 
-        strong_gate = (
-            score >= self.cfg.strong_confirmed_score
-            and stock_rs_score >= self.cfg.strong_stock_rs
-            and sector_score >= self.cfg.strong_sector_score
+        distance_high = _num(structure.get("distance_60d_high_pct"))
+        breakout = structure.get("breakout", {})
+        near_high_or_breakout = (
+            (np.isfinite(distance_high) and distance_high >= -self.cfg.near_high_pct)
+            or bool(breakout.get("breakout_level"))
+            or bool(breakout.get("retest_support_level"))
         )
-        confirmed_gate = (
-            score >= self.cfg.confirmed_score
-            and stock_rs_score >= self.cfg.min_stock_rs
-            and sector_score >= self.cfg.min_sector_score
-            and (regime != "downtrend" or stock_rs_score >= self.cfg.downtrend_min_stock_rs)
+        status = _classify_status(
+            score=score,
+            regime=regime,
+            stock_rs_score=stock_rs_score,
+            structure_score=structure_score,
+            sector_available=sector_available,
+            sector_score=sector_score if np.isfinite(sector_score) else 0.0,
+            distance_60d_high_pct=distance_high,
+            near_high_or_breakout=near_high_or_breakout,
+            cfg=self.cfg,
         )
-        if strong_gate:
-            status = "STRONG_CONFIRMED"
-        elif confirmed_gate:
-            status = "CONFIRMED"
-        elif score >= self.cfg.watch_score:
-            status = "WATCH"
-        else:
-            status = "REJECTED"
 
         if regime == "uptrend":
             reasons.append("시장 상승추세")
+        elif regime == "range":
+            risks.append("횡보장: CONFIRMED 강화 기준 적용")
         elif regime == "downtrend":
-            risks.append("시장 하락추세")
-        if sector_score >= self.cfg.strong_sector_score:
-            reasons.append("강한 섹터")
+            risks.append("시장 하락추세: CONFIRMED 강화 기준 적용")
+
+        if sector_available:
+            if sector_score >= self.cfg.strong_sector_score:
+                reasons.append("강한 섹터")
+        else:
+            risks.append("섹터 정보 없음: 섹터 점수 제외")
         if stock_rs_score >= self.cfg.strong_stock_rs:
             reasons.append("시장 대비 강한 종목")
 
@@ -263,7 +349,8 @@ class CloseBetAnalyzer:
             market_regime=regime,
             market_score=market_score,
             sector_name=sector_name,
-            sector_score=round(sector_score, 2),
+            sector_available=sector_available,
+            sector_score=None if not sector_available else round(float(sector_score), 2),
             sector_rank=sector_rank,
             stock_rs_score=round(stock_rs_score, 2),
             liquidity_score=liquidity_score,
@@ -274,9 +361,7 @@ class CloseBetAnalyzer:
             ma5=structure.get("ma5"),
             ma20=structure.get("ma20"),
             distance_60d_high_pct=(
-                None
-                if not np.isfinite(_num(structure.get("distance_60d_high_pct")))
-                else round(float(structure["distance_60d_high_pct"]) * 100.0, 3)
+                None if not np.isfinite(distance_high) else round(float(distance_high) * 100.0, 3)
             ),
             nearest_support=None if nearest_support is None else round(float(nearest_support), 2),
             nearest_resistance=None if nearest_resistance is None else round(float(nearest_resistance), 2),

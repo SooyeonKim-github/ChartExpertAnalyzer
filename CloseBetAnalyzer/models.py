@@ -31,7 +31,8 @@ class CloseBetResult:
     market_regime: str
     market_score: float
     sector_name: str
-    sector_score: float
+    sector_available: bool
+    sector_score: float | None
     sector_rank: float | None
     stock_rs_score: float
     liquidity_score: float

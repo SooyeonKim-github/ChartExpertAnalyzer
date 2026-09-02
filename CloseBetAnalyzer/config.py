@@ -5,39 +5,49 @@ from dataclasses import dataclass
 
 @dataclass(frozen=True)
 class CloseBetConfig:
-    """Initial V1 thresholds.
+    """CloseBet V2 thresholds based on the first range-backtest review.
 
-    These are implementation defaults for validation, not fixed rules from the lectures.
-    Keep them configurable and re-estimate them with range backtests before treating them
-    as production thresholds.
+    These remain implementation thresholds, not immutable lecture rules.
+    Catalyst and investor-flow factors are intentionally deferred.
     """
 
-    confirmed_score: float = 72.0
-    strong_confirmed_score: float = 82.0
-    watch_score: float = 62.0
+    # Shared by screen and range. Strengthening here strengthens both execution paths.
+    confirmed_score: float = 76.0
+    strong_confirmed_score: float = 80.0
+    watch_score: float = 64.0
 
-    min_stock_rs: float = 50.0
+    min_stock_rs: float = 55.0
     strong_stock_rs: float = 65.0
+    min_structure_score: float = 62.0
+    strong_structure_score: float = 70.0
+
     min_sector_score: float = 50.0
     strong_sector_score: float = 65.0
-    downtrend_min_stock_rs: float = 65.0
+
+    # Range/downtrend require stronger evidence than a normal/uptrend market.
+    range_confirmed_score: float = 80.0
+    range_min_stock_rs: float = 62.0
+    downtrend_confirmed_score: float = 82.0
+    downtrend_min_stock_rs: float = 70.0
 
     near_high_pct: float = 0.08
+    max_confirmed_distance_60d_high_pct: float = 0.20
     overextended_ma20_pct: float = 0.12
 
-    # Manual buy-day guide. The analyzer does NOT ingest intraday charts in V1.
+    # Manual buy-day guide. The analyzer does NOT score the buy day's intraday chart.
     buy_day_soft_drop_pct: float = 0.03
     buy_day_hard_cancel_pct: float = 0.05
     buy_day_preferred_max_gain_pct: float = 0.05
     buy_day_chase_pct: float = 0.08
     guide_support_buffer_pct: float = 0.01
 
+    # V2 de-emphasizes relative-volume bonus and puts more weight on RS/structure.
     market_weight: float = 0.15
-    sector_weight: float = 0.20
-    stock_rs_weight: float = 0.20
+    sector_weight: float = 0.15
+    stock_rs_weight: float = 0.25
     liquidity_weight: float = 0.15
-    structure_weight: float = 0.25
-    volume_weight: float = 0.05
+    structure_weight: float = 0.28
+    volume_weight: float = 0.02
 
     def validate(self) -> None:
         weights = (
@@ -56,6 +66,8 @@ class CloseBetConfig:
             raise ValueError("soft drop must be <= hard cancel")
         if not (0 <= self.buy_day_preferred_max_gain_pct <= self.buy_day_chase_pct):
             raise ValueError("preferred max gain must be <= chase threshold")
+        if not (0 < self.near_high_pct <= self.max_confirmed_distance_60d_high_pct < 1):
+            raise ValueError("high-distance thresholds are invalid")
 
 
 DEFAULT_CONFIG = CloseBetConfig()

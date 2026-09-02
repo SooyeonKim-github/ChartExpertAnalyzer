@@ -18,10 +18,10 @@ if "%PYTHON_EXE%"=="" (
 )
 
 echo ============================================
-echo   CloseBetAnalyzer - Range Backtest
+echo   CloseBetAnalyzer V2 - Range Backtest
 echo ============================================
 echo Example: 20260101~20260831
-set /p DATE_RANGE=Date range YYYYMMDD~YYYYMMDD: 
+set /p DATE_RANGE=Buy-date range YYYYMMDD~YYYYMMDD: 
 
 if "%DATE_RANGE%"=="" (
     echo [ERROR] Date range is required.
@@ -31,7 +31,9 @@ if "%DATE_RANGE%"=="" (
 
 echo.
 echo [INFO] Point-in-time liquidity TOP 100
-echo [INFO] Entry = signal-date close
+echo [INFO] Signal = previous trading day completed data
+echo [INFO] Buy day = guide check only, no buy-day chart scoring
+echo [INFO] Entry = guide BUY passed at buy-day close
 echo [INFO] Forward = D+1 / D+5 / D+10 / D+20 / D+40 / D+60
 echo.
 
