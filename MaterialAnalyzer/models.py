@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import asdict, dataclass
 from hashlib import sha1
+from html import unescape
 import re
 from urllib.parse import urlsplit, urlunsplit
 
@@ -11,7 +12,7 @@ _SPACE_RE = re.compile(r"\s+")
 
 
 def clean_text(value: str | None) -> str:
-    text = _TAG_RE.sub(" ", value or "")
+    text = unescape(_TAG_RE.sub(" ", value or ""))
     return _SPACE_RE.sub(" ", text).strip()
 
 
