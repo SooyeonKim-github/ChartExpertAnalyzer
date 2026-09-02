@@ -109,3 +109,59 @@ CloseBetAnalyzer/results/YYYYMMDD/
 - 매수 논리(Thesis) 훼손 자동 감지
 
 이 항목들은 별도 Provider가 확보된 뒤 V2+에서 추가하는 것이 맞습니다.
+
+## Range Backtest
+
+과거 구간은 현재 Universe를 고정해서 쓰지 않고 루트의
+`scripts/build_liquidity_universe.py`를 재사용하여 **각 날짜 시점의 최근 20거래일 평균 거래대금 TOP N**을 다시 만듭니다.
+
+```bat
+CloseBetAnalyzer\run_range.bat
+```
+
+예:
+
+```text
+Date range YYYYMMDD~YYYYMMDD: 20260101~20260831
+```
+
+직접 실행:
+
+```bash
+python CloseBetAnalyzer/main_range.py ^
+  --date-range 20260101~20260831 ^
+  --top-n 100 ^
+  --lookback 20 ^
+  --daily-top-n 5 ^
+  --forward-bars 60
+```
+
+백테스트 원칙:
+
+- 종목/시장 신호 계산에는 **해당 signal date 종가까지의 데이터만** 사용합니다.
+- Universe는 signal date별 point-in-time 거래대금 TOP N입니다.
+- CloseBet 특성상 가정 진입가는 **signal date의 종가**입니다.
+- `D+1_Open_Return_Pct`로 overnight gap을 따로 기록합니다.
+- D+1/D+5/D+10/D+20/D+40/D+60 종가 수익률을 기록합니다.
+- 각 horizon의 MFE/MAE도 함께 기록합니다.
+- `STRONG_CONFIRMED + CONFIRMED` 전체 성과와 날짜별 score TOP 5 성과를 둘 다 집계합니다.
+- 매수 당일 가격 가이드는 수동 가이드이므로 분봉 데이터가 없는 V1 Range에서는 체결 필터로 소급 적용하지 않습니다.
+
+출력:
+
+```text
+CloseBetAnalyzer/results/range_YYYYMMDD_YYYYMMDD/
+├─ liquidity_universe_daily.csv
+├─ range_all_results.csv
+├─ range_candidates.csv
+├─ range_confirmed_performance.csv
+├─ range_daily_selected.csv
+├─ performance_summary.csv
+├─ closebet_range_backtest.xlsx
+└─ errors.csv
+```
+
+`performance_summary.csv`에는 다음 두 cohort를 기본으로 비교합니다.
+
+- `ALL_CONFIRMED`: 모든 STRONG_CONFIRMED + CONFIRMED
+- `DAILY_TOP5`: 각 거래일 CONFIRMED 후보 중 상태/score 기준 상위 5개
