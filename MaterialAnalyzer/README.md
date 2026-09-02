@@ -1,20 +1,18 @@
-# MaterialAnalyzer V1 - Material Collector
+# MaterialAnalyzer V1 - Material + Schedule Collector
 
-`MaterialAnalyzer`는 차트 Analyzer와 독립적으로 **주가를 움직일 수 있는 재료의 원천 데이터**를 수집하기 위한 모듈입니다.
+`MaterialAnalyzer`는 차트 Analyzer와 독립적으로 **주가를 움직일 수 있는 재료의 원천 데이터와 예정 일정을 수집**하기 위한 모듈입니다.
 
-V1의 첫 단계는 점수화가 아니라 수집입니다. 강의의 흐름인 `일정/뉴스 발견 -> 관련 테마/종목 정리 -> 과거 반응 확인 -> 실제 시장 반응 확인`을 구현하기 위해, 먼저 뉴스/정책/공시를 같은 포맷으로 누적합니다.
+강의의 흐름인 `일정/뉴스 발견 -> 관련 테마/종목 정리 -> 과거 반응 확인 -> 실제 시장 반응 확인`을 코드화하기 위해, V1은 점수화보다 수집과 일정 정리에 집중합니다.
 
 ## V1 수집원
 
 1. **Naver News Search API**
    - `data/news_queries.csv`의 검색어를 날짜순으로 조회
    - 뉴스 제목/요약/원문 링크/검색 카테고리 저장
-   - `예정`, `공청회`, `간담회`, `정상회담`, `출시`, `상장` 등 미래 일정 힌트 표시
    - API 키가 없으면 해당 소스만 SKIP
 
 2. **대한민국 정책브리핑 보도자료**
    - `https://www.korea.kr/briefing/pressReleaseList.do`
-   - API 키 없이 최신 보도자료 링크 수집
    - 정부 정책/투자/산업지원 재료의 원천 데이터 용도
 
 3. **OpenDART 공시검색 API**
@@ -22,26 +20,36 @@ V1의 첫 단계는 점수화가 아니라 수집입니다. 강의의 흐름인 
    - 종목코드, 기업코드, 접수번호 저장
    - API 키가 없으면 해당 소스만 SKIP
 
-## 왜 Collector와 Analyzer를 분리하는가
+4. **ScheduleCollector**
+   - 위에서 수집한 뉴스/정책/공시 문장을 다시 검사
+   - `예정`, `공청회`, `간담회`, `정상회담`, `발표`, `회의`, `방문`, `상장`, `출시`, `착공`, `시행` 등 일정성 키워드 확인
+   - 동시에 `9월 5일`, `2026년 9월 5일`, `내일`, `모레`, `오는 금요일`, `오후 2시`, `14:30`처럼 실제 날짜/시간이 해석되는 경우만 일정 후보로 채택
+   - 기본적으로 기준일부터 앞으로 21일 이내 일정만 저장
+   - 날짜가 없는 단순 `추진 계획`, `산업 육성` 문구는 일정 후보에서 제외
 
-뉴스 API나 수집 사이트가 바뀌더라도 재료 점수화 로직이 영향을 받지 않도록 하기 위함입니다.
+## 구조
 
 ```text
 Naver News -----\
 Policy Briefing ---> MaterialCollector ---> collected_materials.csv
-OpenDART -------/                            |
-                                             v
-                                      Material Analyzer V2
-                                      - novelty
-                                      - continuity
-                                      - beneficiary
-                                      - historical reaction
-                                      - market confirmation
+OpenDART -------/            |
+                             v
+                      ScheduleCollector
+                             |
+                             +--> schedule_candidates.csv
+                             |
+                             v
+                   Material Analyzer V2
+                   - novelty
+                   - continuity
+                   - beneficiary
+                   - historical reaction
+                   - market confirmation
 ```
 
-## 설치
+`ScheduleCollector`는 재료 강도를 평가하지 않습니다. **앞으로 시장이 반응할 수 있는 날짜를 미리 정리하는 역할**만 담당합니다.
 
-기존 가상환경을 사용한다면:
+## 설치
 
 ```bat
 pip install -r MaterialAnalyzer\requirements.txt
@@ -50,8 +58,6 @@ pip install -r MaterialAnalyzer\requirements.txt
 ## API 키 설정
 
 ### Naver News
-
-Windows CMD:
 
 ```bat
 set NAVER_CLIENT_ID=발급받은_CLIENT_ID
@@ -72,10 +78,16 @@ set OPENDART_API_KEY=발급받은_API_KEY
 
 API 키는 Git 저장소에 저장하지 않습니다.
 
-## 실행
+## 전체 실행
 
 ```bat
 MaterialAnalyzer\run_collect.bat
+```
+
+기본 실행은 다음 단계를 모두 수행합니다.
+
+```text
+naver + policy + dart + schedule
 ```
 
 또는 저장소 루트에서:
@@ -83,9 +95,23 @@ MaterialAnalyzer\run_collect.bat
 ```bat
 python -m MaterialAnalyzer.main
 python -m MaterialAnalyzer.main --date 20260902
-python -m MaterialAnalyzer.main --sources policy
+python -m MaterialAnalyzer.main --schedule-lookahead 14
 python -m MaterialAnalyzer.main --query-limit 5
 ```
+
+## 일정 수집만 실행
+
+```bat
+MaterialAnalyzer\run_schedule.bat
+```
+
+이 BAT는 빠르게 일정 후보만 확인할 수 있도록 다음 소스를 사용합니다.
+
+```text
+naver + policy + schedule
+```
+
+기본 미래 탐색 범위는 21일이며 실행 시 변경할 수 있습니다.
 
 ## 검색어 수정
 
@@ -94,51 +120,67 @@ python -m MaterialAnalyzer.main --query-limit 5
 ```csv
 category,query,enabled
 policy,정부 투자,1
+event,발표 예정,1
 event,공청회 예정,1
+event,간담회 개최,1
+event,정상회담,1
 industry,우크라이나 재건,1
-industry,양자컴퓨터,1
 ```
 
 - `category`: 재료 대분류
 - `query`: Naver News 검색어
 - `enabled`: `1` 사용, `0` 미사용
 
-검색어는 점수 규칙이 아닙니다. **수집 Recall을 높이기 위한 입력 목록**입니다.
+검색어는 점수 규칙이 아니라 **수집 Recall을 높이기 위한 입력 목록**입니다.
 
 ## 출력
 
-일별 스냅샷:
+### 원천 재료 일별 스냅샷
 
 ```text
 MaterialAnalyzer/results/YYYYMMDD/collected_materials.csv
 ```
 
-누적 원천 DB:
+### 일정 후보 일별 스냅샷
+
+```text
+MaterialAnalyzer/results/YYYYMMDD/schedule_candidates.csv
+```
+
+주요 일정 컬럼:
+
+```text
+event_date
+event_time
+schedule_kind
+confidence
+title
+summary
+source
+url
+date_evidence
+```
+
+예:
+
+```text
+2026-09-05,14:00,정책발표,0.95,...,9월 5일
+2026-09-06,,정상회담,0.90,...,내일
+```
+
+### 누적 원천 DB
 
 ```text
 MaterialAnalyzer/data/material_items.csv
 ```
 
-주요 컬럼:
+### 누적 일정 DB
 
 ```text
-dedup_key
-collected_at
-published_at
-source_type
-source
-title
-summary
-url
-query
-category
-ticker
-corp_code
-report_code
-future_hint
+MaterialAnalyzer/data/schedule_items.csv
 ```
 
-같은 URL은 `dedup_key` 기준으로 누적 DB에 중복 저장하지 않습니다.
+각 DB는 `dedup_key` 기준으로 중복 누적을 방지합니다.
 
 ## V1에서 하지 않는 것
 
@@ -151,4 +193,4 @@ Collector 단계에서는 다음을 의도적으로 판단하지 않습니다.
 - CONFIRMED / WATCH / REJECT 분류
 - 매수 타이밍 판단
 
-이 기능들은 Collector가 안정적으로 데이터를 쌓은 뒤 V2 Analyzer 계층에서 추가합니다.
+이 기능들은 Collector가 데이터를 충분히 쌓은 뒤 Analyzer 계층에서 추가합니다.

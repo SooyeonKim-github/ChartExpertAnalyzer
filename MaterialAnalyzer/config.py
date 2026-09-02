@@ -24,7 +24,9 @@ class MaterialCollectorConfig:
     policy_max_items: int = 100
 
     history_file: str = "data/material_items.csv"
+    schedule_history_file: str = "data/schedule_items.csv"
     query_file: str = "data/news_queries.csv"
+    schedule_lookahead_days: int = 21
 
     future_hint_keywords: tuple[str, ...] = (
         "예정",
@@ -35,14 +37,22 @@ class MaterialCollectorConfig:
         "회의",
         "정상회담",
         "방문",
+        "순방",
         "출시",
+        "공개",
         "상장",
         "착공",
+        "준공",
         "시행",
         "의결",
+        "심의",
         "추진",
         "계획",
         "로드맵",
+        "컨퍼런스",
+        "박람회",
+        "포럼",
+        "세미나",
     )
 
     def naver_credentials(self) -> tuple[str | None, str | None]:

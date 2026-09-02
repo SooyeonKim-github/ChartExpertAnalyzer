@@ -1,14 +1,15 @@
 from __future__ import annotations
 
 import csv
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import date, datetime
 from pathlib import Path
 from typing import Iterable
 
-from .collectors import NaverNewsCollector, OpenDartCollector, PolicyBriefingCollector
+from .collectors import NaverNewsCollector, OpenDartCollector, PolicyBriefingCollector, ScheduleCollector
 from .config import DEFAULT_CONFIG, MaterialCollectorConfig
 from .models import CollectedItem
+from .schedule_models import ScheduleItem
 
 
 @dataclass
@@ -16,15 +17,20 @@ class CollectionReport:
     items: list[CollectedItem]
     source_counts: dict[str, int]
     warnings: list[str]
+    schedules: list[ScheduleItem] = field(default_factory=list)
     snapshot_file: Path | None = None
     history_file: Path | None = None
+    schedule_snapshot_file: Path | None = None
+    schedule_history_file: Path | None = None
 
 
 class MaterialCollector:
     """Collect raw catalyst candidates without assigning investment scores.
 
-    V1 intentionally keeps collection separate from material analysis. This prevents
-    collection-source changes from silently altering scoring logic later.
+    Raw collection and future-event extraction stay separate. ScheduleCollector turns
+    already collected news/policy/disclosure text into explicit dated event rows, so
+    later material scoring can use a clean future-event calendar without changing the
+    raw material schema.
     """
 
     def __init__(self, config: MaterialCollectorConfig = DEFAULT_CONFIG, base_dir: Path | None = None) -> None:
@@ -33,6 +39,7 @@ class MaterialCollector:
         self.naver = NaverNewsCollector(config)
         self.dart = OpenDartCollector(config)
         self.policy = PolicyBriefingCollector(config)
+        self.schedule = ScheduleCollector(config)
 
     def load_queries(self, path: Path | None = None, limit: int | None = None) -> list[tuple[str, str]]:
         path = path or self.base_dir / self.config.query_file
@@ -58,11 +65,12 @@ class MaterialCollector:
         self,
         target_date: date,
         days: int = 2,
-        sources: Iterable[str] = ("naver", "policy", "dart"),
+        sources: Iterable[str] = ("naver", "policy", "dart", "schedule"),
         query_limit: int | None = None,
+        schedule_lookahead_days: int | None = None,
     ) -> CollectionReport:
         selected = {s.strip().lower() for s in sources if s.strip()}
-        unknown = selected - {"naver", "policy", "dart"}
+        unknown = selected - {"naver", "policy", "dart", "schedule"}
         collected_at = datetime.now().astimezone().isoformat()
         raw_items: list[CollectedItem] = []
         warnings: list[str] = []
@@ -105,22 +113,51 @@ class MaterialCollector:
                 warnings.append("OpenDART skipped: OPENDART_API_KEY not set")
 
         items = self._deduplicate(raw_items)
-        return CollectionReport(items=items, source_counts=source_counts, warnings=warnings)
+        schedules: list[ScheduleItem] = []
+        if "schedule" in selected:
+            lookahead = (
+                self.config.schedule_lookahead_days
+                if schedule_lookahead_days is None
+                else max(schedule_lookahead_days, 0)
+            )
+            schedules = self.schedule.collect(items, target_date, lookahead_days=lookahead)
+            source_counts["schedule"] = len(schedules)
+            if not items:
+                warnings.append("Schedule extraction found no raw materials; include naver/policy/dart sources")
+
+        return CollectionReport(
+            items=items,
+            source_counts=source_counts,
+            warnings=warnings,
+            schedules=schedules,
+        )
 
     def save(self, report: CollectionReport, target_date: date, append_history: bool = True) -> CollectionReport:
         result_dir = self.base_dir / "results" / target_date.strftime("%Y%m%d")
         result_dir.mkdir(parents=True, exist_ok=True)
+
         snapshot_file = result_dir / "collected_materials.csv"
-        self._write_csv(snapshot_file, report.items)
+        self._write_material_csv(snapshot_file, report.items)
         report.snapshot_file = snapshot_file
+
+        schedule_snapshot_file = result_dir / "schedule_candidates.csv"
+        self._write_schedule_csv(schedule_snapshot_file, report.schedules)
+        report.schedule_snapshot_file = schedule_snapshot_file
 
         if append_history:
             history_file = self.base_dir / self.config.history_file
             history_file.parent.mkdir(parents=True, exist_ok=True)
             existing_keys = self._read_existing_keys(history_file)
             new_items = [item for item in report.items if item.dedup_key not in existing_keys]
-            self._append_csv(history_file, new_items)
+            self._append_material_csv(history_file, new_items)
             report.history_file = history_file
+
+            schedule_history_file = self.base_dir / self.config.schedule_history_file
+            schedule_history_file.parent.mkdir(parents=True, exist_ok=True)
+            existing_schedule_keys = self._read_existing_keys(schedule_history_file)
+            new_schedules = [item for item in report.schedules if item.dedup_key not in existing_schedule_keys]
+            self._append_schedule_csv(schedule_history_file, new_schedules)
+            report.schedule_history_file = schedule_history_file
 
         return report
 
@@ -136,7 +173,7 @@ class MaterialCollector:
         return out
 
     @staticmethod
-    def _fieldnames() -> list[str]:
+    def _material_fieldnames() -> list[str]:
         return [
             "dedup_key",
             "collected_at",
@@ -154,25 +191,58 @@ class MaterialCollector:
             "future_hint",
         ]
 
-    def _write_csv(self, path: Path, items: Iterable[CollectedItem]) -> None:
-        with path.open("w", encoding="utf-8-sig", newline="") as fp:
-            writer = csv.DictWriter(fp, fieldnames=self._fieldnames())
-            writer.writeheader()
-            for item in items:
-                writer.writerow(item.to_dict())
+    @staticmethod
+    def _schedule_fieldnames() -> list[str]:
+        return [
+            "dedup_key",
+            "collected_at",
+            "published_at",
+            "event_date",
+            "event_time",
+            "schedule_kind",
+            "confidence",
+            "source",
+            "source_type",
+            "title",
+            "summary",
+            "url",
+            "query",
+            "category",
+            "date_evidence",
+        ]
 
-    def _append_csv(self, path: Path, items: list[CollectedItem]) -> None:
-        if not items:
+    def _write_material_csv(self, path: Path, items: Iterable[CollectedItem]) -> None:
+        self._write_rows(path, self._material_fieldnames(), (item.to_dict() for item in items))
+
+    def _write_schedule_csv(self, path: Path, items: Iterable[ScheduleItem]) -> None:
+        self._write_rows(path, self._schedule_fieldnames(), (item.to_dict() for item in items))
+
+    @staticmethod
+    def _write_rows(path: Path, fieldnames: list[str], rows: Iterable[dict[str, object]]) -> None:
+        with path.open("w", encoding="utf-8-sig", newline="") as fp:
+            writer = csv.DictWriter(fp, fieldnames=fieldnames)
+            writer.writeheader()
+            for row in rows:
+                writer.writerow(row)
+
+    def _append_material_csv(self, path: Path, items: list[CollectedItem]) -> None:
+        self._append_rows(path, self._material_fieldnames(), [item.to_dict() for item in items])
+
+    def _append_schedule_csv(self, path: Path, items: list[ScheduleItem]) -> None:
+        self._append_rows(path, self._schedule_fieldnames(), [item.to_dict() for item in items])
+
+    def _append_rows(self, path: Path, fieldnames: list[str], rows: list[dict[str, object]]) -> None:
+        if not rows:
             if not path.exists():
-                self._write_csv(path, [])
+                self._write_rows(path, fieldnames, [])
             return
         write_header = not path.exists() or path.stat().st_size == 0
         with path.open("a", encoding="utf-8-sig", newline="") as fp:
-            writer = csv.DictWriter(fp, fieldnames=self._fieldnames())
+            writer = csv.DictWriter(fp, fieldnames=fieldnames)
             if write_header:
                 writer.writeheader()
-            for item in items:
-                writer.writerow(item.to_dict())
+            for row in rows:
+                writer.writerow(row)
 
     @staticmethod
     def _read_existing_keys(path: Path) -> set[str]:
