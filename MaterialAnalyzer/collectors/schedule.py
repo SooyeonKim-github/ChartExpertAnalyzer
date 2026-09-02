@@ -10,9 +10,10 @@ from ..schedule_models import ScheduleItem
 
 
 _KOREAN_DATE_RE = re.compile(r"(?:(20\d{2})년\s*)?(\d{1,2})월\s*(\d{1,2})일")
-_NUMERIC_DATE_RE = re.compile(r"(?:(20\d{2})[./-])?(\d{1,2})[./-](\d{1,2})(?:일)?")
+_NUMERIC_DATE_RE = re.compile(r"(?:(20\d{2})[./-]\s*)?(\d{1,2})[./-]\s*(\d{1,2})(?:일)?")
 _COMING_DAY_RE = re.compile(r"오는\s*(\d{1,2})일")
 _NEXT_MONTH_DAY_RE = re.compile(r"다음\s*달\s*(\d{1,2})일")
+_BARE_DAY_RE = re.compile(r"(?<![\d월./-])(\d{1,2})일(?!\s*(?:간|동안|째|전|후))")
 _TIME_RE = re.compile(r"(?:(오전|오후)\s*)?(\d{1,2})시(?:\s*(\d{1,2})분)?")
 _CLOCK_RE = re.compile(r"(?<!\d)([01]?\d|2[0-3]):([0-5]\d)(?!\d)")
 
@@ -183,14 +184,20 @@ class ScheduleCollector:
             if resolved:
                 candidates.append((resolved, match.group(0), 0.9))
 
+        for match in _BARE_DAY_RE.finditer(text):
+            resolved = self._day_in_current_or_next_month(target_date, int(match.group(1)))
+            if resolved:
+                candidates.append((resolved, match.group(0), 0.76))
+
         for match in _WEEKDAY_RE.finditer(text):
             modifier, weekday_char = match.groups()
             weekday = _WEEKDAYS[weekday_char]
             delta = (weekday - target_date.weekday()) % 7
-            if modifier and "다음" in modifier:
-                delta += 7 if delta == 0 else 7
-            elif modifier in {"오는", "이번 주"} and delta == 0:
-                delta = 7 if modifier == "오는" else 0
+            normalized_modifier = (modifier or "").replace(" ", "")
+            if "다음" in normalized_modifier:
+                delta += 7
+            elif normalized_modifier == "오는" and delta == 0:
+                delta = 7
             resolved = target_date + timedelta(days=delta)
             candidates.append((resolved, match.group(0), 0.78))
 
