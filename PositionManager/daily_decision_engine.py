@@ -53,7 +53,7 @@ def evaluate_daily_entry(
             score=score,
         )
 
-    if bars_since_signal >= cfg.entry_watch_bars:
+    if bars_since_signal > cfg.entry_watch_bars:
         return DailyDecision(
             evaluation_date=evaluation_date,
             decision="EXPIRED",
@@ -116,11 +116,54 @@ def evaluate_daily_entry(
     )
 
 
+def evaluate_daily_scale_in(
+    history: pd.DataFrame,
+    signal_bar: pd.Series,
+    structural_stop: float,
+    signal_close: float,
+    bars_since_signal: int,
+    cfg: StrategyConfig,
+) -> DailyDecision:
+    score = score_daily_state(
+        history=history,
+        signal_bar=signal_bar,
+        structural_stop=structural_stop,
+        signal_close=signal_close,
+        cfg=cfg,
+    )
+    evaluation_date = history.index[-1].strftime("%Y%m%d")
+
+    if score.hard_cancel_reason:
+        return DailyDecision(
+            evaluation_date=evaluation_date,
+            decision="BLOCK_SCALE_IN",
+            reason=score.hard_cancel_reason,
+            bars_since_signal=bars_since_signal,
+            score=score,
+        )
+    if score.total_score >= cfg.stage3_min_daily_score:
+        decision = "STRONG_SCALE_IN_OK"
+        reason = "DAILY_SCORE_STRONG"
+    elif score.total_score >= cfg.stage2_min_daily_score:
+        decision = "SCALE_IN_OK"
+        reason = "DAILY_SCORE_OK"
+    else:
+        decision = "HOLD_NO_ADD"
+        reason = "DAILY_SCORE_WEAK"
+    return DailyDecision(
+        evaluation_date=evaluation_date,
+        decision=decision,
+        reason=reason,
+        bars_since_signal=bars_since_signal,
+        score=score,
+    )
+
+
 def scale_in_allowed(decision: DailyDecision, min_score: float) -> bool:
     return (
         not decision.score.hard_cancel_reason
         and decision.score.total_score >= min_score
-        and decision.decision not in {"CANCEL", "EXPIRED"}
+        and decision.decision != "BLOCK_SCALE_IN"
     )
 
 
