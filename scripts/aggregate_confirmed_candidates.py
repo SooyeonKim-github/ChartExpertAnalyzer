@@ -1,18 +1,23 @@
 from __future__ import annotations
 
 import csv
-import time
+import sys
 from datetime import datetime
 from pathlib import Path
 
 import pandas as pd
-from pykrx import stock
 
 ROOT = Path(__file__).resolve().parents[1]
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
+
+from MarketData import get_market_data_service, to_upper_ohlcv  # noqa: E402
+
 OUTPUT_DIR = ROOT / "results"
 OUTPUT_FILE = OUTPUT_DIR / "confirmed_candidates.csv"
+DAILY_RETURN_FILE = OUTPUT_DIR / "confirmed_daily_returns.csv"
 TODAY = datetime.now().strftime("%Y%m%d")
-HORIZONS = (1, 5, 10, 20, 40, 60)
+HORIZONS = tuple(range(1, 61))
 DISPLAY_LIMIT = 20
 
 BASE_COLUMNS = [
@@ -26,6 +31,13 @@ RETURN_COLUMNS = [
     "return_updated_at",
 ]
 OUTPUT_COLUMNS = BASE_COLUMNS + RETURN_COLUMNS
+
+DAILY_RETURN_COLUMNS = [
+    "scan_date", "analyzer", "ticker", "name", "market",
+    "return_entry_date", "return_entry_price_d1_open",
+    "price_date", "trading_day_no", "close", "cumulative_return_pct",
+    "return_updated_at",
+]
 
 
 def _read_csv(path: Path) -> list[dict[str, str]]:
@@ -76,10 +88,21 @@ def _date_key(value: str | None) -> str:
     return "" if pd.isna(parsed) else parsed.strftime("%Y%m%d")
 
 
-def _normalized_row(*, scan_date: str, analyzer: str, ticker: str, name: str, status: str,
-                    score: str = "", timing_score: str = "", market: str = "",
-                    signal: str = "", pattern_type: str = "", entry_price: str = "",
-                    source_file: Path) -> dict[str, str]:
+def _normalized_row(
+    *,
+    scan_date: str,
+    analyzer: str,
+    ticker: str,
+    name: str,
+    status: str,
+    score: str = "",
+    timing_score: str = "",
+    market: str = "",
+    signal: str = "",
+    pattern_type: str = "",
+    entry_price: str = "",
+    source_file: Path,
+) -> dict[str, str]:
     row = {col: "" for col in OUTPUT_COLUMNS}
     row.update({
         "scan_date": _date_key(scan_date),
@@ -185,7 +208,10 @@ def _normalize_existing(rows: list[dict[str, str]]) -> list[dict[str, str]]:
     return normalized
 
 
-def _merge_history(existing: list[dict[str, str]], current: list[dict[str, str]]) -> tuple[list[dict[str, str]], int]:
+def _merge_history(
+    existing: list[dict[str, str]],
+    current: list[dict[str, str]],
+) -> tuple[list[dict[str, str]], int]:
     merged: dict[tuple[str, str, str], dict[str, str]] = {}
     for row in existing:
         if not row["scan_date"] or not row["analyzer"] or not row["ticker"]:
@@ -211,34 +237,25 @@ def _merge_history(existing: list[dict[str, str]], current: list[dict[str, str]]
 def _prepare_ohlcv(df: pd.DataFrame) -> pd.DataFrame:
     if df is None or df.empty:
         return pd.DataFrame()
-    out = df.copy()
-    rename = {
-        "시가": "Open", "고가": "High", "저가": "Low", "종가": "Close", "거래량": "Volume",
-        "open": "Open", "high": "High", "low": "Low", "close": "Close", "volume": "Volume",
-    }
-    out = out.rename(columns={c: rename.get(str(c), str(c)) for c in out.columns})
-    if "Open" not in out.columns or "Close" not in out.columns:
-        return pd.DataFrame()
-    out.index = pd.to_datetime(out.index, errors="coerce")
-    out = out[~out.index.isna()].sort_index()
+    out = to_upper_ohlcv(df)
     out["Open"] = pd.to_numeric(out["Open"], errors="coerce")
     out["Close"] = pd.to_numeric(out["Close"], errors="coerce")
-    return out.dropna(subset=["Open", "Close"])
+    return out.dropna(subset=["Open", "Close"]).sort_index()
 
 
-def _fetch_ohlcv(ticker: str, start: str, end: str) -> pd.DataFrame:
+def _fetch_ohlcv(ticker: str, start: str, end: str, market: str = "") -> pd.DataFrame:
     try:
-        df = _prepare_ohlcv(stock.get_market_ohlcv_by_date(start, end, ticker))
+        raw = get_market_data_service().get_ohlcv(
+            ticker,
+            start,
+            end,
+            market_hint=market or None,
+            allow_etf=False,
+            fallback_yfinance=True,
+        )
+        return _prepare_ohlcv(raw)
     except Exception as exc:
-        print(f"[WARN] Stock OHLCV failed {ticker}: {exc}")
-        df = pd.DataFrame()
-    if not df.empty:
-        return df
-
-    try:
-        return _prepare_ohlcv(stock.get_etf_ohlcv_by_date(start, end, ticker))
-    except Exception as exc:
-        print(f"[WARN] ETF OHLCV failed {ticker}: {exc}")
+        print(f"[WARN] MarketData OHLCV failed {ticker}: {exc}")
         return pd.DataFrame()
 
 
@@ -248,18 +265,62 @@ def _pct(close: float, entry: float) -> str:
     return f"{(close / entry - 1.0) * 100.0:.6f}"
 
 
-def _update_returns(rows: list[dict[str, str]]) -> None:
+def _number(value: float) -> str:
+    return f"{float(value):.6f}".rstrip("0").rstrip(".")
+
+
+def _daily_key(row: dict[str, str]) -> tuple[str, str, str, str]:
+    return (
+        _date_key(row.get("scan_date")),
+        _clean(row.get("analyzer")),
+        _ticker(row.get("ticker")),
+        _date_key(row.get("price_date")),
+    )
+
+
+def _normalize_daily_existing(rows: list[dict[str, str]]) -> list[dict[str, str]]:
+    normalized = []
+    for old in rows:
+        row = {col: _clean(old.get(col, "")) for col in DAILY_RETURN_COLUMNS}
+        row["scan_date"] = _date_key(old.get("scan_date"))
+        row["ticker"] = _ticker(old.get("ticker"))
+        row["return_entry_date"] = _date_key(old.get("return_entry_date"))
+        row["price_date"] = _date_key(old.get("price_date"))
+        normalized.append(row)
+    return normalized
+
+
+def _merge_daily_history(
+    existing: list[dict[str, str]],
+    generated: list[dict[str, str]],
+) -> list[dict[str, str]]:
+    merged: dict[tuple[str, str, str, str], dict[str, str]] = {}
+    for row in existing:
+        key = _daily_key(row)
+        if all(key):
+            merged[key] = row
+    for row in generated:
+        key = _daily_key(row)
+        if all(key):
+            merged[key] = row
+    return list(merged.values())
+
+
+def _update_returns(rows: list[dict[str, str]]) -> list[dict[str, str]]:
     grouped: dict[str, list[dict[str, str]]] = {}
     for row in rows:
         if row.get("ticker") and len(row.get("scan_date", "")) == 8:
             grouped.setdefault(row["ticker"], []).append(row)
 
+    generated_daily: list[dict[str, str]] = []
     updated_at = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     total = len(grouped)
+
     for i, (ticker, ticker_rows) in enumerate(sorted(grouped.items()), 1):
         earliest = min(r["scan_date"] for r in ticker_rows)
+        market = next((_clean(r.get("market")) for r in ticker_rows if _clean(r.get("market"))), "")
         print(f"[RETURN] {i}/{total} {ticker} {earliest}~{TODAY}")
-        df = _fetch_ohlcv(ticker, earliest, TODAY)
+        df = _fetch_ohlcv(ticker, earliest, TODAY, market)
         if df.empty:
             continue
 
@@ -272,16 +333,16 @@ def _update_returns(rows: list[dict[str, str]]) -> None:
                 row["return_updated_at"] = updated_at
                 continue
 
-            entry_date = future.index[0]
+            entry_date = pd.Timestamp(future.index[0])
             entry_open = float(future.iloc[0]["Open"])
             if entry_open <= 0:
                 continue
 
             row["return_entry_date"] = entry_date.strftime("%Y%m%d")
-            row["return_entry_price_d1_open"] = f"{entry_open:.6f}".rstrip("0").rstrip(".")
-            row["latest_price_date"] = future.index[-1].strftime("%Y%m%d")
+            row["return_entry_price_d1_open"] = _number(entry_open)
+            row["latest_price_date"] = pd.Timestamp(future.index[-1]).strftime("%Y%m%d")
             latest_close = float(future.iloc[-1]["Close"])
-            row["latest_close"] = f"{latest_close:.6f}".rstrip("0").rstrip(".")
+            row["latest_close"] = _number(latest_close)
             row["current_return_pct"] = _pct(latest_close, entry_open)
 
             for h in HORIZONS:
@@ -289,7 +350,24 @@ def _update_returns(rows: list[dict[str, str]]) -> None:
                 row[col] = _pct(float(future.iloc[h - 1]["Close"]), entry_open) if len(future) >= h else ""
             row["return_updated_at"] = updated_at
 
-        time.sleep(0.05)
+            for trading_day_no, (price_date, price_row) in enumerate(future.iterrows(), 1):
+                close = float(price_row["Close"])
+                generated_daily.append({
+                    "scan_date": row["scan_date"],
+                    "analyzer": row["analyzer"],
+                    "ticker": row["ticker"],
+                    "name": row.get("name", ""),
+                    "market": row.get("market", ""),
+                    "return_entry_date": row["return_entry_date"],
+                    "return_entry_price_d1_open": row["return_entry_price_d1_open"],
+                    "price_date": pd.Timestamp(price_date).strftime("%Y%m%d"),
+                    "trading_day_no": str(trading_day_no),
+                    "close": _number(close),
+                    "cumulative_return_pct": _pct(close, entry_open),
+                    "return_updated_at": updated_at,
+                })
+
+    return generated_daily
 
 
 def _sort_key(row: dict[str, str]):
@@ -298,6 +376,15 @@ def _sort_key(row: dict[str, str]):
         row.get("analyzer", ""),
         -_float(row.get("score")),
         row.get("ticker", ""),
+    )
+
+
+def _daily_sort_key(row: dict[str, str]):
+    return (
+        row.get("scan_date", ""),
+        row.get("analyzer", ""),
+        row.get("ticker", ""),
+        row.get("price_date", ""),
     )
 
 
@@ -314,11 +401,14 @@ def _fmt_pct(value: str | None) -> str:
 def _display_recent(rows: list[dict[str, str]], limit: int = DISPLAY_LIMIT) -> None:
     recent = rows[:limit]
     print()
-    print("=" * 102)
+    print("=" * 114)
     print(f"  RECENT CONFIRMED HISTORY (latest {len(recent)} / total {len(rows)})")
-    print("=" * 102)
-    print(f"{'scan_date':<10} {'analyzer':<9} {'ticker':<8} {'name':<16} {'D+5':>9} {'D+20':>9} {'D+60':>9} {'current':>9}")
-    print("-" * 102)
+    print("=" * 114)
+    print(
+        f"{'scan_date':<10} {'analyzer':<9} {'ticker':<8} {'name':<16} "
+        f"{'D+1':>9} {'D+5':>9} {'D+20':>9} {'D+60':>9} {'current':>9}"
+    )
+    print("-" * 114)
     for row in recent:
         name = _clean(row.get("name"))[:14]
         print(
@@ -326,12 +416,13 @@ def _display_recent(rows: list[dict[str, str]], limit: int = DISPLAY_LIMIT) -> N
             f"{row.get('analyzer', ''):<9} "
             f"{row.get('ticker', ''):<8} "
             f"{name:<16} "
+            f"{_fmt_pct(row.get('D+1_close_return_pct')):>9} "
             f"{_fmt_pct(row.get('D+5_close_return_pct')):>9} "
             f"{_fmt_pct(row.get('D+20_close_return_pct')):>9} "
             f"{_fmt_pct(row.get('D+60_close_return_pct')):>9} "
             f"{_fmt_pct(row.get('current_return_pct')):>9}"
         )
-    print("=" * 102)
+    print("=" * 114)
 
 
 def main() -> int:
@@ -355,20 +446,31 @@ def main() -> int:
     print(f"[INFO] Existing history: {len(existing)}")
     print(f"[INFO] New confirmed rows: {added}")
     print(f"[INFO] Total history rows: {len(rows)}")
-    _update_returns(rows)
+
+    generated_daily = _update_returns(rows)
+    existing_daily = _normalize_daily_existing(_read_csv(DAILY_RETURN_FILE))
+    daily_rows = _merge_daily_history(existing_daily, generated_daily)
 
     rows = sorted(rows, key=_sort_key, reverse=True)
+    daily_rows = sorted(daily_rows, key=_daily_sort_key, reverse=True)
     OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
+
     with OUTPUT_FILE.open("w", encoding="utf-8-sig", newline="") as f:
         writer = csv.DictWriter(f, fieldnames=OUTPUT_COLUMNS)
         writer.writeheader()
         writer.writerows(rows)
 
+    with DAILY_RETURN_FILE.open("w", encoding="utf-8-sig", newline="") as f:
+        writer = csv.DictWriter(f, fieldnames=DAILY_RETURN_COLUMNS)
+        writer.writeheader()
+        writer.writerows(daily_rows)
+
     counts: dict[str, int] = {}
     for row in current:
         counts[row["analyzer"]] = counts.get(row["analyzer"], 0) + 1
 
-    print(f"[DONE] Confirmed history + returns: {len(rows)} -> {OUTPUT_FILE}")
+    print(f"[DONE] Confirmed history + D+1~D+60 returns: {len(rows)} -> {OUTPUT_FILE}")
+    print(f"[DONE] Daily return history: {len(daily_rows)} -> {DAILY_RETURN_FILE}")
     for analyzer in ("KJB", "SWING", "MA", "DYNAMIC"):
         print(f"[INFO] Today {analyzer}: {counts.get(analyzer, 0)}")
     _display_recent(rows)
