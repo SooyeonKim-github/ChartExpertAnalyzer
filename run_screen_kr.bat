@@ -124,6 +124,9 @@ echo [5/5] Updating confirmed history and returns...
 "%PYTHON_EXE%" %PYTHON_PREFIX% "%ROOT%scripts\aggregate_confirmed_candidates.py"
 if errorlevel 1 goto RUN_FAILED
 
+"%PYTHON_EXE%" %PYTHON_PREFIX% "%ROOT%scripts\export_today_confirmed_candidates.py"
+if errorlevel 1 goto RUN_FAILED
+
 set "NO_PAUSE="
 echo.
 echo ============================================
@@ -131,6 +134,7 @@ echo [DONE] KR screening finished.
 echo ============================================
 echo Universe : %LIQUIDITY_UNIVERSE_XLSX%
 echo History  : %ROOT%results\confirmed_candidates.csv
+echo Today    : %ROOT%results\today_confiremd_candidates.csv
 echo [INFO] KOSPI + KOSDAQ, recent %LOOKBACK%-day avg trading-value TOP %TOP_N%.
 echo ============================================
 pause
