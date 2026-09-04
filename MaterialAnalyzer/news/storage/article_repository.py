@@ -13,7 +13,7 @@ def _iso(value):
 
 class ArticleRepository:
     COLUMNS = [
-        "article_id","source_id","endpoint_id","source_name","source_type","source_grade",
+        "article_id","source_id","endpoint_id","external_id","source_name","source_type","source_grade",
         "title","body","summary","url","canonical_url","author","published_at","updated_at",
         "collected_at","published_at_precision","first_seen_at","last_seen_at","published_date",
         "market_date","category","language","article_class","collector_type","content_mode",
@@ -26,10 +26,24 @@ class ArticleRepository:
         self.database = database
         self.database.initialize()
 
-    def exists_candidate(self, candidate: ArticleCandidate) -> bool:
-        if candidate.external_id:
-            return self.exists_article_id(f"{candidate.source_id}_{candidate.external_id}")
+    def exists_candidate(self, candidate: ArticleCandidate, url_hash: str | None = None) -> bool:
+        if candidate.external_id and self.exists_external_id(candidate.source_id, candidate.external_id):
+            return True
+        if url_hash and self.find_by_url_hash(url_hash):
+            return True
+        # Backward-compatible fallback for databases created before external_id became
+        # a first-class column.
+        if candidate.external_id and self.exists_article_id(f"{candidate.source_id}_{candidate.external_id}"):
+            return True
         return False
+
+    def exists_external_id(self, source_id: str, external_id: str) -> bool:
+        with self.database.connect() as conn:
+            row = conn.execute(
+                "SELECT 1 FROM articles WHERE source_id = ? AND external_id = ? LIMIT 1",
+                (source_id, external_id),
+            ).fetchone()
+        return row is not None
 
     def exists_article_id(self, article_id: str) -> bool:
         with self.database.connect() as conn:
@@ -51,7 +65,7 @@ class ArticleRepository:
             raise ValueError("unsupported lookup column")
         with self.database.connect() as conn:
             return conn.execute(
-                f"SELECT article_id, source_id, url, title, url_hash, content_hash, first_seen_at, last_seen_at "
+                f"SELECT article_id, source_id, external_id, url, title, url_hash, content_hash, first_seen_at, last_seen_at "
                 f"FROM articles WHERE {column} = ? ORDER BY first_seen_at ASC LIMIT 1",
                 (value,),
             ).fetchone()
