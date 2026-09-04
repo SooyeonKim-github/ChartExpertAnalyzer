@@ -3,9 +3,8 @@ from __future__ import annotations
 from datetime import datetime
 from difflib import SequenceMatcher
 
+from .disclosure_rules import DISCLOSURE_SOURCES, disclosure_bridge_id
 from .models import ArticleFeatures, MatchResult
-
-DISCLOSURE_SOURCES = {"DART", "KIND"}
 
 
 def _set_overlap(left, right) -> float:
@@ -31,14 +30,7 @@ class PairScorer:
     MIN_TITLE_RATIO = 0.45
 
     def score(self, article: ArticleFeatures, representative: ArticleFeatures) -> MatchResult:
-        if (
-            {article.source_id, representative.source_id} == DISCLOSURE_SOURCES
-            and article.external_id
-            and representative.external_id
-            and article.external_id == representative.external_id
-        ):
-            return MatchResult(100.0, "DISCLOSURE_ID", "same DART/KIND receipt number")
-
+        source_pair = {article.source_id, representative.source_id}
         title_ratio = (
             SequenceMatcher(None, article.normalized_title, representative.normalized_title).ratio()
             if article.normalized_title and representative.normalized_title
@@ -52,7 +44,31 @@ class PairScorer:
         numbers_conflict = bool(number_left and number_right and not numbers_overlap)
         date_distance = _date_distance(article.market_date, representative.market_date)
 
-        if {article.source_id, representative.source_id} == DISCLOSURE_SOURCES:
+        if (
+            source_pair == DISCLOSURE_SOURCES
+            and article.external_id
+            and representative.external_id
+            and article.external_id == representative.external_id
+        ):
+            return MatchResult(100.0, "DISCLOSURE_ID", "same DART/KIND receipt number")
+
+        article_bridge = disclosure_bridge_id(article.external_id)
+        representative_bridge = disclosure_bridge_id(representative.external_id)
+        if (
+            source_pair == DISCLOSURE_SOURCES
+            and article_bridge
+            and article_bridge == representative_bridge
+            and (company_overlap or stock_overlap)
+            and title_ratio >= 0.55
+            and not numbers_conflict
+        ):
+            return MatchResult(
+                98.0,
+                "DART_KIND_BRIDGE_ID",
+                f"same official bridge id {article_bridge}",
+            )
+
+        if source_pair == DISCLOSURE_SOURCES:
             if company_overlap and article.event_type == representative.event_type:
                 if (
                     article.event_type != "UNKNOWN"
