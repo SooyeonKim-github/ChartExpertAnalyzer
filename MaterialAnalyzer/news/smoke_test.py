@@ -23,7 +23,7 @@ EXPECTED_LIVE_ENDPOINTS = {
 }
 
 
-def _sample(collected_at: datetime) -> RawArticle:
+def _sample(collected_at: datetime, *, body: str | None = "본문입니다.\n\nCopyright 2026 Test\n계약 규모 1조원") -> RawArticle:
     return RawArticle(
         article_id="TEST_001",
         source_id="TEST",
@@ -32,7 +32,7 @@ def _sample(collected_at: datetime) -> RawArticle:
         source_type="NEWS",
         source_grade="A",
         title="[특징주]   삼성전자, HBM4 공급 본격화",
-        body="본문입니다.\n\nCopyright 2026 Test\n계약 규모 1조원",
+        body=body,
         summary=None,
         url="https://example.com/news/1?utm_source=naver&article_id=1#top",
         canonical_url=None,
@@ -74,6 +74,10 @@ def main():
     assert article.url_hash and article.title_hash and article.content_hash
     assert article.first_seen_at == first and article.last_seen_at == first
 
+    bodyless = normalizer.normalize(_sample(first, body=None))
+    assert bodyless.title_hash
+    assert bodyless.content_hash is None
+
     with tempfile.TemporaryDirectory() as td:
         repo = ArticleRepository(Database(Path(td) / "news.db"))
         assert repo.exists_article_id("missing") is False
@@ -95,6 +99,7 @@ def main():
     print(f"     sources={len(sources)} endpoints={len(endpoints)} live={len(live_endpoints)}")
     print("     live endpoints=" + ", ".join(sorted(EXPECTED_LIVE_ENDPOINTS)))
     print("     normalizer=OK first_seen/last_seen=OK market_date=20260907")
+    print("     exact-dedupe=OK bodyless-content-hash=NONE")
 
 
 if __name__ == "__main__":
