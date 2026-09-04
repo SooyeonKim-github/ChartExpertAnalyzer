@@ -27,20 +27,23 @@ class EventRepository:
             after = conn.execute("SELECT COUNT(*) AS cnt FROM material_events").fetchone()["cnt"]
         return int(before) - int(after)
 
-    def get_pending_clusters(self, limit: int | None = None):
+    def get_pending_clusters(self, limit: int | None = None, extraction_version: str | None = None):
         sql = (
             "SELECT c.* FROM article_clusters c "
             "LEFT JOIN material_events e ON e.cluster_id = c.cluster_id "
             "WHERE c.cluster_status = 'ACTIVE' "
-            "AND (e.event_id IS NULL OR e.cluster_updated_at IS NULL OR e.cluster_updated_at <> c.updated_at) "
-            "ORDER BY c.first_seen_at ASC, c.cluster_id ASC"
+            "AND (e.event_id IS NULL OR e.cluster_updated_at IS NULL OR e.cluster_updated_at <> c.updated_at"
         )
-        params = ()
+        params: list[object] = []
+        if extraction_version:
+            sql += " OR e.extraction_version IS NULL OR e.extraction_version <> ?"
+            params.append(extraction_version)
+        sql += ") ORDER BY c.first_seen_at ASC, c.cluster_id ASC"
         if limit is not None:
             sql += " LIMIT ?"
-            params = (int(limit),)
+            params.append(int(limit))
         with self.database.connect() as conn:
-            return conn.execute(sql, params).fetchall()
+            return conn.execute(sql, tuple(params)).fetchall()
 
     def get_cluster_members(self, cluster_id: str):
         with self.database.connect() as conn:
@@ -62,17 +65,20 @@ class EventRepository:
             conn.execute(
                 "INSERT INTO material_events("
                 "event_id, cluster_id, representative_article_id, event_type, event_stage, "
-                "event_title, event_summary, positive_negative, quantified, companies_json, "
-                "stock_codes_json, numbers_json, original_source_id, original_source_name, "
-                "article_count, source_count, confirmation_count, first_seen_at, last_seen_at, "
-                "market_date, extraction_confidence, extraction_version, cluster_updated_at"
-                ") VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) "
+                "event_title, event_summary, positive_negative, quantified, material_candidate, "
+                "material_candidate_reason, classification_source, companies_json, stock_codes_json, "
+                "numbers_json, original_source_id, original_source_name, article_count, source_count, "
+                "confirmation_count, first_seen_at, last_seen_at, market_date, extraction_confidence, "
+                "extraction_version, cluster_updated_at"
+                ") VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) "
                 "ON CONFLICT(event_id) DO UPDATE SET "
-                "cluster_id=excluded.cluster_id, "
-                "representative_article_id=excluded.representative_article_id, "
+                "cluster_id=excluded.cluster_id, representative_article_id=excluded.representative_article_id, "
                 "event_type=excluded.event_type, event_stage=excluded.event_stage, "
                 "event_title=excluded.event_title, event_summary=excluded.event_summary, "
                 "positive_negative=excluded.positive_negative, quantified=excluded.quantified, "
+                "material_candidate=excluded.material_candidate, "
+                "material_candidate_reason=excluded.material_candidate_reason, "
+                "classification_source=excluded.classification_source, "
                 "companies_json=excluded.companies_json, stock_codes_json=excluded.stock_codes_json, "
                 "numbers_json=excluded.numbers_json, original_source_id=excluded.original_source_id, "
                 "original_source_name=excluded.original_source_name, article_count=excluded.article_count, "
@@ -82,29 +88,17 @@ class EventRepository:
                 "extraction_version=excluded.extraction_version, cluster_updated_at=excluded.cluster_updated_at, "
                 "updated_at=CURRENT_TIMESTAMP",
                 (
-                    event.event_id,
-                    event.cluster_id,
-                    event.representative_article_id,
-                    event.event_type,
-                    event.event_stage,
-                    event.event_title,
-                    event.event_summary,
-                    event.positive_negative,
-                    int(event.quantified),
+                    event.event_id, event.cluster_id, event.representative_article_id,
+                    event.event_type, event.event_stage, event.event_title, event.event_summary,
+                    event.positive_negative, int(event.quantified), int(event.material_candidate),
+                    event.material_candidate_reason, event.classification_source,
                     json.dumps(event.companies, ensure_ascii=False),
                     json.dumps(event.stock_codes, ensure_ascii=False),
                     json.dumps(event.numbers, ensure_ascii=False),
-                    event.original_source_id,
-                    event.original_source_name,
-                    event.article_count,
-                    event.source_count,
-                    event.confirmation_count,
-                    event.first_seen_at,
-                    event.last_seen_at,
-                    event.market_date,
-                    event.extraction_confidence,
-                    event.extraction_version,
-                    event.cluster_updated_at,
+                    event.original_source_id, event.original_source_name,
+                    event.article_count, event.source_count, event.confirmation_count,
+                    event.first_seen_at, event.last_seen_at, event.market_date,
+                    event.extraction_confidence, event.extraction_version, event.cluster_updated_at,
                 ),
             )
         return "UPDATED" if existed else "INSERTED"
@@ -112,6 +106,13 @@ class EventRepository:
     def event_count(self) -> int:
         with self.database.connect() as conn:
             row = conn.execute("SELECT COUNT(*) AS cnt FROM material_events").fetchone()
+            return int(row["cnt"])
+
+    def candidate_count(self) -> int:
+        with self.database.connect() as conn:
+            row = conn.execute(
+                "SELECT COUNT(*) AS cnt FROM material_events WHERE material_candidate = 1"
+            ).fetchone()
             return int(row["cnt"])
 
     @staticmethod
@@ -130,12 +131,13 @@ class EventRepository:
         with self.database.connect() as conn:
             rows = conn.execute(
                 "SELECT * FROM material_events "
-                "ORDER BY market_date DESC, extraction_confidence DESC, first_seen_at ASC"
+                "ORDER BY material_candidate DESC, market_date DESC, extraction_confidence DESC, first_seen_at ASC"
             ).fetchall()
 
         fieldnames = [
             "event_id", "cluster_id", "market_date", "event_type", "event_stage",
-            "positive_negative", "event_title", "event_summary", "companies", "stock_codes",
+            "positive_negative", "material_candidate", "material_candidate_reason",
+            "classification_source", "event_title", "event_summary", "companies", "stock_codes",
             "numbers", "quantified", "original_source_id", "original_source_name",
             "article_count", "source_count", "confirmation_count", "first_seen_at", "last_seen_at",
             "extraction_confidence", "extraction_version", "representative_article_id",
@@ -151,6 +153,9 @@ class EventRepository:
                     "event_type": row["event_type"],
                     "event_stage": row["event_stage"],
                     "positive_negative": row["positive_negative"],
+                    "material_candidate": row["material_candidate"],
+                    "material_candidate_reason": row["material_candidate_reason"],
+                    "classification_source": row["classification_source"],
                     "event_title": row["event_title"],
                     "event_summary": row["event_summary"],
                     "companies": self._json_pipe(row["companies_json"]),
