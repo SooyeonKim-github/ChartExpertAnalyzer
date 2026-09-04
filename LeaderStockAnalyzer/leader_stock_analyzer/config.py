@@ -68,6 +68,7 @@ DEFAULT_CONFIG: dict[str, Any] = {
         "medium_score": 45.0,
         "emerging_market_rank_max": 10,
         "emerging_min_leader_score": 85.0,
+        "emerging_max_top20_days_5d": 2,
     },
     "data": {
         "history_days": 420,
