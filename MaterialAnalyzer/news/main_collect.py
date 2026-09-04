@@ -23,7 +23,7 @@ def run(db_path: Path = DEFAULT_DB):
     classifier = RuleArticleClassifier()
     endpoints = load_endpoints(only_enabled=True)
     print("=" * 58)
-    print(" NewsCollector V1.3")
+    print(" NewsCollector V1.4")
     print("=" * 58)
     print(f"DB        : {db_path}")
     print(f"Endpoints : {len(endpoints)}")
@@ -51,7 +51,7 @@ def run(db_path: Path = DEFAULT_DB):
 
 
 def main():
-    parser = argparse.ArgumentParser(description="MaterialAnalyzer NewsCollector V1.3")
+    parser = argparse.ArgumentParser(description="MaterialAnalyzer NewsCollector V1.4")
     parser.add_argument("--db", default=str(DEFAULT_DB))
     args = parser.parse_args()
     run(Path(args.db))
