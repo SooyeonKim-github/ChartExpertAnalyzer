@@ -10,7 +10,7 @@ from .database import Database
 
 
 class ClusterRepository:
-    VERSION = "RULE_CLUSTER_V1"
+    VERSION = "RULE_CLUSTER_V1_1"
 
     def __init__(self, database: Database, feature_extractor):
         self.database = database
@@ -36,6 +36,13 @@ class ClusterRepository:
             params = (int(limit),)
         with self.database.connect() as conn:
             return conn.execute(sql, params).fetchall()
+
+    def get_disclosure_articles(self):
+        with self.database.connect() as conn:
+            return conn.execute(
+                "SELECT * FROM articles WHERE source_id IN ('DART','KIND') "
+                "ORDER BY COALESCE(first_seen_at, collected_at) ASC, article_id ASC"
+            ).fetchall()
 
     def get_article(self, article_id: str):
         with self.database.connect() as conn:
