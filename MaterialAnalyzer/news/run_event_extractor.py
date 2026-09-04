@@ -25,7 +25,7 @@ def run(
     extractor = EventExtractor(repository, FeatureExtractor())
 
     print("=" * 76)
-    print(" EventExtractor V1 - Rule Based")
+    print(" EventExtractor V1.1 - Title First / Material Filter")
     print("=" * 76)
     print(f"DB      : {db_path}")
     print(f"Report  : {output_path}")
@@ -34,18 +34,20 @@ def run(
 
     result = extractor.run(rebuild=rebuild, limit=limit)
     report = repository.export_report(output_path)
+    material_candidates = repository.candidate_count()
 
-    print(f"processed      = {result.processed}")
-    print(f"inserted       = {result.inserted}")
-    print(f"updated        = {result.updated}")
-    print(f"total_events   = {result.total_events}")
-    print(f"report         = {report}")
+    print(f"processed           = {result.processed}")
+    print(f"inserted            = {result.inserted}")
+    print(f"updated             = {result.updated}")
+    print(f"total_events        = {result.total_events}")
+    print(f"material_candidates = {material_candidates}")
+    print(f"report              = {report}")
     print("=" * 76)
     return result
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Rule-based EventExtractor V1")
+    parser = argparse.ArgumentParser(description="Rule-based EventExtractor V1.1")
     parser.add_argument("--db", default=str(DEFAULT_DB))
     parser.add_argument("--output", default=str(DEFAULT_REPORT))
     parser.add_argument("--rebuild", action="store_true")
