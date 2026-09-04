@@ -44,25 +44,21 @@ class ForwardPerformanceEngine:
 
     @staticmethod
     def _excursion(future: pd.DataFrame, entry: float, horizon: int) -> dict[str, float | int | None]:
+        empty = {
+            f"MFE_D{horizon}": None,
+            f"MAE_D{horizon}": None,
+            f"days_to_MFE_D{horizon}": None,
+            f"days_to_MAE_D{horizon}": None,
+        }
         if entry <= 0 or len(future) < horizon:
-            return {
-                f"MFE_D{horizon}": None,
-                f"MAE_D{horizon}": None,
-                f"days_to_MFE_D{horizon}": None,
-                f"days_to_MAE_D{horizon}": None,
-            }
-        window = future.iloc[:horizon].copy()
+            return empty
+        window = future.iloc[:horizon].copy().reset_index(drop=True)
         highs = pd.to_numeric(window["high"], errors="coerce")
         lows = pd.to_numeric(window["low"], errors="coerce")
         if highs.dropna().empty or lows.dropna().empty:
-            return {
-                f"MFE_D{horizon}": None,
-                f"MAE_D{horizon}": None,
-                f"days_to_MFE_D{horizon}": None,
-                f"days_to_MAE_D{horizon}": None,
-            }
-        high_pos = int(highs.to_numpy().argmax())
-        low_pos = int(lows.to_numpy().argmin())
+            return empty
+        high_pos = int(highs.idxmax())
+        low_pos = int(lows.idxmin())
         mfe = (float(highs.iloc[high_pos]) / entry - 1.0) * 100.0
         mae = (float(lows.iloc[low_pos]) / entry - 1.0) * 100.0
         return {
