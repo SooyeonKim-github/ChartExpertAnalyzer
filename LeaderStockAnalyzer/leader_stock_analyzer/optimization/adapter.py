@@ -1,10 +1,16 @@
 from __future__ import annotations
 
+import sys
+from pathlib import Path
 from typing import Any
 
 import pandas as pd
 
-from ThresholdOptimization import BaseThresholdAdapter
+REPO_ROOT = Path(__file__).resolve().parents[3]
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
+
+from ThresholdOptimization import BaseThresholdAdapter  # noqa: E402
 
 
 def _num(df: pd.DataFrame, col: str) -> pd.Series:
@@ -132,7 +138,7 @@ class LeaderThresholdAdapter(BaseThresholdAdapter):
             float(params["strong_leader"]) >= float(self.confirmed_floor.get("confirmed_leader", 0))
             and float(params["strong_timing"]) >= float(self.confirmed_floor.get("confirmed_timing", 0))
             and float(params["min_breakout_quality"]) >= float(self.confirmed_floor.get("min_breakout_quality", 0))
-            and float(params["max_chase_risk"]) <= float(self.confirmed_floor.get("max_chase_risk", 100))
+            and float(params["max_chase_risk"]) == float(self.confirmed_floor.get("max_chase_risk", params["max_chase_risk"]))
         )
 
     def export_config(self, params: dict[str, Any]) -> dict[str, Any]:
