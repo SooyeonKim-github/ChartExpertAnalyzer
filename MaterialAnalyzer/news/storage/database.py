@@ -146,6 +146,9 @@ CREATE TABLE IF NOT EXISTS material_events (
     event_summary TEXT,
     positive_negative TEXT NOT NULL DEFAULT 'NEUTRAL',
     quantified INTEGER NOT NULL DEFAULT 0,
+    material_candidate INTEGER NOT NULL DEFAULT 0,
+    material_candidate_reason TEXT,
+    classification_source TEXT DEFAULT 'NONE',
     companies_json TEXT,
     stock_codes_json TEXT,
     numbers_json TEXT,
@@ -169,6 +172,8 @@ CREATE INDEX IF NOT EXISTS idx_material_events_type
 ON material_events(event_type);
 CREATE INDEX IF NOT EXISTS idx_material_events_cluster
 ON material_events(cluster_id);
+CREATE INDEX IF NOT EXISTS idx_material_events_candidate
+ON material_events(material_candidate);
 """
 
 
@@ -177,6 +182,12 @@ MIGRATION_COLUMNS = {
     "published_at_precision": "TEXT DEFAULT 'UNKNOWN'",
     "first_seen_at": "TEXT",
     "last_seen_at": "TEXT",
+}
+
+MATERIAL_EVENT_MIGRATION_COLUMNS = {
+    "material_candidate": "INTEGER NOT NULL DEFAULT 0",
+    "material_candidate_reason": "TEXT",
+    "classification_source": "TEXT DEFAULT 'NONE'",
 }
 
 
@@ -197,6 +208,7 @@ class Database:
             conn.execute("CREATE INDEX IF NOT EXISTS idx_articles_first_seen_at ON articles(first_seen_at)")
             conn.execute("CREATE INDEX IF NOT EXISTS idx_articles_market_date ON articles(market_date)")
             conn.execute("CREATE INDEX IF NOT EXISTS idx_articles_external_id ON articles(source_id, external_id)")
+            conn.execute("CREATE INDEX IF NOT EXISTS idx_material_events_candidate ON material_events(material_candidate)")
 
     @staticmethod
     def _migrate_columns(conn: sqlite3.Connection):
@@ -204,6 +216,11 @@ class Database:
         for column, definition in MIGRATION_COLUMNS.items():
             if column not in existing:
                 conn.execute(f"ALTER TABLE articles ADD COLUMN {column} {definition}")
+
+        event_existing = {row[1] for row in conn.execute("PRAGMA table_info(material_events)")}
+        for column, definition in MATERIAL_EVENT_MIGRATION_COLUMNS.items():
+            if column not in event_existing:
+                conn.execute(f"ALTER TABLE material_events ADD COLUMN {column} {definition}")
 
         conn.execute(
             "UPDATE articles SET external_id = CASE "
