@@ -46,25 +46,35 @@ def main() -> None:
     attribution = PerformanceAttributionEngine(cfg)
     dates = _trading_dates(start, end)
     rows: list[dict] = []
+
     max_horizon = max(performance.horizons + performance.excursion_horizons)
     future_calendar_days = max_horizon * 2 + 30
+    range_calendar_days = max(0, (pd.Timestamp(end) - pd.Timestamp(start)).days)
+    full_series_future_days = range_calendar_days + future_calendar_days
+    forward_cache: dict[str, pd.DataFrame] = {}
 
     for i, d in enumerate(dates, start=1):
         print(f"\n[{i}/{len(dates)}] {d}")
         _, results = screen_date(cfg, scan_date=d, top_n=args.top_n, base_dir=base_dir, progress=False)
         for r in results:
             rec = r.to_dict()
+            ticker = str(r.ticker).zfill(6)
             try:
-                daily = provider.get_daily(r.ticker, d, future_days=future_calendar_days)
+                if ticker not in forward_cache:
+                    forward_cache[ticker] = provider.get_daily(
+                        ticker,
+                        start,
+                        future_days=full_series_future_days,
+                    )
                 rec.update(
                     performance.evaluate(
-                        daily,
+                        forward_cache[ticker],
                         d,
                         breakout_reference=r.breakout_reference,
                     )
                 )
             except Exception as exc:
-                print(f"[WARN] forward performance {d} {r.ticker} {r.name}: {exc}")
+                print(f"[WARN] forward performance {d} {ticker} {r.name}: {exc}")
                 rec.update(performance.evaluate(pd.DataFrame(), d, breakout_reference=r.breakout_reference))
             rows.append(rec)
 
