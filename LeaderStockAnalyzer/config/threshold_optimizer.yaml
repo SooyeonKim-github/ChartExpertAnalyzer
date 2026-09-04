@@ -9,6 +9,11 @@ optimizer:
   step_trading_days: 40
   purge_trading_days: 20
 
+  # Train에서 충분한 표본이 있는 조합 중 상위 K개만 미래 Validation으로 넘긴다.
+  min_train_samples: 30
+  min_train_unique_dates: 15
+  train_top_k: 50
+
   # Hard sample constraints per validation fold.
   min_samples: 30
   min_unique_dates: 15
