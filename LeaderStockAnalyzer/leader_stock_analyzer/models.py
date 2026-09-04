@@ -19,6 +19,27 @@ class TimingScore:
 
 
 @dataclass
+class BreakoutQualityResult:
+    score: float | None
+    label: str
+    available: bool
+    breakout_type: str | None
+    breakout_reference: float | None
+    breakout_distance_pct: float | None = None
+    close_location_value: float | None = None
+    upper_wick_ratio: float | None = None
+    volume_ratio_20: float | None = None
+    turnover_ratio_20: float | None = None
+    gap_pct: float | None = None
+    breakout_hold_pct: float | None = None
+    pre_breakout_distance_pct: float | None = None
+    volatility_contraction_ratio: float | None = None
+    false_breakout: bool = False
+    exhaustion_risk: bool = False
+    details: dict[str, Any] = field(default_factory=dict)
+
+
+@dataclass
 class LeaderResult:
     scan_date: str
     ticker: str
@@ -50,6 +71,23 @@ class LeaderResult:
     volume_ratio_20: float | None
     market_relative_strength: float | None
     signal: str
+
+    # Breakout quality is independent of the 100-point Leader Score.
+    breakout_quality_available: bool = False
+    breakout_type: str | None = None
+    breakout_reference: float | None = None
+    breakout_quality_score: float | None = None
+    breakout_quality_label: str = "NO_BREAKOUT"
+    breakout_distance_pct: float | None = None
+    close_location_value: float | None = None
+    upper_wick_ratio: float | None = None
+    turnover_ratio_20: float | None = None
+    gap_pct: float | None = None
+    breakout_hold_pct: float | None = None
+    pre_breakout_distance_pct: float | None = None
+    volatility_contraction_ratio: float | None = None
+    false_breakout_flag: bool = False
+    breakout_exhaustion_risk: bool = False
 
     # Sector context. These do not change the original 100-point Leader Score.
     sector: str | None = None
