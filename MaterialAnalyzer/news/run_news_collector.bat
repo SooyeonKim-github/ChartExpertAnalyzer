@@ -3,7 +3,8 @@ setlocal
 cd /d "%~dp0\..\.."
 
 echo ==========================================================
-echo MaterialAnalyzer - NewsCollector V1.4 (7 live sources)
+echo MaterialAnalyzer - NewsCollector V1.5
+echo Incremental Collection + Source Health
 echo ==========================================================
 echo.
 echo [1/2] Local smoke test
@@ -16,7 +17,7 @@ if errorlevel 1 (
 )
 
 echo.
-echo [2/2] Live collection
+echo [2/2] Live incremental collection
 if "%OPENDART_API_KEY%"=="" (
   echo [WARN] OPENDART_API_KEY is not set. DART will report a configuration error.
 )
@@ -30,6 +31,11 @@ if not "%RC%"=="0" (
   echo [DONE] NewsCollector finished.
 )
 
+echo.
+echo Expected on repeat runs:
+echo - DART/KIND: known items should be skip, not fetch.
+echo - GOV sources: only latest 3 known items are re-fetched.
+echo - Every endpoint prints health=HEALTHY/DEGRADED/FAILED.
 echo.
 echo Please share the 7 endpoint result lines and TOTAL line for verification.
 echo.
