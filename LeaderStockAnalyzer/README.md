@@ -15,6 +15,7 @@
 9. 강한 업종 안에서 실제 대장인지 Sector Context로 확인한다
 10. 오늘만 강한 종목과 며칠째 시장 중심인 종목을 Leader Persistence로 구분한다
 11. 미래 성과 평가는 same-day 판정 로직과 완전히 분리해 look-ahead를 방지한다
+12. Threshold는 단일 과거 최고값보다 Purged Walk-Forward와 parameter plateau를 우선한다
 
 ## Leader Score
 
@@ -162,6 +163,74 @@ results/range_YYYYMMDD_YYYYMMDD/performance/
 
 기본 `min_group_count=20`이며 D+20 완전 표본이 20건 미만이면 `LOW_SAMPLE`로 표시합니다.
 
+## Threshold Optimizer
+
+Threshold 최적화는 루트의 공통 `ThresholdOptimization/` 엔진을 사용하고 LeaderStockAnalyzer는 전용 Adapter만 가집니다.
+
+```text
+ThresholdOptimization/
+  base.py
+  walk_forward.py
+  objective.py
+  optimizer.py
+
+LeaderStockAnalyzer/
+  leader_stock_analyzer/optimization/adapter.py
+  config/threshold_optimizer.yaml
+  run_threshold_optimizer.py
+  run_optimize_thresholds.bat
+```
+
+기본 대상은 `D+20`이며 `CONFIRMED -> STRONG_CONFIRMED` 순으로 별도 최적화합니다.
+
+기본 흐름:
+
+```text
+Range 전체 결과
+    -> 과거 Train에서 threshold grid 평가
+    -> Train 상위 K 조합 선별
+    -> D+20 label leakage 방지용 20거래일 Purge
+    -> 미래 Validation에서 재평가
+    -> Fold 평균 성능 - Fold 편차 penalty
+    -> 주변 parameter 성능을 이용한 Plateau penalty
+    -> 현재 설정과 너무 먼 조합에 Distance penalty
+    -> recommended_thresholds.yaml
+```
+
+현재 목적함수는 D+20 중앙값, 승률, P25, MAE 품질, excursion ratio, 표본수를 함께 사용합니다. Validation fold에서 최소 표본/최소 날짜 조건을 충족하지 못한 조합은 경쟁에서 제외합니다.
+
+실행:
+
+```bat
+run_optimize_thresholds.bat
+```
+
+기본적으로 최신 `results/range_*/range_all_results.csv`를 자동으로 사용합니다. 직접 지정하려면:
+
+```bash
+python run_threshold_optimizer.py --range-file results/range_20230101_20260831/range_all_results.csv --phase both
+```
+
+산출물:
+
+```text
+results/range_.../optimizer/
+  confirmed/
+    all_trials.csv
+    fold_results.csv
+    walk_forward_folds.csv
+    top_configs.csv
+    stability_report.csv
+    current_vs_optimized.csv
+    recommended_thresholds.yaml
+  strong/
+    ...
+  current_vs_optimized.csv
+  recommended_thresholds.yaml
+```
+
+추천 Threshold는 `default.yaml`에 자동 적용하지 않습니다. 충분한 Out-of-Sample 안정성과 현재 대비 개선을 확인한 뒤 수동 반영합니다.
+
 ## 실행
 
 Screen:
@@ -179,12 +248,14 @@ run_range.bat
 또는:
 
 ```bash
-python main_range.py --date-range 20260101~20260831 --top-n 100
+python main_range.py --date-range 20230101~20260831 --top-n 100
 ```
+
+Threshold Optimizer는 짧은 기간보다 여러 시장 국면이 포함된 긴 Range 결과를 권장합니다.
 
 ## 설정
 
-모든 주요 가중치와 임계값은 `config/default.yaml`에서 변경할 수 있습니다.
+Analyzer 설정은 `config/default.yaml`, 최적화 탐색 범위와 Walk-Forward 설정은 `config/threshold_optimizer.yaml`에서 변경합니다.
 
 ```text
 weights
@@ -201,4 +272,4 @@ performance
 python -m pytest -q
 ```
 
-Leader/Timing/Sector/Persistence/Breakout Quality에 더해 Forward Performance와 Attribution 합성 테스트를 포함합니다.
+Leader/Timing/Sector/Persistence/Breakout Quality, Forward Performance/Attribution, Threshold Optimizer 합성 테스트를 포함합니다.
