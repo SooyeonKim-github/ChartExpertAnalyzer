@@ -72,6 +72,13 @@ def test_failed_breakout_when_close_falls_back_below_level():
 
 def test_no_breakout_has_no_quality_score():
     d = _base_daily()
+    prev = d.iloc[-2]
+    d.iloc[-1, d.columns.get_loc("open")] = float(prev["open"])
+    d.iloc[-1, d.columns.get_loc("high")] = float(prev["high"])
+    d.iloc[-1, d.columns.get_loc("low")] = float(prev["low"])
+    d.iloc[-1, d.columns.get_loc("close")] = float(prev["close"])
+    d.iloc[-1, d.columns.get_loc("volume")] = float(prev["volume"])
+    d.iloc[-1, d.columns.get_loc("trading_value")] = float(prev["trading_value"])
     pos = score_daily_position(d)
     assert pos.details["breakout_type"] is None
     q = score_breakout_quality(d, pos.details["breakout_reference"], pos.details["breakout_type"], DEFAULT_CONFIG)
