@@ -29,7 +29,7 @@ class ArticleRepository:
     def exists_candidate(self, candidate: ArticleCandidate, url_hash: str | None = None) -> bool:
         if candidate.external_id and self.exists_external_id(candidate.source_id, candidate.external_id):
             return True
-        if url_hash and self.find_by_url_hash(url_hash):
+        if url_hash and self.exists_url_hash(candidate.source_id, url_hash):
             return True
         # Backward-compatible fallback for databases created before external_id became
         # a first-class column.
@@ -42,6 +42,14 @@ class ArticleRepository:
             row = conn.execute(
                 "SELECT 1 FROM articles WHERE source_id = ? AND external_id = ? LIMIT 1",
                 (source_id, external_id),
+            ).fetchone()
+        return row is not None
+
+    def exists_url_hash(self, source_id: str, url_hash: str) -> bool:
+        with self.database.connect() as conn:
+            row = conn.execute(
+                "SELECT 1 FROM articles WHERE source_id = ? AND url_hash = ? LIMIT 1",
+                (source_id, url_hash),
             ).fetchone()
         return row is not None
 
