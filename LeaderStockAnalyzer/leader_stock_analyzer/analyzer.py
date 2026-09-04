@@ -35,8 +35,15 @@ def _leader_type(item: LeaderResult, rank: int, cfg: dict) -> str:
     pcfg = cfg.get("persistence", {})
     if item.persistence_available and item.leader_persistence_level == "HIGH":
         return "PERSISTENT_LEADER"
+
+    # EMERGING means today's leadership is strong while recent leadership
+    # history is still sparse. This prevents every high-score stock from being
+    # labeled emerging and preserves the distinction from persistent leaders.
     if (
-        item.leader_score >= float(pcfg.get("emerging_min_leader_score", 85.0))
+        item.persistence_available
+        and item.leader_persistence_level == "LOW"
+        and item.turnover_top20_days_5d <= int(pcfg.get("emerging_max_top20_days_5d", 2))
+        and item.leader_score >= float(pcfg.get("emerging_min_leader_score", 85.0))
         and rank <= int(pcfg.get("emerging_market_rank_max", 10))
     ):
         return "EMERGING_LEADER"
@@ -77,17 +84,16 @@ def _status(item: LeaderResult, cfg: dict) -> str:
     emerging_support = item.leader_type == "EMERGING_LEADER"
     context_available = sector_available or item.persistence_available
 
-    # Strong candidates now need at least one context confirmation when context
-    # data exists. New leaders are explicitly allowed so Persistence does not
-    # suppress the first day of a genuine leadership change.
+    # Strong candidates need at least one context confirmation when context
+    # exists. A newly emerging leader is a valid confirmation even though its
+    # persistence is low by definition.
     if base_strong:
         if not context_available or sector_support or persistent_support or emerging_support:
             return "STRONG_CONFIRMED"
 
     if base_confirmed:
-        # A middling candidate in a weak sector with no persistence is more
-        # useful as WATCH than as a confirmed leader. Emerging leaders are
-        # exempt because their low persistence is expected by definition.
+        # Weak sector + low persistence is intentionally downgraded to WATCH,
+        # except for a genuine emerging leader.
         if (
             sector_weak
             and item.persistence_available
