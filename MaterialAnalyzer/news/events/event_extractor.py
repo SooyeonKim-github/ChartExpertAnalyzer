@@ -5,7 +5,13 @@ import re
 
 from ..clustering import FeatureExtractor
 from .models import EventRunResult, MaterialEvent
-from .rules import infer_event_type, infer_polarity, infer_stage
+from .number_extractor import extract_meaningful_numbers
+from .rules import (
+    infer_event_type_priority,
+    infer_material_candidate,
+    infer_polarity,
+    infer_stage,
+)
 
 
 SENTENCE_SPLIT_RE = re.compile(r"(?<=[.!?。])\s+|\n+")
@@ -27,8 +33,19 @@ def _first_sentence(value: str | None, max_chars: int = 260) -> str:
     return (parts[0] if parts else text)[:max_chars].rstrip()
 
 
+def _unique_join(values) -> str:
+    result = []
+    seen = set()
+    for value in values:
+        value = re.sub(r"\s+", " ", value or "").strip()
+        if value and value not in seen:
+            seen.add(value)
+            result.append(value)
+    return " | ".join(result)
+
+
 class EventExtractor:
-    VERSION = "RULE_EVENT_V1"
+    VERSION = "RULE_EVENT_V1_1"
 
     def __init__(self, event_repository, feature_extractor=None):
         self.repository = event_repository
@@ -40,7 +57,10 @@ class EventExtractor:
 
         result = EventRunResult()
         self.repository.prune_orphans()
-        clusters = self.repository.get_pending_clusters(limit=limit)
+        clusters = self.repository.get_pending_clusters(
+            limit=limit,
+            extraction_version=self.VERSION,
+        )
 
         for cluster in clusters:
             result.processed += 1
@@ -66,17 +86,10 @@ class EventExtractor:
             raise ValueError(f"cluster has no members: {cluster['cluster_id']}")
 
         source_ids = {row["source_id"] for row in members}
-        combined_parts = []
         companies = []
         stock_codes = []
-        numbers = []
 
         for row in members:
-            combined_parts.extend([
-                row["title"] or "",
-                row["summary"] or "",
-                (row["body"] or "")[:1800],
-            ])
             features = self.feature_extractor.extract(row)
             for company in features.companies:
                 if company not in companies:
@@ -84,24 +97,49 @@ class EventExtractor:
             for code in features.stock_codes:
                 if code not in stock_codes:
                     stock_codes.append(code)
-            for number in features.numbers:
-                if number not in numbers:
-                    numbers.append(number)
 
-        combined = " ".join(part for part in combined_parts if part)
-        event_type = infer_event_type(combined)
-        event_stage = infer_stage(combined, source_ids)
-        positive_negative = infer_polarity(combined, event_type)
+        # Event meaning is intentionally classified in layers. Broad words buried in a
+        # government press-release body must not override the article headline.
+        title_text = _unique_join(row["title"] for row in members)
+        summary_text = _unique_join(row["summary"] for row in members)
+        representative_body = representative["body"] or ""
 
+        event_type, classification_source = infer_event_type_priority(
+            title_text,
+            summary_text,
+            representative_body,
+        )
+
+        # Stage/polarity are based on the headline and summary. This prevents phrases such
+        # as a historical approval or sanction in the body from changing the current event.
+        stage_text = _unique_join([title_text, summary_text])
+        event_stage = infer_stage(stage_text, source_ids)
+        positive_negative = infer_polarity(stage_text, event_type, event_stage)
+        material_candidate, material_reason = infer_material_candidate(
+            event_type,
+            representative["title"] or "",
+            event_stage,
+        )
+
+        # Keep only business-meaningful numbers. Raw dates/phone/article ids are excluded.
         event_summary = (
             _clean_summary(representative["summary"])
             or _first_sentence(representative["body"])
             or _clean_summary(representative["title"])
         )
+        numbers = extract_meaningful_numbers(
+            title_text,
+            summary_text,
+            event_summary,
+        )
 
-        confidence = 35.0
+        confidence = 30.0
         if event_type != "UNKNOWN":
             confidence += 25
+        if classification_source == "TITLE":
+            confidence += 10
+        elif classification_source == "SUMMARY":
+            confidence += 5
         if companies or stock_codes:
             confidence += 15
         if representative["source_id"] in OFFICIAL_SOURCES:
@@ -109,9 +147,9 @@ class EventExtractor:
         if numbers:
             confidence += 5
         if int(cluster["source_count"] or 0) > 1:
-            confidence += 5
+            confidence += 3
         if int(cluster["confirmation_count"] or 0) > 0:
-            confidence += 5
+            confidence += 2
         confidence = round(min(100.0, confidence), 2)
 
         digest = hashlib.sha256(cluster["cluster_id"].encode("utf-8")).hexdigest()[:16]
@@ -125,6 +163,9 @@ class EventExtractor:
             event_summary=event_summary,
             positive_negative=positive_negative,
             quantified=bool(numbers),
+            material_candidate=material_candidate,
+            material_candidate_reason=material_reason,
+            classification_source=classification_source,
             companies=tuple(companies),
             stock_codes=tuple(stock_codes),
             numbers=tuple(numbers),
