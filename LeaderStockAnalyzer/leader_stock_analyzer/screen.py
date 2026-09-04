@@ -7,6 +7,8 @@ import pandas as pd
 from .analyzer import LeaderStockAnalyzer
 from .data_provider import PyKrxLeaderDataProvider
 from .models import LeaderResult
+from .persistence import PersistenceEngine
+from .sector_context import SectorContextEngine
 
 
 def screen_date(
@@ -24,6 +26,7 @@ def screen_date(
     market_returns = {m: provider.get_market_return(m, resolved) for m in ["KOSPI", "KOSDAQ"]}
 
     raw_results: list[LeaderResult] = []
+    daily_by_ticker: dict[str, pd.DataFrame] = {}
     total = len(universe)
     for idx, (ticker, row) in enumerate(universe.iterrows(), start=1):
         try:
@@ -31,6 +34,7 @@ def screen_date(
             daily = daily[daily.index <= pd.Timestamp(resolved)].copy()
             if len(daily) < 21:
                 continue
+            daily_by_ticker[str(ticker).zfill(6)] = daily
             intraday = provider.get_intraday(ticker, resolved)
             result = analyzer.analyze_one(
                 scan_date=resolved,
@@ -52,4 +56,26 @@ def screen_date(
                 print(f"[WARN] {ticker} {row.get('name', '')}: {exc}")
         if progress and (idx == total or idx % 10 == 0):
             print(f"[INFO] analyzed {idx}/{total}")
-    return resolved, analyzer.finalize(raw_results)
+
+    enriched = raw_results
+    if raw_results:
+        sector_map = provider.get_sector_map(resolved)
+        market_period_returns = {
+            market: {
+                5: provider.get_market_period_return(market, resolved, 5),
+                20: provider.get_market_period_return(market, resolved, 20),
+            }
+            for market in ("KOSPI", "KOSDAQ")
+        }
+        enriched = SectorContextEngine(cfg).enrich(
+            enriched,
+            daily_by_ticker=daily_by_ticker,
+            sector_map=sector_map,
+            market_period_returns=market_period_returns,
+        )
+        enriched = PersistenceEngine(cfg).enrich(
+            enriched,
+            daily_by_ticker=daily_by_ticker,
+        )
+
+    return resolved, analyzer.finalize(enriched)
