@@ -1,6 +1,6 @@
-# MaterialAnalyzer NewsCollector / ArticleCluster
+# MaterialAnalyzer News Pipeline
 
-`MaterialAnalyzer.news` is the source-agnostic collection and clustering layer used by MaterialAnalyzer.
+`MaterialAnalyzer.news` is the source-agnostic collection, clustering, and event-structuring layer used by MaterialAnalyzer.
 
 ## Current pipeline
 
@@ -9,30 +9,24 @@
         ↓
 NewsCollector V1.5
         ↓
-ArticleNormalizer
-        ↓
-Exact duplicate check
+ArticleNormalizer / Exact dedupe
         ↓
 Incremental Collection
         ↓
 Source Health / Run History
         ↓
-ArticleCluster V1 (rule-only)
+ArticleCluster V1.1 (rule-only)
         ↓
 cluster_report.csv
+        ↓
+EventExtractor V1 (rule-based)
+        ↓
+material_events
+        ↓
+event_report.csv
 ```
 
-Semantic similarity, embeddings, and LLM clustering are intentionally **disabled** in ArticleCluster V1.
-
-## Live official sources
-
-- DART
-- KIND
-- 산업통상부
-- 과학기술정보통신부
-- 기후에너지환경부
-- 식품의약품안전처
-- 금융위원회
+Semantic similarity, embeddings, and LLM clustering are intentionally **disabled** in ArticleCluster.
 
 ## NewsCollector
 
@@ -47,29 +41,27 @@ Repeated collection is incremental:
 - Government sources: latest 3 items are re-fetched to capture edits.
 - `source_states` and `collection_runs` persist endpoint health/history.
 
-Health can be inspected with:
+Health:
 
 ```bat
 python -m MaterialAnalyzer.news.show_health --runs 20
 ```
 
-## ArticleCluster V1
+## ArticleCluster V1.1
 
-Run:
+Run and rebuild current raw articles with V1.1 rules:
 
 ```bat
 MaterialAnalyzer\news\run_article_cluster.bat
 ```
 
-or:
+Manual incremental mode:
 
 ```bat
 python -m MaterialAnalyzer.news.run_article_cluster
 ```
 
-Default mode is incremental: only articles that do not yet belong to a cluster are processed.
-
-To rebuild all clusters from the raw `articles` table:
+Manual rebuild:
 
 ```bat
 python -m MaterialAnalyzer.news.run_article_cluster --rebuild
@@ -81,25 +73,67 @@ Output:
 MaterialAnalyzer\data\cluster_report.csv
 ```
 
-### Rule-only matching
+### V1.1 disclosure safeguards
 
-ArticleCluster V1 uses:
-- DART/KIND shared receipt number
-- company metadata
-- stock code metadata
-- event keyword class
-- normalized-title lexical similarity
-- title token overlap
-- numeric/amount/quantity agreement
-- market-date proximity
+- Exact DART/KIND receipt id is the strongest key.
+- DART/KIND ids such as `20260904900749` and `20260904000749` use a bridge key based on date + final sequence.
+- The bridge key still requires company/stock evidence and title similarity.
+- If the same company + normalized title + market date contains multiple DART or KIND filings, generic title matching is blocked.
+- Numeric conflicts are penalized.
+- Same-source different receipt ids are never merged only because the filing title is generic.
 
-Numeric conflicts are penalized heavily. Different receipt numbers from the same disclosure source are not merged only because they share a generic filing title.
+Raw `articles` are never deleted or collapsed.
 
-### Cluster storage
-
+Cluster storage:
 - `article_clusters`
 - `article_cluster_members`
 
-Raw articles are never deleted or collapsed. A cluster is a separate event-level grouping layer.
+## EventExtractor V1
 
-`confirmation_count` counts distinct non-`MARKET_REACTION` sources beyond the first source, so later market-reaction articles do not inflate source confirmation.
+EventExtractor converts one cluster into one structured event. It does not merge clusters.
+
+Run:
+
+```bat
+MaterialAnalyzer\news\run_event_extractor.bat
+```
+
+Manual incremental mode:
+
+```bat
+python -m MaterialAnalyzer.news.run_event_extractor
+```
+
+Manual rebuild:
+
+```bat
+python -m MaterialAnalyzer.news.run_event_extractor --rebuild
+```
+
+Output:
+
+```text
+MaterialAnalyzer\data\event_report.csv
+```
+
+Storage:
+
+```text
+material_events
+```
+
+Main fields:
+- `event_type`
+- `event_stage`
+- `event_title`
+- `event_summary`
+- `positive_negative`
+- `quantified`
+- companies / stock codes / numeric facts
+- original source
+- article/source/confirmation counts
+- first/last seen time
+- market date
+- extraction confidence
+
+Event extraction is incremental. If a cluster changes because a new confirmation article is added, only that changed cluster is re-extracted.
