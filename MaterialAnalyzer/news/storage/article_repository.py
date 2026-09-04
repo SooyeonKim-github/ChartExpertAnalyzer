@@ -91,10 +91,11 @@ class ArticleRepository:
 
         ordinary_updates = [
             c for c in columns
-            if c not in {"article_id", "first_seen_at", "last_seen_at", "duplicate_of"}
+            if c not in {"article_id", "external_id", "first_seen_at", "last_seen_at", "duplicate_of"}
         ]
         assignments = [f"{c}=excluded.{c}" for c in ordinary_updates]
         assignments.extend([
+            "external_id=COALESCE(excluded.external_id, articles.external_id)",
             "first_seen_at=CASE "
             "WHEN articles.first_seen_at IS NULL THEN excluded.first_seen_at "
             "WHEN excluded.first_seen_at IS NULL THEN articles.first_seen_at "
