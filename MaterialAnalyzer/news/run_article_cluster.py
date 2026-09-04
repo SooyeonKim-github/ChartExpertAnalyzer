@@ -25,7 +25,7 @@ def run(
     clusterer = ArticleClusterer(repository, extractor)
 
     print("=" * 76)
-    print(" ArticleCluster V1 - Rule Based Only")
+    print(" ArticleCluster V1.1 - Rule Based Only")
     print(" Semantic Similarity / Embedding: DISABLED")
     print("=" * 76)
     print(f"DB      : {db_path}")
@@ -40,6 +40,7 @@ def run(
     print(f"processed             = {result.processed}")
     print(f"matched_existing      = {result.matched}")
     print(f"created_new_clusters  = {result.created}")
+    print(f"ambiguity_blocked     = {result.ambiguity_blocked}")
     print(f"total_clusters        = {result.total_clusters}")
     print(f"multi_member_clusters = {result.multi_member_clusters}")
     print(f"singleton_clusters    = {singleton}")
@@ -49,7 +50,7 @@ def run(
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Rule-only ArticleCluster V1")
+    parser = argparse.ArgumentParser(description="Rule-only ArticleCluster V1.1")
     parser.add_argument("--db", default=str(DEFAULT_DB))
     parser.add_argument("--output", default=str(DEFAULT_REPORT))
     parser.add_argument("--rebuild", action="store_true")
