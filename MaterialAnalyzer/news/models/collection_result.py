@@ -18,4 +18,8 @@ class CollectionResult:
     failed: int = 0
     started_at: datetime | None = None
     finished_at: datetime | None = None
+    run_id: str | None = None
+    health_status: str = "UNKNOWN"
+    consecutive_failures: int = 0
+    checkpoint_value: str | None = None
     errors: List[str] = field(default_factory=list)
