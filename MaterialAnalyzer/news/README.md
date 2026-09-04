@@ -1,139 +1,105 @@
-# NewsCollector V1.5
+# MaterialAnalyzer NewsCollector / ArticleCluster
 
-`MaterialAnalyzer.news` is the source-agnostic collection layer for material/news data.
+`MaterialAnalyzer.news` is the source-agnostic collection and clustering layer used by MaterialAnalyzer.
 
-It is intentionally separate from the legacy `MaterialAnalyzer.collectors` package so the existing workflow keeps working while sources are migrated.
-
-## Architecture
+## Current pipeline
 
 ```text
-source_master.csv
-source_endpoint_master.csv
-        |
-        v
-CollectorFactory
-        |
-        v
-discover
-        |
-        +-- known immutable candidate? -> SKIP before fetch
-        +-- known mutable candidate?   -> latest 3 only re-fetch
-        |
-        v
-fetch -> parse -> RawArticle
-        |
-        v
+7 live official sources
+        ↓
+NewsCollector V1.5
+        ↓
 ArticleNormalizer
-        |
-        +-- exact duplicate checker
-        +-- validator / classifier
-        |
-        v
-SQLite: MaterialAnalyzer/data/news.db
-        |
-        +-- articles
-        +-- source_states
-        +-- collection_runs
+        ↓
+Exact duplicate check
+        ↓
+Incremental Collection
+        ↓
+Source Health / Run History
+        ↓
+ArticleCluster V1 (rule-only)
+        ↓
+cluster_report.csv
 ```
+
+Semantic similarity, embeddings, and LLM clustering are intentionally **disabled** in ArticleCluster V1.
 
 ## Live official sources
 
-Current live endpoints:
+- DART
+- KIND
+- 산업통상부
+- 과학기술정보통신부
+- 기후에너지환경부
+- 식품의약품안전처
+- 금융위원회
 
-- `DART_DISCLOSURE`
-- `KIND_TODAY`
-- `MOTIR_PRESS`
-- `MSIT_PRESS`
-- `MCEE_PRESS`
-- `MFDS_PRESS`
-- `FSC_PRESS`
-
-The remaining source master entries stay disabled until their current endpoint/selectors and usage policy are verified.
-
-## Incremental collection policy
-
-`external_id` is stored as a first-class article field. If it is unavailable, normalized URL hash is used as the incremental fallback.
-
-Default V1.5 behavior:
-
-- DART / KIND: immutable. Known candidates are skipped before fetch.
-- Government press releases: mutable. The latest 3 candidates are re-fetched so corrections can be detected; older known candidates are skipped.
-- New candidates are always fetched and inserted.
-
-Expected repeat-run behavior is therefore closer to:
-
-```text
-DART  found=100 fetch=0  skip=100
-KIND  found=100 fetch=0  skip=100
-MOTIR found=10  fetch=3  skip=7
-MSIT  found=50  fetch=3  skip=47
-...
-```
-
-instead of fetching every discovered item again.
-
-## Source health
-
-Each endpoint run is persisted to `collection_runs`, while the latest endpoint status is stored in `source_states`.
-
-Health states:
-
-- `HEALTHY`: latest run completed without failures
-- `DEGRADED`: 1-2 consecutive failed/partial runs
-- `FAILED`: 3 or more consecutive failed/partial runs
-- `UNKNOWN`: no completed health evaluation yet
-
-Stored state includes last success/failure time, consecutive failures, last discovered/fetched/inserted/updated/skipped/failed counts, error details, and latest checkpoint.
-
-Show current source health:
-
-```bat
-python -m MaterialAnalyzer.news.show_health
-```
-
-Also show recent run history:
-
-```bat
-python -m MaterialAnalyzer.news.show_health --runs 20
-```
-
-## Run
+## NewsCollector
 
 ```bat
 MaterialAnalyzer\news\run_news_collector.bat
 ```
 
+OpenDART requires `OPENDART_API_KEY`.
+
+Repeated collection is incremental:
+- DART/KIND: known items are skipped before fetch.
+- Government sources: latest 3 items are re-fetched to capture edits.
+- `source_states` and `collection_runs` persist endpoint health/history.
+
+Health can be inspected with:
+
+```bat
+python -m MaterialAnalyzer.news.show_health --runs 20
+```
+
+## ArticleCluster V1
+
+Run:
+
+```bat
+MaterialAnalyzer\news\run_article_cluster.bat
+```
+
 or:
 
 ```bat
-python -m MaterialAnalyzer.news.main_collect
+python -m MaterialAnalyzer.news.run_article_cluster
 ```
 
-OpenDART requires `OPENDART_API_KEY`.
+Default mode is incremental: only articles that do not yet belong to a cluster are processed.
 
-The batch script runs the V1.5 smoke test before live collection and pauses at the end unless `NEWS_COLLECTOR_NO_PAUSE=1` is set.
+To rebuild all clusters from the raw `articles` table:
 
-## Collector types
+```bat
+python -m MaterialAnalyzer.news.run_article_cluster --rebuild
+```
 
-- `DART_API`
-- `KIND_HTML`
-- `GOV_RSS`
-- `GOV_HTML_LIST`
-- `GOV_AGGREGATOR`
-- `NEWS_SECTION`
-- `RSS`
-- `API`
+Output:
 
-## Configuration policy
+```text
+MaterialAnalyzer\data\cluster_report.csv
+```
 
-`source_master.csv` answers **who the source is**.
+### Rule-only matching
 
-`source_endpoint_master.csv` answers **where/how to collect it**.
+ArticleCluster V1 uses:
+- DART/KIND shared receipt number
+- company metadata
+- stock code metadata
+- event keyword class
+- normalized-title lexical similarity
+- title token overlap
+- numeric/amount/quantity agreement
+- market-date proximity
 
-`source_material_map.csv` answers **which material/sector the source is strong at**.
+Numeric conflicts are penalized heavily. Different receipt numbers from the same disclosure source are not merged only because they share a generic filing title.
 
-Official sources use `FULL` where permitted. News/industry sources default to `DISCOVERY`, and full-body collection is activated only after source-specific review.
+### Cluster storage
 
-## Next step
+- `article_clusters`
+- `article_cluster_members`
 
-After V1.5 is stable, the next major stage is `ArticleCluster`: group DART/KIND/government/media articles that describe the same underlying event before EventExtractor and MaterialScorer run.
+Raw articles are never deleted or collapsed. A cluster is a separate event-level grouping layer.
+
+`confirmation_count` counts distinct non-`MARKET_REACTION` sources beyond the first source, so later market-reaction articles do not inflate source confirmation.

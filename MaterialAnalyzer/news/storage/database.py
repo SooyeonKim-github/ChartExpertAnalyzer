@@ -98,6 +98,43 @@ CREATE TABLE IF NOT EXISTS collection_runs (
 );
 CREATE INDEX IF NOT EXISTS idx_collection_runs_source_time
 ON collection_runs(source_id, endpoint_id, started_at DESC);
+
+CREATE TABLE IF NOT EXISTS article_clusters (
+    cluster_id TEXT PRIMARY KEY,
+    representative_article_id TEXT NOT NULL,
+    cluster_title TEXT NOT NULL,
+    event_key TEXT,
+    first_seen_at TEXT,
+    last_seen_at TEXT,
+    market_date TEXT,
+    article_count INTEGER NOT NULL DEFAULT 0,
+    source_count INTEGER NOT NULL DEFAULT 0,
+    confirmation_count INTEGER NOT NULL DEFAULT 0,
+    cluster_confidence REAL,
+    cluster_status TEXT NOT NULL DEFAULT 'ACTIVE',
+    clustering_version TEXT NOT NULL,
+    created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+    updated_at TEXT DEFAULT CURRENT_TIMESTAMP
+);
+CREATE INDEX IF NOT EXISTS idx_article_clusters_market_date
+ON article_clusters(market_date);
+CREATE INDEX IF NOT EXISTS idx_article_clusters_event_key
+ON article_clusters(event_key);
+
+CREATE TABLE IF NOT EXISTS article_cluster_members (
+    cluster_id TEXT NOT NULL,
+    article_id TEXT NOT NULL,
+    match_score REAL NOT NULL DEFAULT 0,
+    match_method TEXT NOT NULL,
+    match_reason TEXT,
+    is_representative INTEGER NOT NULL DEFAULT 0,
+    joined_at TEXT DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY(cluster_id, article_id)
+);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_cluster_members_article
+ON article_cluster_members(article_id);
+CREATE INDEX IF NOT EXISTS idx_cluster_members_cluster
+ON article_cluster_members(cluster_id);
 """
 
 
@@ -134,9 +171,6 @@ class Database:
             if column not in existing:
                 conn.execute(f"ALTER TABLE articles ADD COLUMN {column} {definition}")
 
-        # Existing V1.x rows already use SOURCE_externalId-style article ids for most
-        # adapters. Backfill an incremental key where possible; URL hash remains the
-        # fallback for rows whose article_id contains an internally generated hash.
         conn.execute(
             "UPDATE articles SET external_id = CASE "
             "WHEN external_id IS NOT NULL AND external_id <> '' THEN external_id "
