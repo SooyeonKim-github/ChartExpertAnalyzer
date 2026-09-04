@@ -95,11 +95,19 @@ def main():
         assert result.inserted == 2
         assert result.total_events == 2
 
-        with database.connect() as conn:
+        # sqlite3.Connection.__exit__ commits/rolls back but does not close the
+        # connection. On Windows that leaves event.db locked until the local
+        # variable is destroyed, so close explicitly before TemporaryDirectory
+        # attempts to delete the database file.
+        conn = database.connect()
+        try:
             rows = conn.execute(
                 "SELECT event_type, event_stage, positive_negative, quantified, stock_codes_json "
                 "FROM material_events ORDER BY event_type"
             ).fetchall()
+        finally:
+            conn.close()
+
         types = {row["event_type"] for row in rows}
         assert "ORDER_CONTRACT" in types
         assert "GOV_POLICY" in types
@@ -124,6 +132,7 @@ def main():
     print("     government 25GW plan -> GOV_POLICY / PLANNED / quantified")
     print("     incremental repeat -> processed=0")
     print("     event_report.csv -> OK")
+    print("     windows sqlite cleanup -> OK")
 
 
 if __name__ == "__main__":
