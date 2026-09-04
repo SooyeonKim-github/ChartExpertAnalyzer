@@ -135,6 +135,40 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_cluster_members_article
 ON article_cluster_members(article_id);
 CREATE INDEX IF NOT EXISTS idx_cluster_members_cluster
 ON article_cluster_members(cluster_id);
+
+CREATE TABLE IF NOT EXISTS material_events (
+    event_id TEXT PRIMARY KEY,
+    cluster_id TEXT NOT NULL UNIQUE,
+    representative_article_id TEXT NOT NULL,
+    event_type TEXT NOT NULL,
+    event_stage TEXT NOT NULL,
+    event_title TEXT NOT NULL,
+    event_summary TEXT,
+    positive_negative TEXT NOT NULL DEFAULT 'NEUTRAL',
+    quantified INTEGER NOT NULL DEFAULT 0,
+    companies_json TEXT,
+    stock_codes_json TEXT,
+    numbers_json TEXT,
+    original_source_id TEXT,
+    original_source_name TEXT,
+    article_count INTEGER NOT NULL DEFAULT 0,
+    source_count INTEGER NOT NULL DEFAULT 0,
+    confirmation_count INTEGER NOT NULL DEFAULT 0,
+    first_seen_at TEXT,
+    last_seen_at TEXT,
+    market_date TEXT,
+    extraction_confidence REAL NOT NULL DEFAULT 0,
+    extraction_version TEXT NOT NULL,
+    cluster_updated_at TEXT,
+    created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+    updated_at TEXT DEFAULT CURRENT_TIMESTAMP
+);
+CREATE INDEX IF NOT EXISTS idx_material_events_market_date
+ON material_events(market_date);
+CREATE INDEX IF NOT EXISTS idx_material_events_type
+ON material_events(event_type);
+CREATE INDEX IF NOT EXISTS idx_material_events_cluster
+ON material_events(cluster_id);
 """
 
 
