@@ -91,7 +91,7 @@ def main():
         assert saved["last_seen_at"] == second.isoformat()
         assert saved["published_at_precision"] == "SECOND"
 
-    print("[OK] NewsCollector V1.2 smoke test")
+    print("[OK] NewsCollector V1.3 smoke test")
     print(f"     sources={len(sources)} endpoints={len(endpoints)} live={len(live_endpoints)}")
     print("     live endpoints=" + ", ".join(sorted(EXPECTED_LIVE_ENDPOINTS)))
     print("     normalizer=OK first_seen/last_seen=OK market_date=20260907")
