@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import sys
+from copy import deepcopy
 from pathlib import Path
 
 import pandas as pd
@@ -56,12 +57,20 @@ def _run_phase(
     *,
     confirmed_floor: dict | None = None,
 ):
+    phase_cfg = deepcopy(optimizer_cfg)
+    # LeaderStockAnalyzer currently uses one shared max_confirmed_chase_risk for
+    # CONFIRMED and STRONG_CONFIRMED. In a two-phase run, keep that threshold
+    # identical instead of producing contradictory recommendations.
+    if phase == "strong" and confirmed_floor is not None:
+        strong_space = phase_cfg.setdefault("search_space", {}).setdefault("strong", {})
+        strong_space["max_chase_risk"] = [float(confirmed_floor["max_chase_risk"])]
+
     adapter = LeaderThresholdAdapter(
         phase=phase,
         analyzer_config=analyzer_cfg,
         confirmed_floor=confirmed_floor,
     )
-    optimizer = ThresholdOptimizer(adapter, optimizer_cfg)
+    optimizer = ThresholdOptimizer(adapter, phase_cfg)
     result = optimizer.run(df)
     paths = result.write(out_dir / phase)
     print(f"\n[{phase.upper()}] recommended")
