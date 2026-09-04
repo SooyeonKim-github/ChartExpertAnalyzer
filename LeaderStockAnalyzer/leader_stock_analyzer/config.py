@@ -41,6 +41,15 @@ DEFAULT_CONFIG: dict[str, Any] = {
     },
     "breakout_quality": {
         "enabled": True,
+        "weights": {
+            "breakout_distance": 15.0,
+            "close_location": 20.0,
+            "upper_wick": 15.0,
+            "volume_turnover": 20.0,
+            "breakout_hold": 15.0,
+            "gap_quality": 5.0,
+            "pre_breakout_structure": 10.0,
+        },
         "thresholds": {
             "clean": 85.0,
             "valid": 70.0,
