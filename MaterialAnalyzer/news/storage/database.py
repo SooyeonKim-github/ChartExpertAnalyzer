@@ -21,6 +21,9 @@ CREATE TABLE IF NOT EXISTS articles (
     published_at TEXT,
     updated_at TEXT,
     collected_at TEXT NOT NULL,
+    published_at_precision TEXT DEFAULT 'UNKNOWN',
+    first_seen_at TEXT,
+    last_seen_at TEXT,
     published_date TEXT,
     market_date TEXT,
     category TEXT,
@@ -49,8 +52,17 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_articles_article_id ON articles(article_id
 CREATE INDEX IF NOT EXISTS idx_articles_url_hash ON articles(url_hash);
 CREATE INDEX IF NOT EXISTS idx_articles_content_hash ON articles(content_hash);
 CREATE INDEX IF NOT EXISTS idx_articles_published_at ON articles(published_at);
+CREATE INDEX IF NOT EXISTS idx_articles_first_seen_at ON articles(first_seen_at);
+CREATE INDEX IF NOT EXISTS idx_articles_market_date ON articles(market_date);
 CREATE INDEX IF NOT EXISTS idx_articles_source ON articles(source_id, endpoint_id);
 """
+
+
+MIGRATION_COLUMNS = {
+    "published_at_precision": "TEXT DEFAULT 'UNKNOWN'",
+    "first_seen_at": "TEXT",
+    "last_seen_at": "TEXT",
+}
 
 
 class Database:
@@ -66,3 +78,17 @@ class Database:
     def initialize(self):
         with self.connect() as conn:
             conn.executescript(SCHEMA)
+            self._migrate_columns(conn)
+            conn.execute("CREATE INDEX IF NOT EXISTS idx_articles_first_seen_at ON articles(first_seen_at)")
+            conn.execute("CREATE INDEX IF NOT EXISTS idx_articles_market_date ON articles(market_date)")
+
+    @staticmethod
+    def _migrate_columns(conn: sqlite3.Connection):
+        existing = {row[1] for row in conn.execute("PRAGMA table_info(articles)")}
+        for column, definition in MIGRATION_COLUMNS.items():
+            if column not in existing:
+                conn.execute(f"ALTER TABLE articles ADD COLUMN {column} {definition}")
+        conn.execute(
+            "UPDATE articles SET first_seen_at = COALESCE(first_seen_at, collected_at), "
+            "last_seen_at = COALESCE(last_seen_at, collected_at)"
+        )

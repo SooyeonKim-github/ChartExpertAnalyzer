@@ -29,6 +29,9 @@ class RawArticle:
     article_class: str
     collector_type: str
     content_mode: str
+    published_at_precision: str = "UNKNOWN"
+    first_seen_at: Optional[datetime] = None
+    last_seen_at: Optional[datetime] = None
     url_hash: Optional[str] = None
     title_hash: Optional[str] = None
     content_hash: Optional[str] = None

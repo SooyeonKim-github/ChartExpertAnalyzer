@@ -16,7 +16,11 @@ class CollectorService:
 
     def run(self) -> CollectionResult:
         endpoint = self.collector.endpoint
-        result = CollectionResult(source_id=endpoint.source_id, endpoint_id=endpoint.endpoint_id, started_at=datetime.now(timezone.utc))
+        result = CollectionResult(
+            source_id=endpoint.source_id,
+            endpoint_id=endpoint.endpoint_id,
+            started_at=datetime.now(timezone.utc),
+        )
         try:
             candidates = self.collector.discover()
         except Exception as exc:
@@ -24,26 +28,34 @@ class CollectorService:
             result.errors.append(f"DISCOVER_FAILED: {exc}")
             result.finished_at = datetime.now(timezone.utc)
             return result
+
         result.discovered = len(candidates)
         for candidate in candidates:
             try:
-                if self.repository.exists_candidate(candidate):
-                    result.skipped += 1
-                    continue
                 fetched = self.collector.fetch(candidate)
                 result.fetched += 1
                 article = self.collector.parse(candidate, fetched)
                 article = self.normalizer.normalize(article)
                 article.article_class = self.classifier.classify(article)
+
                 valid, error_code = self.validator.validate(article)
                 if not valid:
                     result.failed += 1
                     result.errors.append(f"{candidate.url}: {error_code or 'VALIDATION_FAILED'}")
                     continue
+
                 duplicate = self.duplicate_checker.find_exact(article)
-                if duplicate and duplicate["article_id"] != article.article_id:
-                    article.duplicate_of = duplicate["article_id"]
-                    result.duplicated += 1
+                if duplicate and duplicate.article_id != article.article_id:
+                    if duplicate.match_type == "URL" and duplicate.source_id == article.source_id:
+                        # Same source + same canonical URL: this is a re-observation of the same article.
+                        # Reuse the stored id so repository upsert preserves first_seen_at and advances last_seen_at.
+                        article.article_id = duplicate.article_id
+                        result.duplicated += 1
+                    else:
+                        # Same body at another URL/source is valuable provenance. Keep the row and link it.
+                        article.duplicate_of = duplicate.article_id
+                        result.duplicated += 1
+
                 action = self.repository.upsert(article)
                 if action == "INSERTED":
                     result.inserted += 1
@@ -52,5 +64,6 @@ class CollectorService:
             except Exception as exc:
                 result.failed += 1
                 result.errors.append(f"{candidate.url}: {type(exc).__name__}: {exc}")
+
         result.finished_at = datetime.now(timezone.utc)
         return result
