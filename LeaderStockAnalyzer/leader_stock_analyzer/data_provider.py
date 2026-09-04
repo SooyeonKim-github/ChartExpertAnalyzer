@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import contextlib
 import os
 import sys
 from pathlib import Path
@@ -12,6 +13,7 @@ if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
 from MarketData import ExcelUniverseService, get_market_data_service  # noqa: E402
+from MarketData.service import load_pykrx_stock  # noqa: E402
 
 
 class PyKrxLeaderDataProvider:
@@ -21,6 +23,9 @@ class PyKrxLeaderDataProvider:
         self.cfg = cfg
         self.base_dir = Path(base_dir)
         self.intraday_root = self.base_dir / cfg["data"]["intraday_root"]
+        self.cache_root = self.base_dir / cfg["data"].get("cache_root", "cache")
+        self.sector_cache_root = self.cache_root / "sectors"
+        self.sector_cache_root.mkdir(parents=True, exist_ok=True)
         self.market_data = get_market_data_service()
         self.info_excel = Path(
             os.environ.get(
@@ -43,7 +48,8 @@ class PyKrxLeaderDataProvider:
             }
         ).copy()
         for c in columns:
-            if c not in out.columns: out[c] = 0.0
+            if c not in out.columns:
+                out[c] = 0.0
             out[c] = pd.to_numeric(out[c], errors="coerce")
         out.index = pd.to_datetime(out.index, errors="coerce")
         return out[columns].sort_index().dropna(subset=["close"])
@@ -72,7 +78,8 @@ class PyKrxLeaderDataProvider:
             df["name"] = df["name"].fillna(df["ticker"])
         except Exception as exc:
             print(f"[WARN] Leader snapshot unavailable; using shared Excel universe fallback: {exc}")
-            ucfg = self.cfg["universe"]; n = int(top_n or ucfg["top_n"])
+            ucfg = self.cfg["universe"]
+            n = int(top_n or ucfg["top_n"])
             candidates = ExcelUniverseService(self.info_excel).get_universe(
                 top_n=max(n * 2, n), sort_by="trading_value", include_etf=False, markets=("KOSPI", "KOSDAQ")
             )
@@ -82,7 +89,8 @@ class PyKrxLeaderDataProvider:
                 try:
                     bars = self.market_data.get_ohlcv(info.ticker, start, scan_date, market_hint=info.market, allow_etf=False)
                     close = pd.to_numeric(bars["close"], errors="coerce").dropna()
-                    if close.empty: continue
+                    if close.empty:
+                        continue
                     ret = (float(close.iloc[-1]) / float(close.iloc[-2]) - 1.0) * 100.0 if len(close) >= 2 and float(close.iloc[-2]) > 0 else 0.0
                     last = bars.iloc[-1]
                     rows.append({
@@ -94,26 +102,87 @@ class PyKrxLeaderDataProvider:
                 except Exception:
                     continue
             df = pd.DataFrame(rows)
-            if df.empty: raise RuntimeError("Leader fallback universe is empty")
+            if df.empty:
+                raise RuntimeError("Leader fallback universe is empty")
 
         for c in ["price", "volume", "trading_value", "return_pct", "market_cap"]:
-            if c not in df.columns: df[c] = pd.NA
+            if c not in df.columns:
+                df[c] = pd.NA
             df[c] = pd.to_numeric(df[c], errors="coerce")
-        df["ticker"] = df["ticker"].astype(str).str.zfill(6); df["name"] = df["name"].fillna(df["ticker"]).astype(str); df["market"] = df["market"].fillna("").astype(str).str.upper()
+        df["ticker"] = df["ticker"].astype(str).str.zfill(6)
+        df["name"] = df["name"].fillna(df["ticker"]).astype(str)
+        df["market"] = df["market"].fillna("").astype(str).str.upper()
         ucfg = self.cfg["universe"]
         df = df[(df["price"] >= float(ucfg["min_price"])) & (df["trading_value"].fillna(0) > 0)].copy()
-        if ucfg.get("exclude_spac", True): df = df[~df["name"].str.contains("스팩", na=False)].copy()
+        if ucfg.get("exclude_spac", True):
+            df = df[~df["name"].str.contains("스팩", na=False)].copy()
         if ucfg.get("market_cap_enabled", False) and df["market_cap"].notna().any():
             df = df[(df["market_cap"] >= float(ucfg["market_cap_min"])) & (df["market_cap"] <= float(ucfg["market_cap_max"]))]
-        df = df.sort_values(["trading_value", "return_pct"], ascending=[False, False]); n = int(top_n or ucfg["top_n"]); df = df.head(n).copy(); df["trading_value_rank"] = range(1, len(df) + 1)
+        df = df.sort_values(["trading_value", "return_pct"], ascending=[False, False])
+        n = int(top_n or ucfg["top_n"])
+        df = df.head(n).copy()
+        df["trading_value_rank"] = range(1, len(df) + 1)
         return df.set_index("ticker")
 
     def get_daily(self, ticker: str, scan_date: str, future_days: int = 0) -> pd.DataFrame:
-        end_ts = pd.Timestamp(scan_date) + pd.Timedelta(days=max(0, future_days)); start_ts = pd.Timestamp(scan_date) - pd.Timedelta(days=int(self.cfg["data"]["history_days"]))
+        end_ts = pd.Timestamp(scan_date) + pd.Timedelta(days=max(0, future_days))
+        start_ts = pd.Timestamp(scan_date) - pd.Timedelta(days=int(self.cfg["data"]["history_days"]))
         return self._normalize_daily(self.market_data.get_ohlcv(ticker, start_ts, end_ts, allow_etf=False))
 
     def get_market_return(self, market: str, scan_date: str) -> float | None:
         return self.market_data.get_market_return(market, scan_date)
+
+    def get_market_period_return(self, market: str, scan_date: str, bars: int) -> float | None:
+        end = pd.Timestamp(scan_date)
+        start = end - pd.Timedelta(days=max(30, int(bars) * 3))
+        try:
+            df = self.market_data.get_market_index(market, start, end)
+        except Exception:
+            return None
+        close = pd.to_numeric(df["close"], errors="coerce").dropna()
+        if len(close) <= bars or float(close.iloc[-bars - 1]) <= 0:
+            return None
+        return (float(close.iloc[-1]) / float(close.iloc[-bars - 1]) - 1.0) * 100.0
+
+    def get_sector_map(self, scan_date: str) -> dict[str, str]:
+        """Return point-in-time KRX sector membership and cache it by scan date."""
+        cache_path = self.sector_cache_root / f"{scan_date}.csv"
+        if cache_path.exists():
+            try:
+                cached = pd.read_csv(cache_path, encoding="utf-8-sig", dtype={"ticker": str})
+                if {"ticker", "sector"}.issubset(cached.columns):
+                    cached["ticker"] = cached["ticker"].astype(str).str.zfill(6)
+                    return dict(zip(cached["ticker"], cached["sector"].astype(str)))
+            except Exception:
+                pass
+
+        rows: list[dict[str, str]] = []
+        try:
+            stock = load_pykrx_stock()
+            for market in ("KOSPI", "KOSDAQ"):
+                try:
+                    with contextlib.redirect_stdout(None), contextlib.redirect_stderr(None):
+                        raw = stock.get_market_sector_classifications(scan_date, market)
+                except Exception:
+                    raw = pd.DataFrame()
+                if raw is None or raw.empty or "업종명" not in raw.columns:
+                    continue
+                for ticker, row in raw.iterrows():
+                    code = str(ticker).zfill(6)
+                    sector = str(row.get("업종명", "")).strip()
+                    if code.isdigit() and len(code) == 6 and sector:
+                        rows.append({"ticker": code, "market": market, "sector": sector})
+        except Exception:
+            rows = []
+
+        if not rows:
+            return {}
+        df = pd.DataFrame(rows).drop_duplicates("ticker", keep="last")
+        try:
+            df.to_csv(cache_path, index=False, encoding="utf-8-sig")
+        except Exception:
+            pass
+        return dict(zip(df["ticker"], df["sector"]))
 
     def get_intraday(self, ticker: str, scan_date: str) -> pd.DataFrame:
         candidates: Iterable[Path] = (
@@ -121,14 +190,20 @@ class PyKrxLeaderDataProvider:
             self.intraday_root / f"{scan_date}_{str(ticker).zfill(6)}.csv",
         )
         for path in candidates:
-            if not path.exists(): continue
+            if not path.exists():
+                continue
             df = pd.read_csv(path)
             rename = {"datetime": "timestamp", "일시": "timestamp", "시간": "timestamp", "시가": "open", "고가": "high", "저가": "low", "종가": "close", "거래량": "volume", "거래대금": "trading_value"}
             df = df.rename(columns=rename)
-            if "timestamp" in df.columns: df["timestamp"] = pd.to_datetime(df["timestamp"]); df = df.set_index("timestamp")
+            if "timestamp" in df.columns:
+                df["timestamp"] = pd.to_datetime(df["timestamp"])
+                df = df.set_index("timestamp")
             required = ["open", "high", "low", "close", "volume"]
-            if not all(c in df.columns for c in required): continue
-            for c in required + (["trading_value"] if "trading_value" in df.columns else []): df[c] = pd.to_numeric(df[c], errors="coerce")
-            if "trading_value" not in df.columns: df["trading_value"] = df["close"] * df["volume"]
+            if not all(c in df.columns for c in required):
+                continue
+            for c in required + (["trading_value"] if "trading_value" in df.columns else []):
+                df[c] = pd.to_numeric(df[c], errors="coerce")
+            if "trading_value" not in df.columns:
+                df["trading_value"] = df["close"] * df["volume"]
             return df.sort_index().dropna(subset=["close"])
         return pd.DataFrame()
