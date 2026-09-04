@@ -2,7 +2,7 @@ endpoint_id,source_id,endpoint_role,collector_type,target_section,interval_min,c
 DART_DISCLOSURE,DART,DISCOVERY,DART_API,DISCLOSURE,2,FULL,1,,,,DISCLOSURE,,,,,,,https://opendart.fss.or.kr/api/list.json,,,READY
 KIND_TODAY,KIND,DISCOVERY,KIND_HTML,DISCLOSURE,2,DISCOVERY,1,https://kind.krx.co.kr/disclosure/todaydisclosure.do,,DART,DISCLOSURE,,,,,,,,,,READY_LIVE_TEST
 MOTIR_PRESS,MOTIR,PRESS,GOV_HTML_LIST,PRESS,5,FULL,1,https://www.motir.go.kr/kor/article/ATCL3f49a5a8c,,KOREA_POLICY,GOV_POLICY,,,,,,,,,,READY_LIVE_TEST
-MSIT_PRESS,MSIT,PRESS,GOV_HTML_LIST,PRESS,5,FULL,1,https://www.msit.go.kr/bbs/list.do?mId=307&mPid=208&sCode=user,,KOREA_POLICY,AI,,,,,,,,,,READY_LIVE_TEST
+MSIT_PRESS,MSIT,PRESS,GOV_HTML_LIST,PRESS,5,FULL,1,https://www.msit.go.kr/bbs/list.do?mId=307&mPid=208&sCode=user,,KOREA_POLICY,AI,,,,,,,,https://www.msit.go.kr/user/rss/rss.do?bbsSeqNo=94,,READY_LIVE_TEST
 MCEE_PRESS,MCEE,PRESS,GOV_HTML_LIST,PRESS,5,FULL,1,https://www.mcee.go.kr/home/web/index.do?menuId=10598,,KOREA_POLICY,ENERGY,,,,,,,,,,READY_LIVE_TEST
 MOLIT_PRESS,MOLIT,PRESS,GOV_HTML_LIST,PRESS,10,FULL,0,,,KOREA_POLICY,CONSTRUCTION,,,,,,,,,,NEEDS_URL_SELECTOR_REVIEW
 MFDS_PRESS,MFDS,PRESS,GOV_HTML_LIST,PRESS,5,FULL,1,https://www.mfds.go.kr/brd/m_99/list.do,,KOREA_POLICY,BIO,,,,,,,,,,READY_LIVE_TEST
