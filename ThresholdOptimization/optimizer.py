@@ -19,13 +19,20 @@ def _native(value):
         return {str(k): _native(v) for k, v in value.items()}
     if isinstance(value, (list, tuple)):
         return [_native(v) for v in value]
-    if isinstance(value, (np.integer,)):
+    if isinstance(value, np.integer):
         return int(value)
-    if isinstance(value, (np.floating,)):
+    if isinstance(value, np.floating):
         return float(value)
-    if pd.isna(value) if not isinstance(value, (str, bool)) else False:
+    if not isinstance(value, (str, bool)) and pd.isna(value):
         return None
     return value
+
+
+def _parse_date_series(series: pd.Series) -> pd.Series:
+    text = series.astype(str).str.strip().str.replace(r"\.0$", "", regex=True)
+    ymd = pd.to_datetime(text, format="%Y%m%d", errors="coerce")
+    fallback = pd.to_datetime(text, errors="coerce")
+    return ymd.fillna(fallback).dt.normalize()
 
 
 @dataclass
@@ -74,7 +81,10 @@ class ThresholdOptimizer:
         self.excursion_column = str(ocfg.get("excursion_column", "excursion_ratio_D20"))
         self.min_samples = int(ocfg.get("min_samples", 30))
         self.min_unique_dates = int(ocfg.get("min_unique_dates", 15))
+        self.min_train_samples = int(ocfg.get("min_train_samples", self.min_samples))
+        self.min_train_unique_dates = int(ocfg.get("min_train_unique_dates", self.min_unique_dates))
         self.min_valid_folds = int(ocfg.get("min_valid_folds", 1))
+        self.train_top_k = int(ocfg.get("train_top_k", 50))
         self.top_n = int(ocfg.get("top_n", 50))
         self.std_penalty = float(ocfg.get("robustness_std_penalty", 0.50))
         self.plateau_penalty = float(ocfg.get("plateau_penalty", 0.20))
@@ -105,7 +115,7 @@ class ThresholdOptimizer:
         if self.target_column not in df.columns:
             raise ValueError(f"optimizer target column missing: {self.target_column}")
         out = df.copy()
-        out[self.adapter.date_column] = pd.to_datetime(out[self.adapter.date_column], errors="coerce").dt.normalize()
+        out[self.adapter.date_column] = _parse_date_series(out[self.adapter.date_column])
         out = out[out[self.adapter.date_column].notna()].copy()
         out[self.target_column] = pd.to_numeric(out[self.target_column], errors="coerce")
         return out.sort_values(self.adapter.date_column).reset_index(drop=True)
@@ -123,9 +133,8 @@ class ThresholdOptimizer:
         return rows
 
     def _fold_table(self, folds) -> pd.DataFrame:
-        rows = []
-        for fold in folds:
-            rows.append(
+        return pd.DataFrame(
+            [
                 {
                     "fold_id": fold.fold_id,
                     "train_start": fold.train_start.date(),
@@ -136,16 +145,22 @@ class ThresholdOptimizer:
                     "train_trading_days": len(fold.train_dates),
                     "validation_trading_days": len(fold.validation_dates),
                 }
-            )
-        return pd.DataFrame(rows)
+                for fold in folds
+            ]
+        )
 
-    def _evaluate_fold(self, frame: pd.DataFrame, fold, grid: list[dict[str, Any]]) -> pd.DataFrame:
-        validation_dates = set(fold.validation_dates)
-        val = frame[frame[self.adapter.date_column].isin(validation_dates)].copy()
+    def _evaluate_grid(
+        self,
+        frame: pd.DataFrame,
+        grid: list[dict[str, Any]],
+        *,
+        min_samples: int,
+        min_unique_dates: int,
+    ) -> pd.DataFrame:
         rows: list[dict[str, Any]] = []
         for params in grid:
-            mask = self.adapter.select_mask(val, params).reindex(val.index, fill_value=False).fillna(False).astype(bool)
-            selected = val[mask].copy()
+            mask = self.adapter.select_mask(frame, params).reindex(frame.index, fill_value=False).fillna(False).astype(bool)
+            selected = frame[mask].copy()
             metrics = performance_metrics(
                 selected,
                 target_column=self.target_column,
@@ -154,20 +169,56 @@ class ThresholdOptimizer:
                 date_column=self.adapter.date_column,
             )
             sample_valid = (
-                int(metrics["count"] or 0) >= self.min_samples
-                and int(metrics["unique_dates"] or 0) >= self.min_unique_dates
+                int(metrics["count"] or 0) >= min_samples
+                and int(metrics["unique_dates"] or 0) >= min_unique_dates
             )
-            rows.append(
-                {
-                    **params,
-                    **metrics,
-                    "fold_id": fold.fold_id,
-                    "validation_start": fold.validation_start,
-                    "validation_end": fold.validation_end,
-                    "sample_valid": sample_valid,
-                }
-            )
+            rows.append({**params, **metrics, "sample_valid": sample_valid})
         return add_fold_objective(pd.DataFrame(rows), self.objective_weights)
+
+    @staticmethod
+    def _prefix_non_params(frame: pd.DataFrame, param_cols: list[str], prefix: str) -> pd.DataFrame:
+        rename = {c: f"{prefix}{c}" for c in frame.columns if c not in param_cols}
+        return frame.rename(columns=rename)
+
+    def _evaluate_fold(self, frame: pd.DataFrame, fold, grid: list[dict[str, Any]], param_cols: list[str]) -> pd.DataFrame:
+        train = frame[frame[self.adapter.date_column].isin(set(fold.train_dates))].copy()
+        validation = frame[frame[self.adapter.date_column].isin(set(fold.validation_dates))].copy()
+
+        train_eval = self._evaluate_grid(
+            train,
+            grid,
+            min_samples=self.min_train_samples,
+            min_unique_dates=self.min_train_unique_dates,
+        )
+        validation_eval = self._evaluate_grid(
+            validation,
+            grid,
+            min_samples=self.min_samples,
+            min_unique_dates=self.min_unique_dates,
+        )
+
+        train_valid = train_eval[
+            train_eval["sample_valid"].fillna(False).astype(bool)
+            & train_eval["objective_score"].notna()
+        ].sort_values("objective_score", ascending=False)
+        selected_keys = {
+            tuple(row[c] for c in param_cols)
+            for _, row in train_valid.head(self.train_top_k).iterrows()
+        }
+
+        train_eval = self._prefix_non_params(train_eval, param_cols, "train_")
+        validation_eval = self._prefix_non_params(validation_eval, param_cols, "validation_")
+        merged = train_eval.merge(validation_eval, on=param_cols, how="outer")
+        merged["train_selected"] = merged.apply(
+            lambda row: tuple(row[c] for c in param_cols) in selected_keys,
+            axis=1,
+        )
+        merged["fold_id"] = fold.fold_id
+        merged["train_start"] = fold.train_start
+        merged["train_end"] = fold.train_end
+        merged["validation_start"] = fold.validation_start
+        merged["validation_end"] = fold.validation_end
+        return merged
 
     def _aggregate(self, fold_results: pd.DataFrame, space: dict[str, list[Any]], total_folds: int) -> pd.DataFrame:
         param_cols = list(space)
@@ -176,8 +227,12 @@ class ThresholdOptimizer:
             if not isinstance(keys, tuple):
                 keys = (keys,)
             params = dict(zip(param_cols, keys))
-            valid = grp[grp["sample_valid"].fillna(False).astype(bool) & grp["objective_score"].notna()].copy()
-            objectives = pd.to_numeric(valid["objective_score"], errors="coerce").dropna()
+            valid = grp[
+                grp["train_selected"].fillna(False).astype(bool)
+                & grp["validation_sample_valid"].fillna(False).astype(bool)
+                & grp["validation_objective_score"].notna()
+            ].copy()
+            objectives = pd.to_numeric(valid["validation_objective_score"], errors="coerce").dropna()
             valid_folds = int(len(objectives))
             coverage = valid_folds / total_folds if total_folds else 0.0
             mean_obj = float(objectives.mean()) if not objectives.empty else np.nan
@@ -201,11 +256,11 @@ class ThresholdOptimizer:
                 "count", "unique_dates", "avg_return", "median_return", "win_rate",
                 "p25_return", "p75_return", "avg_mae", "avg_excursion_ratio",
             ):
-                vals = pd.to_numeric(valid.get(metric, pd.Series(dtype=float)), errors="coerce").dropna()
+                column = f"validation_{metric}"
+                vals = pd.to_numeric(valid.get(column, pd.Series(dtype=float)), errors="coerce").dropna()
                 row[f"mean_{metric}"] = float(vals.mean()) if not vals.empty else np.nan
             rows.append(row)
-        out = pd.DataFrame(rows)
-        return self._add_plateau(out, space)
+        return self._add_plateau(pd.DataFrame(rows), space)
 
     def _add_plateau(self, trials: pd.DataFrame, space: dict[str, list[Any]]) -> pd.DataFrame:
         out = trials.copy()
@@ -283,14 +338,18 @@ class ThresholdOptimizer:
             )
         space = self.adapter.parameter_space(self.config)
         grid = self._grid(space)
-        fold_frames = [self._evaluate_fold(frame, fold, grid) for fold in folds]
+        param_cols = list(space)
+        fold_frames = [self._evaluate_fold(frame, fold, grid, param_cols) for fold in folds]
         fold_results = pd.concat(fold_frames, ignore_index=True) if fold_frames else pd.DataFrame()
         trials = self._aggregate(fold_results, space, len(folds))
-        valid = trials[trials["final_score"].notna() & (trials["valid_folds"] >= self.min_valid_folds)].copy()
+        valid = trials[
+            trials["final_score"].notna()
+            & (trials["valid_folds"] >= self.min_valid_folds)
+        ].copy()
         if valid.empty:
             raise ValueError(
-                "No threshold combination passed sample/fold requirements. "
-                "Use a longer range or relax optimizer min_samples/min_unique_dates."
+                "No threshold combination passed train/validation sample requirements. "
+                "Use a longer range or relax optimizer sample constraints."
             )
         best = valid.iloc[0]
         recommended = {name: _native(best[name]) for name in space}
