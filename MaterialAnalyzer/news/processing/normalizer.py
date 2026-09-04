@@ -48,7 +48,12 @@ class ArticleNormalizer:
         title_for_hash = normalize_hash_text(article.title)
         body_for_hash = normalize_hash_text(article.body)
         article.title_hash = sha256_text(title_for_hash)
-        article.content_hash = sha256_text(body_for_hash or title_for_hash)
+
+        # content_hash is only an exact-body hash. Do not fall back to title.
+        # Many disclosures legitimately share generic titles such as
+        # "주주총회소집결의" across different companies. A title-only content hash
+        # would incorrectly mark those distinct disclosures as duplicates.
+        article.content_hash = sha256_text(body_for_hash) if body_for_hash else None
 
         article.body_length = len(article.body or "")
         article.has_full_body = bool(article.body)
