@@ -1,3 +1,4 @@
+from .breakout_quality import score_breakout_quality
 from .chase_risk import score_chase_risk
 from .daily_position import score_daily_position, score_ma_structure
 from .intraday_strength import score_intraday_strength
@@ -7,6 +8,7 @@ from .relative_strength import score_relative_strength
 from .timing import score_timing
 
 __all__ = [
+    "score_breakout_quality",
     "score_chase_risk",
     "score_daily_position",
     "score_ma_structure",
