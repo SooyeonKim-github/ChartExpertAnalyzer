@@ -12,6 +12,15 @@ from .storage import ArticleRepository, Database
 
 
 KST = timezone(timedelta(hours=9))
+EXPECTED_LIVE_ENDPOINTS = {
+    "DART_DISCLOSURE",
+    "KIND_TODAY",
+    "MOTIR_PRESS",
+    "MSIT_PRESS",
+    "MCEE_PRESS",
+    "MFDS_PRESS",
+    "FSC_PRESS",
+}
 
 
 def _sample(collected_at: datetime) -> RawArticle:
@@ -44,9 +53,13 @@ def _sample(collected_at: datetime) -> RawArticle:
 def main():
     sources = load_sources()
     endpoints = load_endpoints(only_enabled=False)
+    live_endpoints = load_endpoints(only_enabled=True)
     assert len(sources) == 36, f"expected 36 sources, got {len(sources)}"
     assert len(endpoints) == 36, f"expected 36 endpoints, got {len(endpoints)}"
+    assert {item.endpoint_id for item in live_endpoints} == EXPECTED_LIVE_ENDPOINTS
     assert "DART_API" in CollectorFactory.REGISTRY
+    assert "KIND_HTML" in CollectorFactory.REGISTRY
+    assert "GOV_HTML_LIST" in CollectorFactory.REGISTRY
     assert "NEWS_SECTION" in CollectorFactory.REGISTRY
 
     normalizer = ArticleNormalizer()
@@ -78,8 +91,9 @@ def main():
         assert saved["last_seen_at"] == second.isoformat()
         assert saved["published_at_precision"] == "SECOND"
 
-    print("[OK] NewsCollector V1.1 smoke test")
-    print(f"     sources={len(sources)} endpoints={len(endpoints)}")
+    print("[OK] NewsCollector V1.2 smoke test")
+    print(f"     sources={len(sources)} endpoints={len(endpoints)} live={len(live_endpoints)}")
+    print("     live endpoints=" + ", ".join(sorted(EXPECTED_LIVE_ENDPOINTS)))
     print("     normalizer=OK first_seen/last_seen=OK market_date=20260907")
 
 
