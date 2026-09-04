@@ -40,6 +40,7 @@ def main() -> None:
         cols = [
             "market_leader_rank", "ticker", "name", "status", "leader_type",
             "leader_score", "timing_score", "chase_risk",
+            "breakout_type", "breakout_quality_score", "breakout_quality_label",
             "sector", "sector_market_rank", "sector_leader_rank",
             "leader_persistence_score", "leader_persistence_level",
             "return_pct", "trading_value_rank", "entry_state",
