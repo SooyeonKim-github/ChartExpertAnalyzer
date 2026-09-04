@@ -12,6 +12,7 @@ from ..exceptions import DiscoverError, ParseError
 from ..models import ArticleCandidate, RawArticle
 from .base import BaseCollector
 from .factory import CollectorFactory
+from .rss import RSSCollector
 
 
 KST = ZoneInfo("Asia/Seoul")
@@ -20,7 +21,7 @@ DATE_RE = re.compile(r"(20\d{2})[.\-/](\d{1,2})[.\-/](\d{1,2})")
 LINK_RULES = {
     "MOTIR": re.compile(r"/kor/article/ATCL3f49a5a8c/\d+/view(?:$|[?#])"),
     "MSIT": re.compile(r"/bbs/view\.do(?:$|[?#])"),
-    "MCEE": re.compile(r"/home/web/newsRead\.do(?:$|[?#])"),
+    "MCEE": re.compile(r"/home/web/(?:newsRead\.do|board/read\.do)(?:$|[?#])"),
     "MFDS": re.compile(r"/brd/(?:m_)?99/view\.do(?:$|[?#])"),
     "FSC": re.compile(r"/no010101/\d+(?:$|[?#])"),
 }
@@ -28,7 +29,7 @@ LINK_RULES = {
 DETAIL_SELECTORS = {
     "MOTIR": [".article-view-content", ".view-cont", ".view_con", ".board-view", "#content"],
     "MSIT": [".view_cont", ".view-content", ".bbsView", ".board_view", "#content"],
-    "MCEE": [".view_cont", ".view-content", ".news_view", ".board_view", "#content"],
+    "MCEE": [".board_view", ".view_cont", ".view-content", ".news_view", "#content"],
     "MFDS": [".board_view", ".view_cont", ".view-content", ".bbs_view", "#content"],
     "FSC": [".view-content", ".board-view", ".board_view", ".contents", "#content"],
 }
@@ -70,7 +71,7 @@ def _external_id(source_id: str, url: str) -> str:
 
 def _nearest_date(anchor):
     node = anchor
-    for _ in range(5):
+    for _ in range(6):
         if node is None:
             break
         parsed = _parse_date(_clean_text(node))
@@ -83,6 +84,34 @@ def _nearest_date(anchor):
 def _looks_like_attachment(title: str, href: str) -> bool:
     combined = f"{title} {href}".lower()
     return any(ext in combined for ext in (".pdf", ".hwp", ".hwpx", ".xlsx", ".zip", "다운로드", "파일뷰어"))
+
+
+def _recover_dynamic_url(source_id: str, anchor, list_url: str) -> str:
+    markup = str(anchor)
+    parent_markup = str(anchor.parent) if anchor.parent else markup
+    combined = f"{markup} {parent_markup}"
+
+    if source_id == "MSIT":
+        match = re.search(r"nttSeqNo[^0-9]{0,20}(\d{6,10})", combined, re.I)
+        if not match:
+            match = re.search(r"(?<!\d)(3\d{6})(?!\d)", combined)
+        if match:
+            return (
+                "https://www.msit.go.kr/bbs/view.do?"
+                f"bbsSeqNo=94&nttSeqNo={match.group(1)}&sCode=user"
+            )
+
+    if source_id == "MCEE":
+        match = re.search(r"boardId[^0-9]{0,20}(\d{6,10})", combined, re.I)
+        if not match:
+            match = re.search(r"(?<!\d)(1\d{6})(?!\d)", combined)
+        if match:
+            return (
+                "https://www.mcee.go.kr/home/web/board/read.do?"
+                f"boardId={match.group(1)}&boardMasterId=939&menuId=10598"
+            )
+
+    return ""
 
 
 def _extract_body(soup: BeautifulSoup, source_id: str, title: str) -> str | None:
@@ -121,12 +150,17 @@ def _extract_body(soup: BeautifulSoup, source_id: str, title: str) -> str | None
 
 @CollectorFactory.register("GOV_HTML", "GOV_HTML_LIST")
 class GovernmentCollector(BaseCollector):
-    """Resilient collector for Korean government press-release boards.
-
-    Discovery is based on stable detail-URL patterns rather than brittle CSS class names.
-    """
+    """Resilient collector for Korean government press-release boards."""
 
     def discover(self):
+        if self.endpoint.rss_url:
+            try:
+                candidates = RSSCollector(self.endpoint, self.http).discover()
+                if candidates:
+                    return candidates
+            except Exception:
+                pass
+
         if not self.endpoint.list_url:
             raise DiscoverError(f"list_url is empty: {self.endpoint.endpoint_id}")
         rule = LINK_RULES.get(self.endpoint.source_id)
@@ -137,18 +171,30 @@ class GovernmentCollector(BaseCollector):
         soup = BeautifulSoup(fetched.text or "", "html.parser")
         candidates = []
         seen = set()
-        for anchor in soup.find_all("a", href=True):
-            href = anchor.get("href", "").strip()
-            absolute = urljoin(self.endpoint.list_url, href)
-            parsed = urlparse(absolute)
-            path_query = parsed.path + ("?" + parsed.query if parsed.query else "")
-            if not rule.search(path_query):
+
+        for anchor in soup.find_all("a"):
+            href = (anchor.get("href") or "").strip()
+            absolute = urljoin(self.endpoint.list_url, href) if href and not href.lower().startswith("javascript:") else ""
+            if absolute:
+                parsed = urlparse(absolute)
+                path_query = parsed.path + ("?" + parsed.query if parsed.query else "")
+                if not rule.search(path_query):
+                    absolute = ""
+
+            if not absolute:
+                absolute = _recover_dynamic_url(self.endpoint.source_id, anchor, self.endpoint.list_url)
+            if not absolute:
                 continue
+
             title = _clean_text(anchor)
+            if len(title) < 4:
+                title = _clean_text(anchor.parent)
             if len(title) < 4 or _looks_like_attachment(title, href):
                 continue
+
             if self.endpoint.source_id == "MSIT" and "bbsSeqNo=94" not in absolute:
                 continue
+
             external_id = _external_id(self.endpoint.source_id, absolute)
             key = external_id or absolute
             if key in seen:
@@ -166,6 +212,7 @@ class GovernmentCollector(BaseCollector):
                     metadata={"discovery_url": self.endpoint.list_url},
                 )
             )
+
         if not candidates:
             raise DiscoverError(f"no press-release links discovered: {self.endpoint.endpoint_id}")
         return candidates
@@ -177,6 +224,7 @@ class GovernmentCollector(BaseCollector):
         soup = BeautifulSoup(fetched.text or "", "html.parser")
         for tag in soup(["script", "style", "noscript"]):
             tag.decompose()
+
         title = (candidate.title_hint or "").strip()
         if not title:
             heading = soup.find(["h1", "h2", "h3"])
@@ -189,6 +237,7 @@ class GovernmentCollector(BaseCollector):
         body = _extract_body(soup, self.endpoint.source_id, title)
         now = datetime.now(KST)
         external_id = candidate.external_id or hashlib.sha256(candidate.url.encode("utf-8")).hexdigest()[:16]
+
         return RawArticle(
             article_id=f"{self.endpoint.source_id}_{external_id}",
             source_id=self.endpoint.source_id,
