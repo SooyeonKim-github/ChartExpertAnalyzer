@@ -17,10 +17,16 @@ def _period_return(df: pd.DataFrame, bars: int) -> float | None:
 
 
 def _percentile(series: pd.Series) -> pd.Series:
+    """Cross-sectional percentile with neutral 50 for unavailable observations."""
     numeric = pd.to_numeric(series, errors="coerce")
-    if numeric.notna().sum() <= 1:
-        return pd.Series(100.0, index=series.index)
-    return numeric.rank(method="average", pct=True) * 100.0
+    out = pd.Series(50.0, index=series.index, dtype=float)
+    valid = numeric.notna()
+    count = int(valid.sum())
+    if count == 1:
+        out.loc[valid] = 100.0
+    elif count > 1:
+        out.loc[valid] = numeric.loc[valid].rank(method="average", pct=True) * 100.0
+    return out
 
 
 class SectorContextEngine:
@@ -86,8 +92,7 @@ class SectorContextEngine:
                 daily = daily_by_ticker.get(ticker, pd.DataFrame())
                 if daily is None or daily.empty or "trading_value" not in daily.columns:
                     continue
-                s = pd.to_numeric(daily["trading_value"], errors="coerce").rename(ticker)
-                turnover_series.append(s)
+                turnover_series.append(pd.to_numeric(daily["trading_value"], errors="coerce").rename(ticker))
             turnover_ratio = None
             if turnover_series:
                 sector_daily = pd.concat(turnover_series, axis=1).sum(axis=1, min_count=1).dropna().sort_index()
@@ -133,8 +138,12 @@ class SectorContextEngine:
             key = (str(market), str(sector))
             sector_row = sector_lookup[key]
             g = grp.copy()
-            g["stock_vs_sector_rs_5d"] = pd.to_numeric(g["ret_5d"], errors="coerce") - sector_row["sector_ret_5d"]
-            g["stock_vs_sector_rs_20d"] = pd.to_numeric(g["ret_20d"], errors="coerce") - sector_row["sector_ret_20d"]
+            ret5 = pd.to_numeric(g["ret_5d"], errors="coerce")
+            ret20 = pd.to_numeric(g["ret_20d"], errors="coerce")
+            sector_ret5 = sector_row["sector_ret_5d"]
+            sector_ret20 = sector_row["sector_ret_20d"]
+            g["stock_vs_sector_rs_5d"] = ret5 - float(sector_ret5) if pd.notna(sector_ret5) else pd.Series(float("nan"), index=g.index)
+            g["stock_vs_sector_rs_20d"] = ret20 - float(sector_ret20) if pd.notna(sector_ret20) else pd.Series(float("nan"), index=g.index)
             g["rs5_pct"] = _percentile(g["stock_vs_sector_rs_5d"])
             g["rs20_pct"] = _percentile(g["stock_vs_sector_rs_20d"])
             g["value_pct"] = _percentile(g["trading_value"])
