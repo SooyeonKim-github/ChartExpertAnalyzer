@@ -172,8 +172,6 @@ CREATE INDEX IF NOT EXISTS idx_material_events_type
 ON material_events(event_type);
 CREATE INDEX IF NOT EXISTS idx_material_events_cluster
 ON material_events(cluster_id);
-CREATE INDEX IF NOT EXISTS idx_material_events_candidate
-ON material_events(material_candidate);
 """
 
 
