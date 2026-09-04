@@ -3,7 +3,7 @@ setlocal
 cd /d "%~dp0\..\.."
 
 echo ============================================================================
-echo MaterialAnalyzer - ArticleCluster V1 (Rule Based Only)
+echo MaterialAnalyzer - ArticleCluster V1.1 (Rule Based Only)
 echo Semantic Similarity / Embedding: DISABLED
 echo ============================================================================
 echo.
@@ -17,16 +17,17 @@ if errorlevel 1 (
 )
 
 echo.
-echo [2/2] Incremental article clustering
-python -m MaterialAnalyzer.news.run_article_cluster
+echo [2/2] Rebuild article clusters with V1.1 rules
+python -m MaterialAnalyzer.news.run_article_cluster --rebuild
 set RC=%ERRORLEVEL%
 
 echo.
 if not "%RC%"=="0" (
   echo [ERROR] ArticleCluster exited with code %RC%.
 ) else (
-  echo [DONE] ArticleCluster finished.
+  echo [DONE] ArticleCluster V1.1 finished.
   echo Report: MaterialAnalyzer\data\cluster_report.csv
+  echo Next: MaterialAnalyzer\news\run_event_extractor.bat
 )
 
 echo.
