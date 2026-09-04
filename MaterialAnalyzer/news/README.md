@@ -19,7 +19,7 @@ ArticleCluster V1.1 (rule-only)
         ↓
 cluster_report.csv
         ↓
-EventExtractor V1 (rule-based)
+EventExtractor V1.1 (title-first rule-based)
         ↓
 material_events
         ↓
@@ -88,7 +88,7 @@ Cluster storage:
 - `article_clusters`
 - `article_cluster_members`
 
-## EventExtractor V1
+## EventExtractor V1.1
 
 EventExtractor converts one cluster into one structured event. It does not merge clusters.
 
@@ -122,18 +122,68 @@ Storage:
 material_events
 ```
 
+### V1.1 classification policy
+
+Event type classification is layered to prevent body-text contamination:
+
+```text
+TITLE
+  ↓ if UNKNOWN
+SUMMARY
+  ↓ if UNKNOWN
+BODY high-precision rules only
+```
+
+Broad words such as `AI`, `지원금`, `배터리`, or `제재` found only somewhere in a government press-release body do not automatically determine the event type.
+
+Stage rules use specific phrases before broad words:
+- `승인 신청`, `허가 신청` -> `REQUESTED`
+- plan/target/review -> `PLANNED`
+- contract/order/decision -> `CONFIRMED`
+- approval/license -> `APPROVED`
+- start/operation/launch -> `STARTED`
+- completion -> `COMPLETED`
+- trading-halt/designation release -> `RELEASED`
+
+`REQUESTED` events are tracked but are not promoted as confirmed material candidates.
+
+### Meaningful numeric facts
+
+`quantified=1` now requires a business-meaningful numeric fact such as:
+- money
+- percent
+- capacity (`GW`, `MW`, `GWh`, ...)
+- quantity (`척`, `대`, `개`, `명`, ...)
+- duration
+- clinical phase
+
+Calendar years, phone numbers, article ids, and other bare numbers are not enough to set `quantified=1`.
+
+### Material candidate filter
+
+Routine/administrative events are stored as events but excluded from downstream material scoring with `material_candidate=0`, including examples such as:
+- market warning / investment caution
+- short-selling restriction
+- ETF/ETN administrative changes
+- routine securities filings
+- routine ownership filings
+- routine IR notices
+- unknown events
+- application/request stage events
+
 Main fields:
 - `event_type`
 - `event_stage`
-- `event_title`
-- `event_summary`
 - `positive_negative`
+- `material_candidate`
+- `material_candidate_reason`
+- `classification_source`
 - `quantified`
-- companies / stock codes / numeric facts
+- companies / stock codes / meaningful numeric facts
 - original source
 - article/source/confirmation counts
 - first/last seen time
 - market date
 - extraction confidence
 
-Event extraction is incremental. If a cluster changes because a new confirmation article is added, only that changed cluster is re-extracted.
+Event extraction is incremental and version-aware. When EventExtractor rules are upgraded, existing events with an older `extraction_version` are re-extracted once. If neither the cluster nor extractor version changes, a repeat run should process zero events.
