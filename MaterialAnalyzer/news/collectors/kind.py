@@ -1,7 +1,9 @@
 from __future__ import annotations
 
+import hashlib
 import re
 from datetime import datetime
+from urllib.parse import urlencode
 from zoneinfo import ZoneInfo
 
 from bs4 import BeautifulSoup
@@ -19,82 +21,104 @@ TIME_RE = re.compile(r"\b([01]\d|2[0-3]):([0-5]\d)\b")
 
 @CollectorFactory.register("KIND_HTML", "KIND")
 class KindCollector(BaseCollector):
-    """KRX KIND today's-disclosure collector using the official POST screen."""
+    """KRX KIND today's-disclosure collector using public KOSPI/KOSDAQ screens."""
+
+    MARKET_TYPES = ("1", "2")
 
     def discover(self):
         now = datetime.now(KST)
-        payload = {
-            "method": "searchTodayDisclosureSub",
-            "currentPageSize": "100",
-            "pageIndex": "1",
-            "orderMode": "0",
-            "orderStat": "D",
-            "forward": "todaydisclosure_sub",
-            "chose": "S",
-            "todayFlag": "N",
-            "marketType": "0",
-            "selDate": now.strftime("%Y-%m-%d"),
-        }
-        fetched = self.http.post(self.endpoint.list_url, data=payload)
-        soup = BeautifulSoup(fetched.text or "", "html.parser")
         candidates = []
         seen = set()
-        for row in soup.select("table tr"):
-            row_text = row.get_text(" ", strip=True)
-            if not row_text or not TIME_RE.search(row_text):
-                continue
-            match = ACPT_RE.search(str(row))
-            if not match:
-                continue
-            acptno = match.group(1)
-            if acptno in seen:
-                continue
-            seen.add(acptno)
-            cells = [cell.get_text(" ", strip=True) for cell in row.find_all(["td", "th"])]
-            report_title = ""
-            company = ""
-            for anchor in row.find_all("a"):
-                text = anchor.get_text(" ", strip=True)
-                if len(text) >= 4 and not report_title:
-                    report_title = text
-            if len(cells) >= 3:
+
+        for market_type in self.MARKET_TYPES:
+            params = {
+                "method": "searchTodayDisclosureMain",
+                "marketType": market_type,
+            }
+            fetched = self.http.get(self.endpoint.list_url, params=params)
+            soup = BeautifulSoup(fetched.text or "", "html.parser")
+            page_url = fetched.url
+
+            for row in soup.select("table tr"):
+                row_text = row.get_text(" ", strip=True)
+                time_match = TIME_RE.search(row_text)
+                if not row_text or not time_match:
+                    continue
+
+                cells = [cell.get_text(" ", strip=True) for cell in row.find_all(["td", "th"])]
+                if len(cells) < 3:
+                    continue
+
                 company = cells[1].strip()
-                if len(cells[2].strip()) >= 4:
-                    report_title = cells[2].strip()
-            if not report_title:
-                continue
-            time_match = TIME_RE.search(row_text)
-            published_at = None
-            if time_match:
+                report_title = cells[2].strip()
+                if len(report_title) < 4:
+                    continue
+
+                row_html = str(row)
+                acpt_match = ACPT_RE.search(row_html)
+                acptno = acpt_match.group(1) if acpt_match else ""
+
                 published_at = now.replace(
                     hour=int(time_match.group(1)),
                     minute=int(time_match.group(2)),
                     second=0,
                     microsecond=0,
                 )
-            viewer_url = (
-                "https://kind.krx.co.kr/common/disclsviewer.do"
-                f"?method=search&acptno={acptno}&docno=&viewerhost=&viewerport="
-            )
-            candidates.append(
-                ArticleCandidate(
-                    source_id=self.endpoint.source_id,
-                    endpoint_id=self.endpoint.endpoint_id,
-                    url=viewer_url,
-                    external_id=acptno,
-                    title_hint=report_title,
-                    published_at_hint=published_at,
-                    category_hint="DISCLOSURE",
-                    metadata={"acptno": acptno, "company_name": company, "row_text": row_text},
+
+                if acptno:
+                    external_id = acptno
+                    viewer_url = (
+                        "https://kind.krx.co.kr/common/disclsviewer.do"
+                        f"?method=search&acptno={acptno}&docno=&viewerhost=&viewerport="
+                    )
+                else:
+                    stable = (
+                        f"{now:%Y%m%d}|{market_type}|{time_match.group(0)}|"
+                        f"{company}|{report_title}"
+                    )
+                    external_id = "ROW_" + hashlib.sha256(stable.encode("utf-8")).hexdigest()[:16]
+                    viewer_url = (
+                        self.endpoint.list_url
+                        + "?"
+                        + urlencode(
+                            {
+                                "method": "searchTodayDisclosureMain",
+                                "marketType": market_type,
+                                "rowKey": external_id,
+                            }
+                        )
+                    )
+
+                if external_id in seen:
+                    continue
+                seen.add(external_id)
+
+                candidates.append(
+                    ArticleCandidate(
+                        source_id=self.endpoint.source_id,
+                        endpoint_id=self.endpoint.endpoint_id,
+                        url=viewer_url,
+                        external_id=external_id,
+                        title_hint=report_title,
+                        published_at_hint=published_at,
+                        category_hint="DISCLOSURE",
+                        metadata={
+                            "acptno": acptno,
+                            "company_name": company,
+                            "row_text": row_text,
+                            "market_type": market_type,
+                            "discovery_url": page_url,
+                        },
+                    )
                 )
-            )
+
         if not candidates:
-            raise DiscoverError("KIND returned no disclosure rows or its table structure changed")
+            raise DiscoverError(
+                "KIND returned no KOSPI/KOSDAQ disclosure rows from the public main screens"
+            )
         return candidates
 
     def fetch(self, candidate):
-        # DART handles the full disclosure document. KIND is an independent official
-        # confirmation source, so we keep metadata without a second viewer request.
         return FetchedContent(
             url=candidate.url,
             status_code=200,
@@ -125,7 +149,9 @@ class KindCollector(BaseCollector):
             published_at=candidate.published_at_hint,
             updated_at=None,
             collected_at=now,
-            published_date=candidate.published_at_hint.date().isoformat() if candidate.published_at_hint else now.date().isoformat(),
+            published_date=candidate.published_at_hint.date().isoformat()
+            if candidate.published_at_hint
+            else now.date().isoformat(),
             market_date=None,
             category="DISCLOSURE",
             language="ko",
