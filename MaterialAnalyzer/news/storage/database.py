@@ -52,8 +52,6 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_articles_article_id ON articles(article_id
 CREATE INDEX IF NOT EXISTS idx_articles_url_hash ON articles(url_hash);
 CREATE INDEX IF NOT EXISTS idx_articles_content_hash ON articles(content_hash);
 CREATE INDEX IF NOT EXISTS idx_articles_published_at ON articles(published_at);
-CREATE INDEX IF NOT EXISTS idx_articles_first_seen_at ON articles(first_seen_at);
-CREATE INDEX IF NOT EXISTS idx_articles_market_date ON articles(market_date);
 CREATE INDEX IF NOT EXISTS idx_articles_source ON articles(source_id, endpoint_id);
 """
 
