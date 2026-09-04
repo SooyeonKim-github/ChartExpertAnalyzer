@@ -31,22 +31,73 @@ def _weighted_score(parts: dict[str, SignalScore], weights: dict[str, float]) ->
     return 0.0 if denominator <= 0 else round(numerator / denominator, 2)
 
 
-def _status(leader_score: float, timing_score: float, chase_risk: float, rank: int, cfg: dict) -> str:
+def _leader_type(item: LeaderResult, rank: int, cfg: dict) -> str:
+    pcfg = cfg.get("persistence", {})
+    if item.persistence_available and item.leader_persistence_level == "HIGH":
+        return "PERSISTENT_LEADER"
+    if (
+        item.leader_score >= float(pcfg.get("emerging_min_leader_score", 85.0))
+        and rank <= int(pcfg.get("emerging_market_rank_max", 10))
+    ):
+        return "EMERGING_LEADER"
+    return "NORMAL"
+
+
+def _status(item: LeaderResult, cfg: dict) -> str:
     t = cfg["thresholds"]
-    if (
-        leader_score >= t["strong_confirmed_leader"]
-        and timing_score >= t["strong_confirmed_timing"]
-        and chase_risk < t["max_confirmed_chase_risk"]
-        and rank <= int(t["strong_rank_max"])
-    ):
-        return "STRONG_CONFIRMED"
-    if (
-        leader_score >= t["confirmed_leader"]
-        and timing_score >= t["confirmed_timing"]
-        and chase_risk < t["max_confirmed_chase_risk"]
-    ):
+    scfg = cfg.get("sector_context", {})
+
+    base_strong = (
+        item.leader_score >= float(t["strong_confirmed_leader"])
+        and item.timing_score >= float(t["strong_confirmed_timing"])
+        and item.chase_risk < float(t["max_confirmed_chase_risk"])
+        and item.market_leader_rank <= int(t["strong_rank_max"])
+    )
+    base_confirmed = (
+        item.leader_score >= float(t["confirmed_leader"])
+        and item.timing_score >= float(t["confirmed_timing"])
+        and item.chase_risk < float(t["max_confirmed_chase_risk"])
+    )
+
+    sector_available = bool(item.sector_context_available and item.sector_context_reliable)
+    sector_support = (
+        sector_available
+        and item.sector_market_rank > 0
+        and item.sector_market_rank <= int(scfg.get("strong_sector_rank_max", 5))
+        and item.sector_leader_rank > 0
+        and item.sector_leader_rank <= int(scfg.get("strong_sector_leader_rank_max", 3))
+    )
+    sector_weak = (
+        sector_available
+        and item.sector_market_rank >= int(scfg.get("weak_sector_rank_min", 15))
+    )
+    persistent_support = bool(
+        item.persistence_available and item.leader_persistence_level == "HIGH"
+    )
+    emerging_support = item.leader_type == "EMERGING_LEADER"
+    context_available = sector_available or item.persistence_available
+
+    # Strong candidates now need at least one context confirmation when context
+    # data exists. New leaders are explicitly allowed so Persistence does not
+    # suppress the first day of a genuine leadership change.
+    if base_strong:
+        if not context_available or sector_support or persistent_support or emerging_support:
+            return "STRONG_CONFIRMED"
+
+    if base_confirmed:
+        # A middling candidate in a weak sector with no persistence is more
+        # useful as WATCH than as a confirmed leader. Emerging leaders are
+        # exempt because their low persistence is expected by definition.
+        if (
+            sector_weak
+            and item.persistence_available
+            and item.leader_persistence_level == "LOW"
+            and not emerging_support
+        ):
+            return "WATCH"
         return "CONFIRMED"
-    if leader_score >= t["watch_leader"]:
+
+    if item.leader_score >= float(t["watch_leader"]):
         return "WATCH"
     return "REJECT"
 
@@ -67,6 +118,15 @@ def _build_signal(result: LeaderResult) -> str:
         reasons.append("전고점 돌파")
     if result.market_relative_strength is not None and result.market_relative_strength >= 3:
         reasons.append("시장 대비 강세")
+    if result.sector_context_available and result.sector_context_reliable:
+        if 0 < result.sector_market_rank <= 5:
+            reasons.append(f"강한 업종 {result.sector_market_rank}위")
+        if 0 < result.sector_leader_rank <= 3:
+            reasons.append(f"업종 내 {result.sector_leader_rank}위")
+    if result.leader_type == "PERSISTENT_LEADER":
+        reasons.append("주도 지속")
+    elif result.leader_type == "EMERGING_LEADER":
+        reasons.append("신규 주도 등장")
     if result.entry_state == "ENTRY_READY":
         reasons.append("돌파 후 눌림·지지·턴")
     elif result.entry_state == "DAILY_BREAKOUT_PROXY":
@@ -116,7 +176,7 @@ class LeaderStockAnalyzer:
         leader_score = _weighted_score(parts, self.cfg["weights"])
         p = position.details
         rs_pct = rs.details.get("rs_pct") if rs.score is not None else None
-        result = LeaderResult(
+        return LeaderResult(
             scan_date=scan_date,
             ticker=str(ticker).zfill(6),
             name=name,
@@ -158,14 +218,14 @@ class LeaderStockAnalyzer:
                 "chase_risk": chase.details,
             },
         )
-        return result
 
     def finalize(self, results: list[LeaderResult]) -> list[LeaderResult]:
         ranked = sorted(results, key=lambda x: (-x.leader_score, x.trading_value_rank, x.ticker))
         out: list[LeaderResult] = []
         for idx, item in enumerate(ranked, start=1):
-            status = _status(item.leader_score, item.timing_score, item.chase_risk, idx, self.cfg)
-            updated = replace(item, market_leader_rank=idx, status=status)
+            typed = replace(item, market_leader_rank=idx, leader_type=_leader_type(item, idx, self.cfg))
+            status = _status(typed, self.cfg)
+            updated = replace(typed, status=status)
             updated = replace(updated, signal=_build_signal(updated))
             out.append(updated)
         return out
