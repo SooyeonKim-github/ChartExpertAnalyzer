@@ -1,0 +1,44 @@
+optimizer:
+  target_column: D+20
+  mae_column: MAE_D20
+  excursion_column: excursion_ratio_D20
+
+  # Purged expanding walk-forward. D+20 target -> 20 trading-day gap.
+  min_train_trading_days: 60
+  validation_trading_days: 40
+  step_trading_days: 40
+  purge_trading_days: 20
+
+  # Hard sample constraints per validation fold.
+  min_samples: 30
+  min_unique_dates: 15
+  min_valid_folds: 1
+  top_n: 50
+
+  # Robustness penalties. Higher means more conservative parameter selection.
+  robustness_std_penalty: 0.50
+  plateau_penalty: 0.20
+  distance_penalty: 0.10
+  coverage_penalty: 0.50
+
+  objective_weights:
+    median_return: 0.30
+    win_rate: 0.20
+    p25_return: 0.15
+    mae_quality: 0.15
+    excursion_ratio: 0.10
+    sample_size: 0.10
+
+search_space:
+  confirmed:
+    confirmed_leader: [70, 72.5, 75, 77.5, 80, 82.5]
+    confirmed_timing: [60, 65, 70, 75, 80]
+    max_chase_risk: [40, 50, 60, 70]
+    min_breakout_quality: [45, 55, 65, 70]
+
+  strong:
+    strong_leader: [82.5, 85, 87.5, 90]
+    strong_timing: [72.5, 75, 77.5, 80]
+    max_chase_risk: [40, 50, 60, 70]
+    min_breakout_quality: [65, 70, 75, 80]
+    strong_rank_max: [3, 5, 10]
