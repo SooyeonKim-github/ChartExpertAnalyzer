@@ -15,6 +15,9 @@ class MaterialEvent:
     event_summary: str
     positive_negative: str
     quantified: bool
+    material_candidate: bool = False
+    material_candidate_reason: str = ""
+    classification_source: str = "NONE"
     companies: Tuple[str, ...] = field(default_factory=tuple)
     stock_codes: Tuple[str, ...] = field(default_factory=tuple)
     numbers: Tuple[str, ...] = field(default_factory=tuple)
@@ -27,7 +30,7 @@ class MaterialEvent:
     last_seen_at: str | None = None
     market_date: str | None = None
     extraction_confidence: float = 0.0
-    extraction_version: str = "RULE_EVENT_V1"
+    extraction_version: str = "RULE_EVENT_V1_1"
     cluster_updated_at: str | None = None
 
 
