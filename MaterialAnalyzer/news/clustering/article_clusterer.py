@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 
+from .disclosure_rules import DisclosureAmbiguityGuard
 from .feature_extractor import FeatureExtractor
 from .pair_scorer import PairScorer
 
@@ -13,6 +14,7 @@ class ClusterRunResult:
     matched: int = 0
     created: int = 0
     skipped: int = 0
+    ambiguity_blocked: int = 0
     multi_member_clusters: int = 0
     total_clusters: int = 0
 
@@ -31,16 +33,19 @@ def _nearby_market_dates(value: str | None, days: int = 2) -> list[str]:
 
 
 class ArticleClusterer:
-    VERSION = "RULE_CLUSTER_V1"
+    VERSION = "RULE_CLUSTER_V1_1"
 
     def __init__(self, cluster_repository, feature_extractor=None, pair_scorer=None):
         self.repository = cluster_repository
         self.feature_extractor = feature_extractor or FeatureExtractor()
         self.pair_scorer = pair_scorer or PairScorer()
+        self.ambiguity_guard = DisclosureAmbiguityGuard(self.feature_extractor)
 
     def run(self, *, rebuild: bool = False, limit: int | None = None) -> ClusterRunResult:
         if rebuild:
             self.repository.clear_all()
+
+        self.ambiguity_guard.prepare(self.repository.get_disclosure_articles())
 
         result = ClusterRunResult()
         articles = self.repository.get_unclustered_articles(limit=limit)
@@ -68,6 +73,7 @@ class ArticleClusterer:
                 continue
 
             best = None
+            best_features = None
             best_match = None
             market_dates = _nearby_market_dates(features.market_date)
             candidates = self.repository.candidate_representatives(market_dates)
@@ -79,9 +85,28 @@ class ArticleClusterer:
                 match = self.pair_scorer.score(features, representative_features)
                 if best_match is None or match.score > best_match.score:
                     best = candidate
+                    best_features = representative_features
                     best_match = match
 
-            if best is not None and best_match is not None and best_match.score >= self.pair_scorer.AUTO_MATCH_THRESHOLD:
+            blocked = False
+            if (
+                best is not None
+                and best_features is not None
+                and best_match is not None
+                and best_match.score >= self.pair_scorer.AUTO_MATCH_THRESHOLD
+            ):
+                blocked = self.ambiguity_guard.is_ambiguous_pair(
+                    features,
+                    best_features,
+                    match_method=best_match.method,
+                )
+
+            if (
+                best is not None
+                and best_match is not None
+                and best_match.score >= self.pair_scorer.AUTO_MATCH_THRESHOLD
+                and not blocked
+            ):
                 self.repository.add_member(
                     best["cluster_id"],
                     article["article_id"],
@@ -92,6 +117,8 @@ class ArticleClusterer:
                 self.repository.refresh_cluster(best["cluster_id"])
                 result.matched += 1
             else:
+                if blocked:
+                    result.ambiguity_blocked += 1
                 cluster_id = self.repository.create_cluster(article, features)
                 self.repository.refresh_cluster(cluster_id)
                 result.created += 1
