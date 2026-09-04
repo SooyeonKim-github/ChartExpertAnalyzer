@@ -39,6 +39,21 @@ DEFAULT_CONFIG: dict[str, Any] = {
         "relative_strength": 10.0,
         "ma_structure": 5.0,
     },
+    "breakout_quality": {
+        "enabled": True,
+        "thresholds": {
+            "clean": 85.0,
+            "valid": 70.0,
+            "weak": 50.0,
+            "failed_upper_wick_ratio": 0.55,
+            "excessive_gap_pct": 8.0,
+            "failed_gap_pct": 12.0,
+        },
+        "confirmation": {
+            "min_strong_quality": 70.0,
+            "min_confirmed_quality": 55.0,
+        },
+    },
     "sector_context": {
         "enabled": True,
         "min_members": 2,
