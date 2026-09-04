@@ -10,7 +10,8 @@ PATTERNS = [
     ("PERCENT", re.compile(r"(?<!\d)(\d+(?:\.\d+)?)\s*(%|퍼센트)", re.I)),
     ("CAPACITY", re.compile(r"(?<!\d)(\d+(?:\.\d+)?)\s*(GW|MW|kW|GWh|MWh|kWh|TB|PB)", re.I)),
     ("QUANTITY", re.compile(r"(?<!\d)(\d[\d,]*(?:\.\d+)?)\s*(척|대|개|건|명|호기|기|곳|개사|종|회)", re.I)),
-    ("DURATION", re.compile(r"(?<!\d)(\d+(?:\.\d+)?)\s*(년|개월|주|일)\b", re.I)),
+    # Limit duration to 1-3 digits and omit bare '일' to avoid YYYY년/MM월/DD일 dates.
+    ("DURATION", re.compile(r"(?<!\d)(\d{1,3}(?:\.\d+)?)\s*(년|개월|주)\b", re.I)),
     ("CLINICAL_PHASE", re.compile(r"(?<!\d)([123])\s*상\b")),
 ]
 
