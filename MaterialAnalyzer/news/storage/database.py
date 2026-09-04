@@ -140,7 +140,8 @@ class Database:
         conn.execute(
             "UPDATE articles SET external_id = CASE "
             "WHEN external_id IS NOT NULL AND external_id <> '' THEN external_id "
-            "WHEN article_id LIKE source_id || '_%' THEN substr(article_id, length(source_id) + 2) "
+            "WHEN substr(article_id, 1, length(source_id) + 1) = source_id || '_' "
+            "THEN substr(article_id, length(source_id) + 2) "
             "ELSE external_id END"
         )
         conn.execute(
