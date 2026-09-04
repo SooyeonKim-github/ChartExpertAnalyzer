@@ -6,12 +6,12 @@ import re
 # Numbers without business meaning (dates, phone numbers, article ids) are intentionally ignored.
 # A value is kept only when a recognizable unit/context is present.
 PATTERNS = [
-    ("MONEY", re.compile(r"(?<!\d)(\d[\d,]*(?:\.\d+)?)\s*(조원|억원|만원|원|억\s*달러|만\s*달러|달러|조\s*원|억\s*원)", re.I)),
-    ("PERCENT", re.compile(r"(?<!\d)(\d+(?:\.\d+)?)\s*(%|퍼센트)", re.I)),
-    ("CAPACITY", re.compile(r"(?<!\d)(\d+(?:\.\d+)?)\s*(GW|MW|kW|GWh|MWh|kWh|TB|PB)", re.I)),
-    ("QUANTITY", re.compile(r"(?<!\d)(\d[\d,]*(?:\.\d+)?)\s*(척|대|개|건|명|호기|기|곳|개사|종|회)", re.I)),
+    ("MONEY", re.compile(r"(?<!\d)(\d[\d,]*(?:\.\d+)?)\s*(억\s*달러|만\s*달러|조\s*원|억\s*원|조원|억원|만원|달러|원)", re.I)),
+    ("PERCENT", re.compile(r"(?<!\d)(\d+(?:\.\d+)?)\s*(퍼센트|%)", re.I)),
+    ("CAPACITY", re.compile(r"(?<!\d)(\d+(?:\.\d+)?)\s*(GWh|MWh|kWh|GW|MW|kW|PB|TB)", re.I)),
+    ("QUANTITY", re.compile(r"(?<!\d)(\d[\d,]*(?:\.\d+)?)\s*(개사|호기|척|대|개|건|명|기|곳|종|회)", re.I)),
     # Limit duration to 1-3 digits and omit bare '일' to avoid YYYY년/MM월/DD일 dates.
-    ("DURATION", re.compile(r"(?<!\d)(\d{1,3}(?:\.\d+)?)\s*(년|개월|주)\b", re.I)),
+    ("DURATION", re.compile(r"(?<!\d)(\d{1,3}(?:\.\d+)?)\s*(개월|년|주)\b", re.I)),
     ("CLINICAL_PHASE", re.compile(r"(?<!\d)([123])\s*상\b")),
 ]
 
