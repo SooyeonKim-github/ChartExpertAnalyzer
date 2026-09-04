@@ -32,6 +32,14 @@ thresholds:
 
 breakout_quality:
   enabled: true
+  weights:
+    breakout_distance: 15
+    close_location: 20
+    upper_wick: 15
+    volume_turnover: 20
+    breakout_hold: 15
+    gap_quality: 5
+    pre_breakout_structure: 10
   thresholds:
     clean: 85
     valid: 70
