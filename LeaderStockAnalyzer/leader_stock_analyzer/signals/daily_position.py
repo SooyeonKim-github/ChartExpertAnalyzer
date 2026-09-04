@@ -44,6 +44,24 @@ def score_daily_position(daily: pd.DataFrame) -> SignalScore:
         if not b20 and distance_20d_high >= -2.0:
             score += 10.0
 
+    # Primary breakout is the most structurally important level actually broken.
+    # If no breakout occurred, keep high20 as the timing reference only; quality
+    # scoring will remain unavailable because breakout_type is None.
+    breakout_type = None
+    breakout_reference = high20
+    if previous_high_break and high60 is not None:
+        breakout_type = "PREVIOUS_HIGH_BREAK"
+        breakout_reference = high60
+    elif b52 and high52 is not None:
+        breakout_type = "52D_HIGH_BREAK"
+        breakout_reference = high52
+    elif b20 and high20 is not None:
+        breakout_type = "20D_HIGH_BREAK"
+        breakout_reference = high20
+    elif b10 and high10 is not None:
+        breakout_type = "10D_HIGH_BREAK"
+        breakout_reference = high10
+
     return SignalScore(min(100.0, round(score, 2)), {
         "high_10d_break": bool(b10),
         "high_20d_break": bool(b20),
@@ -51,7 +69,12 @@ def score_daily_position(daily: pd.DataFrame) -> SignalScore:
         "previous_high_break": bool(previous_high_break),
         "close_20d_high": bool(close20_high),
         "distance_20d_high": None if distance_20d_high is None else round(float(distance_20d_high), 3),
-        "breakout_reference": high20,
+        "high_10d_reference": high10,
+        "high_20d_reference": high20,
+        "high_52d_reference": high52,
+        "previous_high_reference": high60,
+        "breakout_type": breakout_type,
+        "breakout_reference": breakout_reference,
     })
 
 
