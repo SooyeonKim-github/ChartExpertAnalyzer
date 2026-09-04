@@ -94,6 +94,13 @@ DEFAULT_CONFIG: dict[str, Any] = {
         "emerging_min_leader_score": 85.0,
         "emerging_max_top20_days_5d": 2,
     },
+    "performance": {
+        "horizons": [1, 5, 20, 60],
+        "excursion_horizons": [5, 20, 60],
+        "breakout_hold_days": [1, 3],
+        "breakout_hold_tolerance_pct": 2.0,
+        "min_group_count": 20,
+    },
     "data": {
         "history_days": 420,
         "intraday_root": "data/intraday",
