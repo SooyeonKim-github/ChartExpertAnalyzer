@@ -6,6 +6,7 @@ import pandas as pd
 
 from .models import LeaderResult, SignalScore
 from .signals import (
+    score_breakout_quality,
     score_chase_risk,
     score_daily_position,
     score_intraday_strength,
@@ -35,10 +36,6 @@ def _leader_type(item: LeaderResult, rank: int, cfg: dict) -> str:
     pcfg = cfg.get("persistence", {})
     if item.persistence_available and item.leader_persistence_level == "HIGH":
         return "PERSISTENT_LEADER"
-
-    # EMERGING means today's leadership is strong while recent leadership
-    # history is still sparse. This prevents every high-score stock from being
-    # labeled emerging and preserves the distinction from persistent leaders.
     if (
         item.persistence_available
         and item.leader_persistence_level == "LOW"
@@ -48,6 +45,20 @@ def _leader_type(item: LeaderResult, rank: int, cfg: dict) -> str:
     ):
         return "EMERGING_LEADER"
     return "NORMAL"
+
+
+def _quality_gate(item: LeaderResult, cfg: dict, strong: bool) -> bool:
+    if not item.breakout_quality_available:
+        return True
+    if item.breakout_quality_label == "FAILED_BREAKOUT" or item.false_breakout_flag:
+        return False
+    confirmation = cfg.get("breakout_quality", {}).get("confirmation", {})
+    threshold = float(
+        confirmation.get("min_strong_quality", 70.0)
+        if strong
+        else confirmation.get("min_confirmed_quality", 55.0)
+    )
+    return item.breakout_quality_score is not None and item.breakout_quality_score >= threshold
 
 
 def _status(item: LeaderResult, cfg: dict) -> str:
@@ -74,26 +85,18 @@ def _status(item: LeaderResult, cfg: dict) -> str:
         and item.sector_leader_rank > 0
         and item.sector_leader_rank <= int(scfg.get("strong_sector_leader_rank_max", 3))
     )
-    sector_weak = (
-        sector_available
-        and item.sector_market_rank >= int(scfg.get("weak_sector_rank_min", 15))
-    )
-    persistent_support = bool(
-        item.persistence_available and item.leader_persistence_level == "HIGH"
-    )
+    sector_weak = sector_available and item.sector_market_rank >= int(scfg.get("weak_sector_rank_min", 15))
+    persistent_support = bool(item.persistence_available and item.leader_persistence_level == "HIGH")
     emerging_support = item.leader_type == "EMERGING_LEADER"
     context_available = sector_available or item.persistence_available
 
-    # Strong candidates need at least one context confirmation when context
-    # exists. A newly emerging leader is a valid confirmation even though its
-    # persistence is low by definition.
-    if base_strong:
+    if base_strong and _quality_gate(item, cfg, strong=True):
         if not context_available or sector_support or persistent_support or emerging_support:
             return "STRONG_CONFIRMED"
 
     if base_confirmed:
-        # Weak sector + low persistence is intentionally downgraded to WATCH,
-        # except for a genuine emerging leader.
+        if not _quality_gate(item, cfg, strong=False):
+            return "WATCH"
         if (
             sector_weak
             and item.persistence_available
@@ -116,12 +119,27 @@ def _build_signal(result: LeaderResult) -> str:
         reasons.append("상승률 10%+")
     elif result.return_pct >= 5:
         reasons.append("상승률 5%+")
-    if result.high_20d_break:
+    if result.previous_high_break:
+        reasons.append("전고점 돌파")
+    elif result.high_52d_break:
+        reasons.append("52일 고점 돌파")
+    elif result.high_20d_break:
         reasons.append("20일 고점 돌파")
     elif result.high_10d_break:
         reasons.append("10일 고점 돌파")
-    if result.previous_high_break:
-        reasons.append("전고점 돌파")
+
+    if result.breakout_quality_available:
+        quality_reason = {
+            "CLEAN_BREAKOUT": "돌파품질 우수",
+            "VALID_BREAKOUT": "돌파품질 양호",
+            "WEAK_BREAKOUT": "돌파품질 약함",
+            "FAILED_BREAKOUT": "돌파실패",
+        }.get(result.breakout_quality_label)
+        if quality_reason:
+            reasons.append(quality_reason)
+        if result.breakout_exhaustion_risk:
+            reasons.append("돌파과열 주의")
+
     if result.market_relative_strength is not None and result.market_relative_strength >= 3:
         reasons.append("시장 대비 강세")
     if result.sector_context_available and result.sector_context_reliable:
@@ -169,6 +187,12 @@ class LeaderStockAnalyzer:
         intra = score_intraday_strength(intraday if intraday is not None else pd.DataFrame(), self.cfg)
         rs = score_relative_strength(return_pct, market_return_pct)
         chase = score_chase_risk(daily, return_pct)
+        breakout = score_breakout_quality(
+            daily,
+            position.details.get("breakout_reference"),
+            position.details.get("breakout_type"),
+            self.cfg,
+        )
         timing = score_timing(daily, intraday, position.details.get("breakout_reference"))
 
         parts = {
@@ -213,6 +237,21 @@ class LeaderStockAnalyzer:
             volume_ratio_20=money.details.get("volume_ratio_20"),
             market_relative_strength=rs_pct,
             signal="",
+            breakout_quality_available=breakout.available,
+            breakout_type=breakout.breakout_type,
+            breakout_reference=breakout.breakout_reference,
+            breakout_quality_score=breakout.score,
+            breakout_quality_label=breakout.label,
+            breakout_distance_pct=breakout.breakout_distance_pct,
+            close_location_value=breakout.close_location_value,
+            upper_wick_ratio=breakout.upper_wick_ratio,
+            turnover_ratio_20=breakout.turnover_ratio_20,
+            gap_pct=breakout.gap_pct,
+            breakout_hold_pct=breakout.breakout_hold_pct,
+            pre_breakout_distance_pct=breakout.pre_breakout_distance_pct,
+            volatility_contraction_ratio=breakout.volatility_contraction_ratio,
+            false_breakout_flag=breakout.false_breakout,
+            breakout_exhaustion_risk=breakout.exhaustion_risk,
             details={
                 "money_flow": money.details,
                 "price_strength": price_sig.details,
@@ -222,6 +261,7 @@ class LeaderStockAnalyzer:
                 "ma_structure": ma_sig.details,
                 "timing": timing.details,
                 "chase_risk": chase.details,
+                "breakout_quality": breakout.details,
             },
         )
 
