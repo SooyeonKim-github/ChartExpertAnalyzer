@@ -3,7 +3,7 @@ setlocal
 cd /d "%~dp0\..\.."
 
 echo ==========================================================
-echo MaterialAnalyzer - NewsCollector V1.3 (7 live sources)
+echo MaterialAnalyzer - NewsCollector V1.4 (7 live sources)
 echo ==========================================================
 echo.
 echo [1/2] Local smoke test
