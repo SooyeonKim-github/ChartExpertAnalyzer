@@ -57,6 +57,7 @@ persistence:
   medium_score: 45
   emerging_market_rank_max: 10
   emerging_min_leader_score: 85
+  emerging_max_top20_days_5d: 2
 
 data:
   history_days: 420
