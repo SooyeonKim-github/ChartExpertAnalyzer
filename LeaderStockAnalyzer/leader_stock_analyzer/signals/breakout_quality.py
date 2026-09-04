@@ -122,6 +122,12 @@ def _prebreakout_structure(daily: pd.DataFrame, breakout_reference: float) -> tu
     return near_score + contraction_score, pre_distance, contraction
 
 
+def _weighted_component(raw_score: float, raw_max: float, weight: float) -> float:
+    if raw_max <= 0 or weight <= 0:
+        return 0.0
+    return max(0.0, min(1.0, raw_score / raw_max)) * weight
+
+
 def score_breakout_quality(
     daily: pd.DataFrame,
     breakout_reference: float | None,
@@ -170,16 +176,35 @@ def score_breakout_quality(
     elif close >= breakout_reference * 0.995:
         hold_score = 7.0
 
-    score = (
-        _distance_score(breakout_distance_pct)
-        + _clv_score(clv)
-        + _wick_score(upper_wick_ratio)
-        + _turnover_score(turnover_ratio20)
-        + _volume_score(volume_ratio20)
-        + hold_score
-        + _gap_score(gap_pct)
-        + structure_score
-    )
+    raw_components = {
+        "breakout_distance": (_distance_score(breakout_distance_pct), 15.0),
+        "close_location": (_clv_score(clv), 20.0),
+        "upper_wick": (_wick_score(upper_wick_ratio), 15.0),
+        "volume_turnover": (_turnover_score(turnover_ratio20) + _volume_score(volume_ratio20), 20.0),
+        "breakout_hold": (hold_score, 15.0),
+        "gap_quality": (_gap_score(gap_pct), 5.0),
+        "pre_breakout_structure": (structure_score, 10.0),
+    }
+    weights = qcfg.get("weights", {})
+    default_weights = {
+        "breakout_distance": 15.0,
+        "close_location": 20.0,
+        "upper_wick": 15.0,
+        "volume_turnover": 20.0,
+        "breakout_hold": 15.0,
+        "gap_quality": 5.0,
+        "pre_breakout_structure": 10.0,
+    }
+    weighted_sum = 0.0
+    total_weight = 0.0
+    component_points: dict[str, float] = {}
+    for name, (raw_score, raw_max) in raw_components.items():
+        weight = float(weights.get(name, default_weights[name]))
+        points = _weighted_component(raw_score, raw_max, weight)
+        component_points[name] = round(points, 3)
+        weighted_sum += points
+        total_weight += max(0.0, weight)
+    score = 0.0 if total_weight <= 0 else weighted_sum / total_weight * 100.0
     score = round(max(0.0, min(100.0, score)), 2)
 
     thresholds = qcfg.get("thresholds", {})
@@ -231,13 +256,8 @@ def score_breakout_quality(
         false_breakout=false_breakout,
         exhaustion_risk=exhaustion_risk,
         details={
-            "distance_score": _distance_score(breakout_distance_pct),
-            "close_location_score": _clv_score(clv),
-            "upper_wick_score": _wick_score(upper_wick_ratio),
-            "turnover_score": _turnover_score(turnover_ratio20),
-            "volume_score": _volume_score(volume_ratio20),
-            "hold_score": hold_score,
-            "gap_score": _gap_score(gap_pct),
-            "structure_score": structure_score,
+            "raw_components": {k: round(v[0], 3) for k, v in raw_components.items()},
+            "weighted_component_points": component_points,
+            "configured_weights": {k: float(weights.get(k, default_weights[k])) for k in default_weights},
         },
     )
