@@ -37,7 +37,14 @@ def main() -> None:
     if df.empty:
         print("No analyzable symbols.")
     else:
-        cols = ["market_leader_rank", "ticker", "name", "status", "leader_score", "timing_score", "chase_risk", "return_pct", "trading_value_rank", "entry_state"]
+        cols = [
+            "market_leader_rank", "ticker", "name", "status", "leader_type",
+            "leader_score", "timing_score", "chase_risk",
+            "sector", "sector_market_rank", "sector_leader_rank",
+            "leader_persistence_score", "leader_persistence_level",
+            "return_pct", "trading_value_rank", "entry_state",
+        ]
+        cols = [c for c in cols if c in df.columns]
         print(df[cols].head(20).to_string(index=False))
     print(f"\n[DONE] {all_path}")
     print(f"[DONE] {cand_path}")
