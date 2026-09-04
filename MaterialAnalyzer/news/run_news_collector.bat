@@ -3,7 +3,7 @@ setlocal
 cd /d "%~dp0\..\.."
 
 echo ==========================================================
-echo MaterialAnalyzer - NewsCollector V1.2 (7 live sources)
+echo MaterialAnalyzer - NewsCollector V1.3 (7 live sources)
 echo ==========================================================
 echo.
 echo [1/2] Local smoke test
@@ -11,6 +11,7 @@ python -m MaterialAnalyzer.news.smoke_test
 if errorlevel 1 (
   echo.
   echo [ERROR] Smoke test failed. Collection was not started.
+  if not "%NEWS_COLLECTOR_NO_PAUSE%"=="1" pause
   exit /b 1
 )
 
@@ -31,4 +32,6 @@ if not "%RC%"=="0" (
 
 echo.
 echo Please share the 7 endpoint result lines and TOTAL line for verification.
+echo.
+if not "%NEWS_COLLECTOR_NO_PAUSE%"=="1" pause
 exit /b %RC%
