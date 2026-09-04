@@ -3,8 +3,8 @@ setlocal
 cd /d "%~dp0\..\.."
 
 echo ============================================================================
-echo MaterialAnalyzer - EventExtractor V1
-echo Rule Based Event Structuring
+echo MaterialAnalyzer - EventExtractor V1.1
+echo Title First + Material Filter + Meaningful Numbers
 echo ============================================================================
 echo.
 echo [1/2] EventExtractor smoke test
