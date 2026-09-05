@@ -102,11 +102,13 @@ def write_range_workbook(
         else pd.DataFrame()
     )
 
+    # Full range results are already persisted as CSV by the range pipeline.
+    # Keep the workbook focused on candidates and summaries to avoid excessive
+    # openpyxl memory usage on large backtests.
     sheets = {
         "range_candidates": candidates,
         "range_confirmed": confirmed,
         "range_watch": watch,
-        "range_all_results": all_results,
         "performance_by_date": perf_by_date,
         "performance_by_status": perf_by_status,
         "performance_by_score": perf_by_score,
