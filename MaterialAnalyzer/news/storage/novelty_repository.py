@@ -59,6 +59,7 @@ class NoveltyRepository:
         current: EventView,
         *,
         start_market_date: str | None,
+        analysis_version: str,
         limit: int = 500,
     ):
         sql = (
@@ -66,10 +67,10 @@ class NoveltyRepository:
             "FROM event_novelty n "
             "JOIN material_events e ON e.event_id = n.event_id "
             "LEFT JOIN articles a ON a.article_id = e.representative_article_id "
-            "WHERE n.event_id <> ? "
+            "WHERE n.event_id <> ? AND n.analysis_version = ? "
             f"AND {self._eligible_sql('e', 'a')} "
         )
-        params: list[object] = [current.event_id]
+        params: list[object] = [current.event_id, analysis_version]
 
         if current.market_date:
             if start_market_date:
@@ -152,9 +153,9 @@ class NoveltyRepository:
                 "FROM event_novelty n "
                 "JOIN material_events e ON e.event_id = n.event_id "
                 "LEFT JOIN articles a ON a.article_id = e.representative_article_id "
-                "WHERE n.family_id = ? "
+                "WHERE n.family_id = ? AND n.analysis_version = ? "
                 "ORDER BY COALESCE(e.first_seen_at, e.created_at) ASC, e.event_id ASC",
-                (family_id,),
+                (family_id, analysis_version),
             ).fetchall()
         if not rows:
             with self.database.connect() as conn:
