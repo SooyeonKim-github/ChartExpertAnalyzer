@@ -172,6 +172,61 @@ CREATE INDEX IF NOT EXISTS idx_material_events_type
 ON material_events(event_type);
 CREATE INDEX IF NOT EXISTS idx_material_events_cluster
 ON material_events(cluster_id);
+
+CREATE TABLE IF NOT EXISTS event_families (
+    family_id TEXT PRIMARY KEY,
+    root_event_id TEXT NOT NULL,
+    latest_event_id TEXT NOT NULL,
+    primary_company TEXT,
+    primary_ticker TEXT,
+    event_type TEXT NOT NULL,
+    first_seen_at TEXT,
+    last_seen_at TEXT,
+    event_count INTEGER NOT NULL DEFAULT 0,
+    family_status TEXT NOT NULL DEFAULT 'ACTIVE',
+    analysis_version TEXT NOT NULL,
+    created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+    updated_at TEXT DEFAULT CURRENT_TIMESTAMP
+);
+CREATE INDEX IF NOT EXISTS idx_event_families_type
+ON event_families(event_type);
+CREATE INDEX IF NOT EXISTS idx_event_families_ticker
+ON event_families(primary_ticker);
+CREATE INDEX IF NOT EXISTS idx_event_families_last_seen
+ON event_families(last_seen_at);
+
+CREATE TABLE IF NOT EXISTS event_novelty (
+    event_id TEXT PRIMARY KEY,
+    family_id TEXT NOT NULL,
+    parent_event_id TEXT,
+    novelty_status TEXT NOT NULL,
+    novelty_score REAL NOT NULL DEFAULT 0,
+    relation_score REAL NOT NULL DEFAULT 0,
+    days_since_parent INTEGER,
+    stage_changed INTEGER NOT NULL DEFAULT 0,
+    stage_progressed INTEGER NOT NULL DEFAULT 0,
+    number_changed INTEGER NOT NULL DEFAULT 0,
+    company_changed INTEGER NOT NULL DEFAULT 0,
+    polarity_changed INTEGER NOT NULL DEFAULT 0,
+    source_reliability_increased INTEGER NOT NULL DEFAULT 0,
+    confirmation_source_added INTEGER NOT NULL DEFAULT 0,
+    new_information_count INTEGER NOT NULL DEFAULT 0,
+    previous_stage TEXT,
+    current_stage TEXT,
+    previous_numbers_json TEXT,
+    current_numbers_json TEXT,
+    novelty_reason TEXT,
+    analysis_version TEXT NOT NULL,
+    event_updated_at TEXT,
+    created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+    updated_at TEXT DEFAULT CURRENT_TIMESTAMP
+);
+CREATE INDEX IF NOT EXISTS idx_event_novelty_family
+ON event_novelty(family_id);
+CREATE INDEX IF NOT EXISTS idx_event_novelty_status
+ON event_novelty(novelty_status);
+CREATE INDEX IF NOT EXISTS idx_event_novelty_parent
+ON event_novelty(parent_event_id);
 """
 
 
