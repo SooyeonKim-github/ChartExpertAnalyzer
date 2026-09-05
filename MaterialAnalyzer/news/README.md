@@ -1,6 +1,6 @@
 # MaterialAnalyzer News Pipeline
 
-`MaterialAnalyzer.news` is the source-agnostic collection, clustering, and event-structuring layer used by MaterialAnalyzer.
+`MaterialAnalyzer.news` is the source-agnostic collection, clustering, event-structuring, and novelty layer used by MaterialAnalyzer.
 
 ## Current pipeline
 
@@ -24,9 +24,15 @@ EventExtractor V1.1 (title-first rule-based)
 material_events
         ↓
 event_report.csv
+        ↓
+NoveltyAnalyzer V1 (rule-only family + delta)
+        ↓
+event_families + event_novelty
+        ↓
+novelty_report.csv
 ```
 
-Semantic similarity, embeddings, and LLM clustering are intentionally **disabled** in ArticleCluster.
+Semantic similarity, embeddings, and LLM clustering are intentionally disabled in ArticleCluster and NoveltyAnalyzer V1.
 
 ## NewsCollector
 
@@ -149,7 +155,7 @@ Stage rules use specific phrases before broad words:
 
 ### Meaningful numeric facts
 
-`quantified=1` now requires a business-meaningful numeric fact such as:
+`quantified=1` requires a business-meaningful numeric fact such as:
 - money
 - percent
 - capacity (`GW`, `MW`, `GWh`, ...)
@@ -171,19 +177,100 @@ Routine/administrative events are stored as events but excluded from downstream 
 - unknown events
 - application/request stage events
 
-Main fields:
-- `event_type`
-- `event_stage`
-- `positive_negative`
-- `material_candidate`
-- `material_candidate_reason`
-- `classification_source`
-- `quantified`
-- companies / stock codes / meaningful numeric facts
-- original source
-- article/source/confirmation counts
-- first/last seen time
-- market date
-- extraction confidence
+Event extraction is incremental and version-aware. If neither the cluster nor extractor version changes, a repeat run should process zero events.
 
-Event extraction is incremental and version-aware. When EventExtractor rules are upgraded, existing events with an older `extraction_version` are re-extracted once. If neither the cluster nor extractor version changes, a repeat run should process zero events.
+## NoveltyAnalyzer V1
+
+NoveltyAnalyzer analyzes material events over time and determines whether each event is actually new information or a continuation of an existing event family.
+
+Run:
+
+```bat
+MaterialAnalyzer\news\run_novelty_analyzer.bat
+```
+
+Manual incremental mode:
+
+```bat
+python -m MaterialAnalyzer.news.run_novelty_analyzer
+```
+
+Manual rebuild:
+
+```bat
+python -m MaterialAnalyzer.news.run_novelty_analyzer --rebuild
+```
+
+The batch runner forwards arguments, so this also works:
+
+```bat
+MaterialAnalyzer\news\run_novelty_analyzer.bat --rebuild
+```
+
+Output:
+
+```text
+MaterialAnalyzer\data\novelty_report.csv
+```
+
+Storage:
+- `event_families`
+- `event_novelty`
+
+### Novelty statuses
+
+- `NEW_EVENT`: no sufficiently related prior material event.
+- `FOLLOW_UP`: same event family with meaningful new information such as stage, amount, counterpart, or polarity change.
+- `CONFIRMATION`: same event family confirmed by a stronger/new source without a substantive event delta.
+- `REHASH`: same event family repeated without meaningful new information.
+- `MARKET_REACTION`: price/market reaction article rather than a new catalyst.
+
+### Event-family matching
+
+V1 is deterministic and rule-based. It uses:
+- ticker/company identity
+- event type or explicitly compatible type
+- normalized title lexical similarity
+- token overlap
+- event-specific informative title anchors
+- meaningful numeric overlap/change
+- time distance
+
+The auto-family threshold is `68`.
+
+Important safeguards:
+- different named companies/tickers cannot join only because titles are similar;
+- same company + same event type is not enough;
+- generic words such as `계약`, `수주`, `투자`, `승인`, and company names are removed when checking event-specific anchors;
+- same-company unrelated contracts such as `LNG선 공급계약` and `반도체 장비 공급계약` stay in separate families unless stronger evidence links them;
+- company-less government events require stronger lexical evidence.
+
+### Delta detection
+
+Once a prior family parent is found, NoveltyAnalyzer checks:
+- `stage_changed`
+- `stage_progressed`
+- `number_changed`
+- `company_changed`
+- `polarity_changed`
+- `source_reliability_increased`
+- `confirmation_source_added`
+
+These are stored with `new_information_count`, parent event, family id, and novelty reason.
+
+### Novelty scoring
+
+V1 stores a 0-100 `novelty_score` for later MaterialScorer use.
+
+Typical interpretation:
+- `NEW_EVENT`: 100
+- `FOLLOW_UP`: 60-100 depending on delta strength
+- `CONFIRMATION`: 55-75
+- `REHASH`: 15
+- `MARKET_REACTION`: 5
+
+Novelty analysis is incremental and version-aware. Only `material_candidate=1` events are analyzed by default, plus explicitly classified `MARKET_REACTION` articles so market reactions can be suppressed later. A repeat run with no EventExtractor changes should process zero events.
+
+## Next stage
+
+The next downstream layer is `MaterialScorer`, which will combine event certainty, financial impact, quantification, novelty, source reliability, and confirmation into a final material score/status.
