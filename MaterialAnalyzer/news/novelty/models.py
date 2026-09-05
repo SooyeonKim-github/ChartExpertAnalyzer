@@ -19,6 +19,13 @@ def _json_tuple(value) -> tuple[str, ...]:
     return tuple(str(item) for item in parsed if str(item))
 
 
+def _row_value(row, key: str, default=""):
+    if key not in row.keys():
+        return default
+    value = row[key]
+    return default if value is None else value
+
+
 @dataclass(frozen=True)
 class EventView:
     event_id: str
@@ -48,25 +55,25 @@ class EventView:
         return cls(
             event_id=row["event_id"],
             cluster_id=row["cluster_id"],
-            event_type=row["event_type"] or "UNKNOWN",
-            event_stage=row["event_stage"] or "UNKNOWN",
-            event_title=row["event_title"] or "",
-            event_summary=row["event_summary"] or "",
-            positive_negative=row["positive_negative"] or "NEUTRAL",
-            companies=_json_tuple(row["companies_json"]),
-            stock_codes=_json_tuple(row["stock_codes_json"]),
-            numbers=_json_tuple(row["numbers_json"]),
-            original_source_id=row["original_source_id"] or "",
-            source_grade=row["source_grade"] or "" if "source_grade" in row.keys() else "",
-            source_type=row["source_type"] or "" if "source_type" in row.keys() else "",
-            article_class=row["article_class"] or "" if "article_class" in row.keys() else "",
-            source_count=int(row["source_count"] or 0),
-            confirmation_count=int(row["confirmation_count"] or 0),
-            first_seen_at=row["first_seen_at"],
-            last_seen_at=row["last_seen_at"],
-            market_date=row["market_date"],
-            updated_at=row["updated_at"],
-            material_candidate=bool(int(row["material_candidate"] or 0)),
+            event_type=_row_value(row, "event_type", "UNKNOWN") or "UNKNOWN",
+            event_stage=_row_value(row, "event_stage", "UNKNOWN") or "UNKNOWN",
+            event_title=_row_value(row, "event_title", ""),
+            event_summary=_row_value(row, "event_summary", ""),
+            positive_negative=_row_value(row, "positive_negative", "NEUTRAL") or "NEUTRAL",
+            companies=_json_tuple(_row_value(row, "companies_json", None)),
+            stock_codes=_json_tuple(_row_value(row, "stock_codes_json", None)),
+            numbers=_json_tuple(_row_value(row, "numbers_json", None)),
+            original_source_id=_row_value(row, "original_source_id", ""),
+            source_grade=_row_value(row, "source_grade", ""),
+            source_type=_row_value(row, "source_type", ""),
+            article_class=_row_value(row, "article_class", ""),
+            source_count=int(_row_value(row, "source_count", 0) or 0),
+            confirmation_count=int(_row_value(row, "confirmation_count", 0) or 0),
+            first_seen_at=_row_value(row, "first_seen_at", None),
+            last_seen_at=_row_value(row, "last_seen_at", None),
+            market_date=_row_value(row, "market_date", None),
+            updated_at=_row_value(row, "updated_at", None),
+            material_candidate=bool(int(_row_value(row, "material_candidate", 0) or 0)),
         )
 
 
