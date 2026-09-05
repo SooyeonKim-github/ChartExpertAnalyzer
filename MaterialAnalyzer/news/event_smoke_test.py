@@ -6,6 +6,7 @@ from pathlib import Path
 
 from .clustering import ArticleClusterer, FeatureExtractor
 from .events import EventExtractor
+from .events.number_extractor import extract_meaningful_numbers
 from .models import RawArticle
 from .processing import ArticleNormalizer
 from .storage import ArticleRepository, ClusterRepository, Database, EventRepository
@@ -56,6 +57,17 @@ def _article(
 
 
 def main():
+    # Regression check: every meaningful-number pattern must expose value + unit.
+    # This specifically protects the clinical-phase pattern that caused Win/Python runtime IndexError.
+    direct_numbers = extract_meaningful_numbers(
+        "임상 2상에서 20% 개선, 25GW 설비, 3년 계획. 문의 043-719-4904"
+    )
+    assert "2상" in direct_numbers
+    assert "20%" in direct_numbers
+    assert "25GW" in direct_numbers
+    assert "3년" in direct_numbers
+    assert not any("043" in value or "719" in value or "4904" in value for value in direct_numbers)
+
     first = datetime(2026, 9, 4, 10, 0, tzinfo=KST)
     normalizer = ArticleNormalizer()
 
@@ -83,6 +95,7 @@ def main():
             _article(
                 "DART_CLINICAL", "DART", "20260904009901",
                 "임상시험계획 변경승인 신청", first + timedelta(minutes=3),
+                body="임상 2상 변경승인 신청 관련 공시",
                 metadata={"corp_name": "테스트바이오", "stock_code": "123456"},
             ),
             _article(
@@ -148,6 +161,7 @@ def main():
         assert clinical["event_stage"] == "REQUESTED"
         assert clinical["positive_negative"] == "NEUTRAL"
         assert int(clinical["material_candidate"]) == 0
+        assert "2상" in (clinical["numbers_json"] or "")
 
         noise = by_title["과학기술정보통신부 인사(과장급 전보)"]
         assert noise["event_type"] == "UNKNOWN"
@@ -176,7 +190,8 @@ def main():
     print("     approval application -> REQUESTED / NEUTRAL")
     print("     trading halt release -> RELEASED / NEUTRAL")
     print("     administrative warning -> material_candidate=0")
-    print("     meaningful number 25GW -> quantified; calendar year/phone -> ignored")
+    print("     meaningful number 25GW / 2-phase -> quantified; calendar year/phone -> ignored")
+    print("     all meaningful-number regex groups -> validated")
     print("     incremental repeat -> processed=0")
     print("     event_report.csv -> OK")
     print("     windows sqlite cleanup -> OK")
