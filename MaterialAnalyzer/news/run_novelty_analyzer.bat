@@ -17,8 +17,8 @@ if errorlevel 1 (
 )
 
 echo.
-echo [2/2] Incremental novelty analysis
-python -m MaterialAnalyzer.news.run_novelty_analyzer
+echo [2/2] Novelty analysis
+python -m MaterialAnalyzer.news.run_novelty_analyzer %*
 set RC=%ERRORLEVEL%
 
 echo.
