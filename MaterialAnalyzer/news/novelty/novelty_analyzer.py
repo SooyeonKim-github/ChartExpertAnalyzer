@@ -31,7 +31,11 @@ class NoveltyAnalyzer:
     ):
         self.repository = repository
         self.relation_scorer = relation_scorer or RelationScorer()
-        self.candidate_finder = CandidateFinder(repository, self.relation_scorer)
+        self.candidate_finder = CandidateFinder(
+            repository,
+            self.relation_scorer,
+            analysis_version=self.VERSION,
+        )
         self.delta_detector = delta_detector or DeltaDetector()
         self.classifier = classifier or NoveltyClassifier()
 
