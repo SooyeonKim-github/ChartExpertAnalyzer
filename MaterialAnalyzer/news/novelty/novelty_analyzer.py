@@ -102,8 +102,11 @@ class NoveltyAnalyzer:
                 event_updated_at=event.updated_at,
             )
 
-            action = self.repository.upsert_novelty(record)
+            action, previous_family_id = self.repository.upsert_novelty(record)
             self.repository.refresh_family(family_id, analysis_version=self.VERSION)
+            if previous_family_id and previous_family_id != family_id:
+                self.repository.refresh_family(previous_family_id, analysis_version=self.VERSION)
+
             if action == "INSERTED":
                 result.inserted += 1
             else:
