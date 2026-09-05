@@ -11,9 +11,12 @@ PATTERNS = [
     ("PERCENT", re.compile(r"(?<!\d)(\d+(?:\.\d+)?)\s*(퍼센트|%)", re.I)),
     ("CAPACITY", re.compile(r"(?<!\d)(\d+(?:\.\d+)?)\s*(GWh|MWh|kWh|GW|MW|kW|PB|TB)", re.I)),
     ("QUANTITY", re.compile(r"(?<!\d)(\d[\d,]*(?:\.\d+)?)\s*(개사|호기|척|대|개|건|명|기|곳|종|회)", re.I)),
-    # Limit duration to 1-3 digits and omit bare '일' to avoid YYYY년/MM월/DD일 dates.
-    ("DURATION", re.compile(r"(?<!\d)(\d{1,3}(?:\.\d+)?)\s*(개월|년|주)\b", re.I)),
-    ("CLINICAL_PHASE", re.compile(r"(?<!\d)([123])\s*(상)\b")),
+    # Korean suffixes such as '3년간' do not form a Python \b boundary after '년'.
+    # Use a digit guard instead so meaningful durations embedded in Korean text are retained.
+    ("DURATION", re.compile(r"(?<!\d)(\d{1,3}(?:\.\d+)?)\s*(개월|년|주)(?!\d)", re.I)),
+    # Python's Unicode \b does not match '2상에서' because both '상' and '에' are word chars.
+    # A digit guard correctly accepts '2상', '2상에서', and '2상시험'.
+    ("CLINICAL_PHASE", re.compile(r"(?<!\d)([123])\s*(상)(?!\d)")),
 ]
 
 
@@ -24,11 +27,12 @@ def _normalize_value(number: str, unit: str) -> str:
 
 
 def _iter_values(pattern: re.Pattern, text: str):
+    # Fail immediately even when a malformed future regex happens to match nothing.
+    if pattern.groups != 2:
+        raise ValueError(
+            f"meaningful-number pattern must have 2 groups, got {pattern.groups}: {pattern.pattern}"
+        )
     for match in pattern.finditer(text):
-        # PATTERNS are required to provide exactly two capture groups.
-        # Keep this explicit so malformed future patterns fail here during tests.
-        if pattern.groups != 2:
-            raise ValueError(f"meaningful-number pattern must have 2 groups, got {pattern.groups}: {pattern.pattern}")
         yield _normalize_value(match.group(1), match.group(2))
 
 
