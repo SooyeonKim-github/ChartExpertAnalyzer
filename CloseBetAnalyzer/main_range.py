@@ -132,7 +132,6 @@ def _build_summary(performance: pd.DataFrame, selected: pd.DataFrame, daily_top_
 
 def _write_excel(path: Path, all_results: pd.DataFrame, candidates: pd.DataFrame, performance: pd.DataFrame, selected: pd.DataFrame, summary: pd.DataFrame, errors: pd.DataFrame) -> None:
     with pd.ExcelWriter(path, engine="openpyxl") as writer:
-        all_results.to_excel(writer, sheet_name="AllResults", index=False)
         candidates.to_excel(writer, sheet_name="Candidates", index=False)
         performance.to_excel(writer, sheet_name="ConfirmedPerformance", index=False)
         selected.to_excel(writer, sheet_name="DailySelected", index=False)
