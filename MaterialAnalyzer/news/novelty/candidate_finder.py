@@ -7,9 +7,16 @@ from .relation_scorer import RelationScorer
 
 
 class CandidateFinder:
-    def __init__(self, repository, relation_scorer: RelationScorer | None = None):
+    def __init__(
+        self,
+        repository,
+        relation_scorer: RelationScorer | None = None,
+        *,
+        analysis_version: str,
+    ):
         self.repository = repository
         self.relation_scorer = relation_scorer or RelationScorer()
+        self.analysis_version = analysis_version
 
     @staticmethod
     def _window_start(event: EventView) -> str | None:
@@ -26,6 +33,7 @@ class CandidateFinder:
         candidates = self.repository.get_prior_analyzed_events(
             event,
             start_market_date=self._window_start(event),
+            analysis_version=self.analysis_version,
             limit=500,
         )
         best_event = None
