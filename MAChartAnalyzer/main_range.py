@@ -288,7 +288,6 @@ def run_range(args) -> int:
         )
 
     with pd.ExcelWriter(out_dir / "ma_range_backtest.xlsx", engine="openpyxl") as writer:
-        all_results.to_excel(writer, sheet_name="AllResults", index=False)
         candidates.to_excel(writer, sheet_name="Candidates", index=False)
         trade_events.to_excel(writer, sheet_name="TradeEvents", index=False)
         position_entries.to_excel(writer, sheet_name="PositionEntries", index=False)
