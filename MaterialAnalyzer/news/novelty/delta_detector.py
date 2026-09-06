@@ -1,5 +1,10 @@
 from __future__ import annotations
 
+from .litigation_rules import (
+    litigation_procedure,
+    litigation_procedure_progressed,
+    same_litigation_subject,
+)
 from .models import DeltaResult, EventView
 
 
@@ -58,8 +63,6 @@ class DeltaDetector:
 
         current_companies = set(current.companies)
         parent_companies = set(parent.companies)
-        # Only call this a company delta when the family identity is already shared and a new
-        # named party appears. Empty metadata on one side is not considered new information.
         shared_identity = bool(
             (set(current.stock_codes) & set(parent.stock_codes))
             or (current_companies & parent_companies)
@@ -76,6 +79,25 @@ class DeltaDetector:
             and current.positive_negative not in {"", "UNKNOWN"}
             and parent.positive_negative not in {"", "UNKNOWN"}
         )
+
+        litigation_procedure_changed = False
+        litigation_progressed = False
+        if (
+            current.event_type == "LITIGATION"
+            and parent.event_type == "LITIGATION"
+            and same_litigation_subject(current.event_title, parent.event_title)
+        ):
+            current_procedure = litigation_procedure(current.event_title)
+            parent_procedure = litigation_procedure(parent.event_title)
+            litigation_procedure_changed = bool(
+                current_procedure
+                and parent_procedure
+                and current_procedure != parent_procedure
+            )
+            litigation_progressed = litigation_procedure_progressed(
+                current.event_title,
+                parent.event_title,
+            )
 
         current_reliability = source_reliability(current)
         parent_reliability = source_reliability(parent)
@@ -99,6 +121,7 @@ class DeltaDetector:
                 number_changed,
                 company_changed,
                 polarity_changed,
+                litigation_procedure_changed,
                 source_reliability_increased,
                 confirmation_source_added,
             )
@@ -110,6 +133,8 @@ class DeltaDetector:
             number_changed=number_changed,
             company_changed=company_changed,
             polarity_changed=polarity_changed,
+            litigation_procedure_changed=litigation_procedure_changed,
+            litigation_procedure_progressed=litigation_progressed,
             source_reliability_increased=source_reliability_increased,
             confirmation_source_added=confirmation_source_added,
             new_information_count=new_information_count,
