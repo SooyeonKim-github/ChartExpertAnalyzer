@@ -1,83 +1,59 @@
 from __future__ import annotations
 
 from pathlib import Path
-
 import pandas as pd
-
 from .data import TrendFollowingDataProvider
 from .indicators import add_moving_average_indicators
 from .models import StageScreenResult
 from .regime import add_stage_labels, classify_market_regime, compute_52w_breadth_history, compute_intraday_strength_history, latest_breadth_snapshot, latest_intraday_snapshot
+from .strength import add_cross_sectional_rs_percentiles, compute_relative_strength_snapshot
 
 
 def _optional_float(value) -> float | None:
-    if value is None or pd.isna(value):
-        return None
+    if value is None or pd.isna(value): return None
     return float(value)
 
 
 def _build_market_context(provider: TrendFollowingDataProvider, cfg: dict, resolved: str) -> tuple[dict, dict, dict]:
-    mcfg = cfg["market_regime"]
-    bcfg = mcfg.get("breadth_52w", {})
-    icfg = mcfg.get("intraday_strength", {})
-    regime_snapshots, breadth_snapshots, intraday_snapshots = {}, {}, {}
-    for market in ("KOSPI", "KOSDAQ"):
+    mcfg=cfg["market_regime"]; bcfg=mcfg.get("breadth_52w", {}); icfg=mcfg.get("intraday_strength", {}); regime_snapshots={}; breadth_snapshots={}; intraday_snapshots={}
+    for market in ("KOSPI","KOSDAQ"):
+        try: index_df=provider.get_market_index(market,resolved)
+        except Exception as exc: print(f"[WARN] {market} market regime index load failed: {exc}"); index_df=pd.DataFrame(columns=["open","high","low","close"])
+        regime_snapshots[market]=classify_market_regime(index_df,market=market,ma_short=int(mcfg.get("ma_short",50)),ma_long=int(mcfg.get("ma_long",150)),slope_lookback=int(mcfg.get("slope_lookback",20)),experimental_slope_threshold_pct=float(mcfg.get("experimental_slope_threshold_pct",0.30)))
         try:
-            index_df = provider.get_market_index(market, resolved)
-        except Exception as exc:
-            print(f"[WARN] {market} market regime index load failed: {exc}")
-            index_df = pd.DataFrame(columns=["open", "high", "low", "close"])
-        regime_snapshots[market] = classify_market_regime(index_df, market=market, ma_short=int(mcfg.get("ma_short", 50)), ma_long=int(mcfg.get("ma_long", 150)), slope_lookback=int(mcfg.get("slope_lookback", 20)), experimental_slope_threshold_pct=float(mcfg.get("experimental_slope_threshold_pct", 0.30)))
+            intraday_history=compute_intraday_strength_history(index_df,strong_clv_threshold=float(icfg.get("strong_clv_threshold",0.70)),weak_clv_threshold=float(icfg.get("weak_clv_threshold",0.30)),short_window=int(icfg.get("short_window",5)),long_window=int(icfg.get("long_window",20)))
+            intraday_snapshots[market]=latest_intraday_snapshot(intraday_history,market=market,short_window=int(icfg.get("short_window",5)),long_window=int(icfg.get("long_window",20)))
+        except Exception as exc: print(f"[WARN] {market} intraday-strength proxy failed: {exc}"); intraday_snapshots[market]=latest_intraday_snapshot(pd.DataFrame(),market=market,short_window=int(icfg.get("short_window",5)),long_window=int(icfg.get("long_window",20)))
         try:
-            if not bool(icfg.get("enabled", True)):
-                raise RuntimeError("intraday-strength proxy disabled")
-            intraday_history = compute_intraday_strength_history(index_df, strong_clv_threshold=float(icfg.get("strong_clv_threshold", 0.70)), weak_clv_threshold=float(icfg.get("weak_clv_threshold", 0.30)), short_window=int(icfg.get("short_window", 5)), long_window=int(icfg.get("long_window", 20)))
-            intraday_snapshots[market] = latest_intraday_snapshot(intraday_history, market=market, short_window=int(icfg.get("short_window", 5)), long_window=int(icfg.get("long_window", 20)))
-        except Exception as exc:
-            print(f"[WARN] {market} intraday-strength proxy failed: {exc}")
-            intraday_snapshots[market] = latest_intraday_snapshot(pd.DataFrame(), market=market, short_window=int(icfg.get("short_window", 5)), long_window=int(icfg.get("long_window", 20)))
-        try:
-            source, meta = provider.get_market_breadth_source(market, resolved)
-            breadth_history = compute_52w_breadth_history(source, lookback_sessions=int(bcfg.get("lookback_sessions", 252)), min_history_sessions=int(bcfg.get("min_history_sessions", 252)), short_window=int(bcfg.get("short_window", 5)), long_window=int(bcfg.get("long_window", 20)))
-            breadth_snapshots[market] = latest_breadth_snapshot(breadth_history, market=market, min_coverage_ratio=float(bcfg.get("min_coverage_ratio", 0.60)), snapshot_dates_loaded=int(meta.get("loaded_dates", 0)), snapshot_dates_expected=int(meta.get("expected_dates", 0)))
-        except Exception as exc:
-            print(f"[WARN] {market} 52W breadth analysis failed: {exc}")
-            breadth_snapshots[market] = latest_breadth_snapshot(pd.DataFrame(), market=market, min_coverage_ratio=float(bcfg.get("min_coverage_ratio", 0.60)))
-    return regime_snapshots, breadth_snapshots, intraday_snapshots
+            source,meta=provider.get_market_breadth_source(market,resolved); breadth_history=compute_52w_breadth_history(source,lookback_sessions=int(bcfg.get("lookback_sessions",252)),min_history_sessions=int(bcfg.get("min_history_sessions",252)),short_window=int(bcfg.get("short_window",5)),long_window=int(bcfg.get("long_window",20))); breadth_snapshots[market]=latest_breadth_snapshot(breadth_history,market=market,min_coverage_ratio=float(bcfg.get("min_coverage_ratio",0.60)),snapshot_dates_loaded=int(meta.get("loaded_dates",0)),snapshot_dates_expected=int(meta.get("expected_dates",0)))
+        except Exception as exc: print(f"[WARN] {market} 52W breadth analysis failed: {exc}"); breadth_snapshots[market]=latest_breadth_snapshot(pd.DataFrame(),market=market,min_coverage_ratio=float(bcfg.get("min_coverage_ratio",0.60)))
+    return regime_snapshots,breadth_snapshots,intraday_snapshots
 
 
-def screen_date(cfg: dict, *, scan_date: str | None = None, top_n: int | None = None, base_dir: str | Path, universe_xlsx: str | Path | None = None) -> tuple[str, list[StageScreenResult]]:
-    provider = TrendFollowingDataProvider(cfg, base_dir=base_dir, universe_xlsx=universe_xlsx)
-    resolved = provider.resolve_scan_date(scan_date)
-    universe = provider.build_universe(resolved, top_n=top_n)
-    market_snapshots, breadth_snapshots, intraday_snapshots = _build_market_context(provider, cfg, resolved)
-    tcfg = cfg["trend"]
-    results = []
-    for ticker, info in universe.iterrows():
+def _build_rs_context(provider: TrendFollowingDataProvider,cfg: dict,resolved: str,universe: pd.DataFrame)->tuple[dict,dict]:
+    rcfg=cfg.get("relative_strength",{}); short_window=int(rcfg.get("short_window",20)); long_window=int(rcfg.get("long_window",60)); min_percentile=float(rcfg.get("experimental_min_percentile",80.0)); snapshots={}; rows=[]
+    for ticker,info in universe.iterrows():
+        code=str(ticker).zfill(6); market=str(info.get("market","")).upper()
+        try: snap=compute_relative_strength_snapshot(provider.get_daily(code,resolved),provider.get_market_index(market,resolved),market=market,short_window=short_window,long_window=long_window,as_of=resolved)
+        except Exception as exc: print(f"[WARN] {code} relative-strength analysis failed: {exc}"); snap=compute_relative_strength_snapshot(pd.DataFrame(columns=["close"]),pd.DataFrame(columns=["close"]),market=market,short_window=short_window,long_window=long_window,as_of=resolved)
+        snapshots[code]=snap; rows.append({"ticker":code,"market":market,"rs_20d_pct":snap.rs_20d_pct,"rs_60d_pct":snap.rs_60d_pct})
+    percentile_map={}
+    if rows:
+        ranked=add_cross_sectional_rs_percentiles(pd.DataFrame(rows))
+        for _,row in ranked.iterrows():
+            p20=_optional_float(row.get("rs_percentile_20d")); p60=_optional_float(row.get("rs_percentile_60d")); composite=_optional_float(row.get("rs_percentile_composite")); percentile_map[str(row["ticker"]).zfill(6)]={"rs_percentile_20d":p20,"rs_percentile_60d":p60,"rs_percentile_composite":composite,"rs_experimental_percentile_pass":bool(composite is not None and composite>=min_percentile)}
+    return snapshots,percentile_map
+
+
+def screen_date(cfg: dict,*,scan_date: str|None=None,top_n: int|None=None,base_dir: str|Path,universe_xlsx: str|Path|None=None)->tuple[str,list[StageScreenResult]]:
+    provider=TrendFollowingDataProvider(cfg,base_dir=base_dir,universe_xlsx=universe_xlsx); resolved=provider.resolve_scan_date(scan_date); universe=provider.build_universe(resolved,top_n=top_n); market_snapshots,breadth_snapshots,intraday_snapshots=_build_market_context(provider,cfg,resolved); rs_snapshots,rs_percentiles=_build_rs_context(provider,cfg,resolved,universe); tcfg=cfg["trend"]; results=[]
+    for ticker,info in universe.iterrows():
         try:
-            daily = provider.get_daily(ticker, resolved)
-            if daily.empty:
-                continue
-            enriched = add_moving_average_indicators(daily, ma_short=int(tcfg.get("ma_short", 50)), ma_long=int(tcfg.get("ma_long", 150)), slope_lookback=int(tcfg.get("slope_lookback", 20)))
-            enriched = add_stage_labels(enriched, slope_threshold_pct=float(tcfg.get("experimental_slope_threshold_pct", 0.30)))
-            last = enriched.iloc[-1]
-            market = str(info.get("market", "")).upper()
-            market_snapshot = market_snapshots.get(market)
-            breadth_snapshot = breadth_snapshots.get(market)
-            intraday_snapshot = intraday_snapshots.get(market)
-            if market_snapshot is None or breadth_snapshot is None or intraday_snapshot is None:
-                continue
-            stage_core_pass = bool(last["stage_core_pass"])
-            market_core_pass = bool(market_snapshot.market_eligible)
-            lecture_core_pass = stage_core_pass and market_core_pass
-            results.append(StageScreenResult(
-                scan_date=resolved, ticker=str(ticker).zfill(6), name=str(info.get("name", ticker)), market=market, trading_value_rank=int(info.get("trading_value_rank", 0)), close=float(last["close"]), ma50=_optional_float(last.get("ma50")), ma150=_optional_float(last.get("ma150")), ma150_slope_pct=_optional_float(last.get("ma150_slope_pct")), close_vs_ma150_pct=_optional_float(last.get("close_vs_ma150_pct")), ma50_vs_ma150_pct=_optional_float(last.get("ma50_vs_ma150_pct")), stage=str(last["stage"]), trend_eligible=bool(last["trend_eligible"]), stage_core_pass=stage_core_pass, stage_experimental_slope_pass=bool(last["stage_experimental_slope_pass"]), stage_reason=str(last["stage_reason"]),
-                market_regime=market_snapshot.regime, market_eligible=market_core_pass, market_index_close=market_snapshot.index_close, market_index_ma50=market_snapshot.index_ma50, market_index_ma150=market_snapshot.index_ma150, market_index_ma150_slope_pct=market_snapshot.index_ma150_slope_pct, market_index_close_vs_ma150_pct=market_snapshot.index_close_vs_ma150_pct, market_index_ma50_vs_ma150_pct=market_snapshot.index_ma50_vs_ma150_pct, market_lecture_ma150_position_pass=market_snapshot.lecture_ma150_position_pass, market_lecture_ma150_slope_pass=market_snapshot.lecture_ma150_slope_pass, market_experimental_slope_threshold_pass=market_snapshot.experimental_slope_threshold_pass, market_experimental_ma50_alignment_pass=market_snapshot.experimental_ma50_alignment_pass, market_regime_reason=market_snapshot.regime_reason,
-                market_breadth_status=breadth_snapshot.status, market_breadth_measurement=breadth_snapshot.measurement, market_breadth_universe_count=breadth_snapshot.universe_count, market_breadth_eligible_count=breadth_snapshot.eligible_count, market_breadth_coverage_ratio=breadth_snapshot.coverage_ratio, market_new_high_52w_count=breadth_snapshot.new_high_52w_count, market_new_low_52w_count=breadth_snapshot.new_low_52w_count, market_new_high_52w_ratio=breadth_snapshot.new_high_52w_ratio, market_new_low_52w_ratio=breadth_snapshot.new_low_52w_ratio, market_new_high_low_spread=breadth_snapshot.new_high_low_spread, market_breadth_5d_avg=breadth_snapshot.breadth_5d_avg, market_breadth_20d_avg=breadth_snapshot.breadth_20d_avg, market_breadth_5d_change=breadth_snapshot.breadth_5d_change, market_breadth_20d_change=breadth_snapshot.breadth_20d_change, market_breadth_direction=breadth_snapshot.breadth_direction, market_breadth_snapshot_dates_loaded=breadth_snapshot.snapshot_dates_loaded, market_breadth_snapshot_dates_expected=breadth_snapshot.snapshot_dates_expected, market_breadth_snapshot_date_coverage_ratio=breadth_snapshot.snapshot_date_coverage_ratio, market_breadth_filter_applied=False,
-                market_intraday_status=intraday_snapshot.status, market_intraday_measurement=intraday_snapshot.measurement, market_gap_return_pct=intraday_snapshot.gap_return_pct, market_open_close_return_pct=intraday_snapshot.open_close_return_pct, market_close_return_pct=intraday_snapshot.close_return_pct, market_close_location_value=intraday_snapshot.close_location_value, market_recovery_strength_pct=intraday_snapshot.recovery_strength_pct, market_fade_strength_pct=intraday_snapshot.fade_strength_pct, market_intraday_label=intraday_snapshot.intraday_label, market_experimental_intraday_strength_score=intraday_snapshot.experimental_intraday_strength_score, market_weak_open_strong_close_5d_ratio=intraday_snapshot.weak_open_strong_close_5d_ratio, market_weak_open_strong_close_20d_ratio=intraday_snapshot.weak_open_strong_close_20d_ratio, market_strong_open_weak_close_5d_ratio=intraday_snapshot.strong_open_weak_close_5d_ratio, market_strong_open_weak_close_20d_ratio=intraday_snapshot.strong_open_weak_close_20d_ratio, market_strong_close_5d_ratio=intraday_snapshot.strong_close_5d_ratio, market_strong_close_20d_ratio=intraday_snapshot.strong_close_20d_ratio, market_weak_close_5d_ratio=intraday_snapshot.weak_close_5d_ratio, market_weak_close_20d_ratio=intraday_snapshot.weak_close_20d_ratio, market_intraday_direction=intraday_snapshot.intraday_direction, market_intraday_filter_applied=False,
-                lecture_core_pass=lecture_core_pass, experimental_filters_applied=False,
-            ))
-        except Exception as exc:
-            print(f"[WARN] {ticker} trend analysis failed: {exc}")
-    results.sort(key=lambda r: (0 if r.lecture_core_pass else 1, 0 if r.stage == "STAGE_2" else 1, r.trading_value_rank))
-    return resolved, results
+            code=str(ticker).zfill(6); daily=provider.get_daily(code,resolved)
+            if daily.empty: continue
+            enriched=add_moving_average_indicators(daily,ma_short=int(tcfg.get("ma_short",50)),ma_long=int(tcfg.get("ma_long",150)),slope_lookback=int(tcfg.get("slope_lookback",20))); enriched=add_stage_labels(enriched,slope_threshold_pct=float(tcfg.get("experimental_slope_threshold_pct",0.30))); last=enriched.iloc[-1]; market=str(info.get("market","")).upper(); market_snapshot=market_snapshots.get(market); breadth_snapshot=breadth_snapshots.get(market); intraday_snapshot=intraday_snapshots.get(market); rs_snapshot=rs_snapshots.get(code); rs_rank=rs_percentiles.get(code,{})
+            if market_snapshot is None or breadth_snapshot is None or intraday_snapshot is None or rs_snapshot is None: continue
+            stage_core_pass=bool(last["stage_core_pass"]); market_core_pass=bool(market_snapshot.market_eligible); lecture_core_pass=stage_core_pass and market_core_pass
+            results.append(StageScreenResult(scan_date=resolved,ticker=code,name=str(info.get("name",ticker)),market=market,trading_value_rank=int(info.get("trading_value_rank",0)),close=float(last["close"]),ma50=_optional_float(last.get("ma50")),ma150=_optional_float(last.get("ma150")),ma150_slope_pct=_optional_float(last.get("ma150_slope_pct")),close_vs_ma150_pct=_optional_float(last.get("close_vs_ma150_pct")),ma50_vs_ma150_pct=_optional_float(last.get("ma50_vs_ma150_pct")),stage=str(last["stage"]),trend_eligible=bool(last["trend_eligible"]),stage_core_pass=stage_core_pass,stage_experimental_slope_pass=bool(last["stage_experimental_slope_pass"]),stage_reason=str(last["stage_reason"]),market_regime=market_snapshot.regime,market_eligible=market_core_pass,market_index_close=market_snapshot.index_close,market_index_ma50=market_snapshot.index_ma50,market_index_ma150=market_snapshot.index_ma150,market_index_ma150_slope_pct=market_snapshot.index_ma150_slope_pct,market_index_close_vs_ma150_pct=market_snapshot.index_close_vs_ma150_pct,market_index_ma50_vs_ma150_pct=market_snapshot.index_ma50_vs_ma150_pct,market_lecture_ma150_position_pass=market_snapshot.lecture_ma150_position_pass,market_lecture_ma150_slope_pass=market_snapshot.lecture_ma150_slope_pass,market_experimental_slope_threshold_pass=market_snapshot.experimental_slope_threshold_pass,market_experimental_ma50_alignment_pass=market_snapshot.experimental_ma50_alignment_pass,market_regime_reason=market_snapshot.regime_reason,market_breadth_status=breadth_snapshot.status,market_breadth_measurement=breadth_snapshot.measurement,market_breadth_universe_count=breadth_snapshot.universe_count,market_breadth_eligible_count=breadth_snapshot.eligible_count,market_breadth_coverage_ratio=breadth_snapshot.coverage_ratio,market_new_high_52w_count=breadth_snapshot.new_high_52w_count,market_new_low_52w_count=breadth_snapshot.new_low_52w_count,market_new_high_52w_ratio=breadth_snapshot.new_high_52w_ratio,market_new_low_52w_ratio=breadth_snapshot.new_low_52w_ratio,market_new_high_low_spread=breadth_snapshot.new_high_low_spread,market_breadth_5d_avg=breadth_snapshot.breadth_5d_avg,market_breadth_20d_avg=breadth_snapshot.breadth_20d_avg,market_breadth_5d_change=breadth_snapshot.breadth_5d_change,market_breadth_20d_change=breadth_snapshot.breadth_20d_change,market_breadth_direction=breadth_snapshot.breadth_direction,market_breadth_snapshot_dates_loaded=breadth_snapshot.snapshot_dates_loaded,market_breadth_snapshot_dates_expected=breadth_snapshot.snapshot_dates_expected,market_breadth_snapshot_date_coverage_ratio=breadth_snapshot.snapshot_date_coverage_ratio,market_breadth_filter_applied=False,market_intraday_status=intraday_snapshot.status,market_intraday_measurement=intraday_snapshot.measurement,market_gap_return_pct=intraday_snapshot.gap_return_pct,market_open_close_return_pct=intraday_snapshot.open_close_return_pct,market_close_return_pct=intraday_snapshot.close_return_pct,market_close_location_value=intraday_snapshot.close_location_value,market_recovery_strength_pct=intraday_snapshot.recovery_strength_pct,market_fade_strength_pct=intraday_snapshot.fade_strength_pct,market_intraday_label=intraday_snapshot.intraday_label,market_experimental_intraday_strength_score=intraday_snapshot.experimental_intraday_strength_score,market_weak_open_strong_close_5d_ratio=intraday_snapshot.weak_open_strong_close_5d_ratio,market_weak_open_strong_close_20d_ratio=intraday_snapshot.weak_open_strong_close_20d_ratio,market_strong_open_weak_close_5d_ratio=intraday_snapshot.strong_open_weak_close_5d_ratio,market_strong_open_weak_close_20d_ratio=intraday_snapshot.strong_open_weak_close_20d_ratio,market_strong_close_5d_ratio=intraday_snapshot.strong_close_5d_ratio,market_strong_close_20d_ratio=intraday_snapshot.strong_close_20d_ratio,market_weak_close_5d_ratio=intraday_snapshot.weak_close_5d_ratio,market_weak_close_20d_ratio=intraday_snapshot.weak_close_20d_ratio,market_intraday_direction=intraday_snapshot.intraday_direction,market_intraday_filter_applied=False,rs_status=rs_snapshot.status,rs_measurement=rs_snapshot.measurement,rs_percentile_scope=rs_snapshot.percentile_scope,stock_return_20d_pct=rs_snapshot.stock_return_20d_pct,benchmark_return_20d_pct=rs_snapshot.benchmark_return_20d_pct,rs_20d_pct=rs_snapshot.rs_20d_pct,stock_return_60d_pct=rs_snapshot.stock_return_60d_pct,benchmark_return_60d_pct=rs_snapshot.benchmark_return_60d_pct,rs_60d_pct=rs_snapshot.rs_60d_pct,rs_percentile_20d=rs_rank.get("rs_percentile_20d"),rs_percentile_60d=rs_rank.get("rs_percentile_60d"),rs_percentile_composite=rs_rank.get("rs_percentile_composite"),rs_label=rs_snapshot.rs_label,rs_experimental_20d_outperform_pass=bool(rs_snapshot.rs_20d_pct is not None and rs_snapshot.rs_20d_pct>0),rs_experimental_60d_outperform_pass=bool(rs_snapshot.rs_60d_pct is not None and rs_snapshot.rs_60d_pct>0),rs_experimental_percentile_pass=bool(rs_rank.get("rs_experimental_percentile_pass",False)),rs_filter_applied=False,lecture_core_pass=lecture_core_pass,experimental_filters_applied=False))
+        except Exception as exc: print(f"[WARN] {ticker} trend analysis failed: {exc}")
+    results.sort(key=lambda r:(0 if r.lecture_core_pass else 1,0 if r.stage=="STAGE_2" else 1,-(r.rs_percentile_composite or -1.0),r.trading_value_rank)); return resolved,results

@@ -73,6 +73,23 @@ class StageScreenResult:
     market_weak_close_20d_ratio: float | None
     market_intraday_direction: str
     market_intraday_filter_applied: bool
+    rs_status: str
+    rs_measurement: str
+    rs_percentile_scope: str
+    stock_return_20d_pct: float | None
+    benchmark_return_20d_pct: float | None
+    rs_20d_pct: float | None
+    stock_return_60d_pct: float | None
+    benchmark_return_60d_pct: float | None
+    rs_60d_pct: float | None
+    rs_percentile_20d: float | None
+    rs_percentile_60d: float | None
+    rs_percentile_composite: float | None
+    rs_label: str
+    rs_experimental_20d_outperform_pass: bool
+    rs_experimental_60d_outperform_pass: bool
+    rs_experimental_percentile_pass: bool
+    rs_filter_applied: bool
     lecture_core_pass: bool
     experimental_filters_applied: bool
 
