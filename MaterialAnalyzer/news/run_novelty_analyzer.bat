@@ -3,8 +3,8 @@ setlocal
 cd /d "%~dp0\..\.."
 
 echo ============================================================================
-echo MaterialAnalyzer - NoveltyAnalyzer V1
-echo Rule Based Event Family / Delta Analysis
+echo MaterialAnalyzer - NoveltyAnalyzer V1.1
+echo Rule Based Event Family / Delta + Litigation Guard
 echo ============================================================================
 echo.
 echo [1/2] NoveltyAnalyzer smoke test
