@@ -86,13 +86,26 @@ emerging_leader:
   strong_score: 85
   emerging_score: 70
   watch_score: 55
-  max_chase_risk: 70
+  max_chase_risk: 40
   strong_rank_max: 15
   strong_rank_velocity_5d: 30
+  overheat_return_pct: 15
+  overheat_return_hard_pct: 20
+  overheat_rs_acceleration: 16
+  overheat_rs_acceleration_hard: 25
+  overheat_trading_value_ratio_5d: 5
+  overheat_combo_return_pct: 10
+  overheat_return_penalty: 10
+  overheat_return_hard_penalty: 10
+  overheat_rs_penalty: 10
+  overheat_rs_hard_penalty: 10
+  overheat_turnover_combo_penalty: 10
+  momentum_spike_penalty_threshold: 20
 
 lifecycle:
   enabled: true
   use_emerging_engine: true
+  allow_strong_emerging_fast_track: false
   discovery_min_leader_score: 60
   discovery_rank_max: 50
   emerging_min_leader_score: 72
