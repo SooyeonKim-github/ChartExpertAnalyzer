@@ -10,6 +10,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_OUTPUT = ROOT / "data" / "reference" / "ticker_master_krx.csv"
 FIELDS = ["ticker", "name", "aliases", "market", "sector", "industry", "enabled"]
+MIN_EXPECTED_ROWS = 1000
 
 
 def _meta_path(path: Path) -> Path:
@@ -41,9 +42,6 @@ def _is_fresh(path: Path, stale_days: int) -> bool:
 
 
 def _latest_market_snapshot(stock_module):
-    # pykrx can resolve the latest business day internally when date is omitted.
-    # Prefer that path first because explicit future/weekend/calendar dates can
-    # return an empty list depending on the installed pykrx/KRX endpoint behavior.
     try:
         kospi = list(stock_module.get_market_ticker_list(market="KOSPI"))
         kosdaq = list(stock_module.get_market_ticker_list(market="KOSDAQ"))
@@ -51,8 +49,6 @@ def _latest_market_snapshot(stock_module):
             return "LATEST", (("KOSPI", kospi), ("KOSDAQ", kosdaq))
     except Exception:
         pass
-
-    # Fallback: explicitly walk backward over recent calendar days.
     for offset in range(0, 31):
         target = (date.today() - timedelta(days=offset)).strftime("%Y%m%d")
         try:
@@ -62,7 +58,101 @@ def _latest_market_snapshot(stock_module):
             continue
         if kospi or kosdaq:
             return target, (("KOSPI", kospi), ("KOSDAQ", kosdaq))
-    raise RuntimeError("KRX ticker list was empty from both latest-business-day and 31-day fallback queries")
+    raise RuntimeError("empty latest-business-day and 31-day KRX ticker queries")
+
+
+def _rows_from_pykrx(stock_module, existing):
+    snapshot_date, markets = _latest_market_snapshot(stock_module)
+    rows = []
+    seen = set()
+    for market, tickers in markets:
+        for raw_ticker in tickers:
+            ticker = str(raw_ticker).zfill(6)
+            if ticker in seen:
+                continue
+            seen.add(ticker)
+            name = str(stock_module.get_market_ticker_name(ticker) or "").strip()
+            if not name:
+                continue
+            old = existing.get(ticker, {})
+            aliases = [x for x in str(old.get("aliases", "")).split("|") if x]
+            old_name = str(old.get("name", "")).strip()
+            if old_name and old_name != name and old_name not in aliases:
+                aliases.append(old_name)
+            rows.append({
+                "ticker": ticker,
+                "name": name,
+                "aliases": "|".join(aliases),
+                "market": market,
+                "sector": str(old.get("sector", "")).strip(),
+                "industry": str(old.get("industry", "")).strip(),
+                "enabled": "1",
+            })
+    return snapshot_date, rows
+
+
+def _provider_shared_marketdata(existing):
+    from MarketData.service import load_pykrx_stock
+    stock = load_pykrx_stock()
+    return _rows_from_pykrx(stock, existing)
+
+
+def _provider_finance_data_reader(existing):
+    import FinanceDataReader as fdr
+    frame = fdr.StockListing("KRX")
+    if frame is None or frame.empty:
+        raise RuntimeError("FinanceDataReader StockListing('KRX') returned empty")
+    rows = []
+    seen = set()
+    for _, row in frame.iterrows():
+        ticker = str(row.get("Code", row.get("Symbol", ""))).strip().zfill(6)
+        name = str(row.get("Name", "")).strip()
+        market = str(row.get("Market", row.get("MarketId", ""))).strip().upper()
+        if market not in {"KOSPI", "KOSDAQ"} or not ticker.isdigit() or len(ticker) != 6 or not name:
+            continue
+        if ticker in seen:
+            continue
+        seen.add(ticker)
+        old = existing.get(ticker, {})
+        aliases = [x for x in str(old.get("aliases", "")).split("|") if x]
+        old_name = str(old.get("name", "")).strip()
+        if old_name and old_name != name and old_name not in aliases:
+            aliases.append(old_name)
+        rows.append({
+            "ticker": ticker,
+            "name": name,
+            "aliases": "|".join(aliases),
+            "market": market,
+            "sector": str(old.get("sector", "")).strip(),
+            "industry": str(old.get("industry", "")).strip(),
+            "enabled": "1",
+        })
+    return "FDR_LATEST", rows
+
+
+def _provider_direct_pykrx(existing):
+    from pykrx import stock
+    return _rows_from_pykrx(stock, existing)
+
+
+def _choose_provider(existing):
+    providers = (
+        ("MARKETDATA_SHARED_PYKRX", _provider_shared_marketdata),
+        ("FINANCE_DATA_READER", _provider_finance_data_reader),
+        ("DIRECT_PYKRX", _provider_direct_pykrx),
+    )
+    errors = []
+    for name, provider in providers:
+        try:
+            snapshot_date, rows = provider(existing)
+            if len(rows) < MIN_EXPECTED_ROWS:
+                raise RuntimeError(f"provider returned only {len(rows)} rows")
+            print(f"[OK] ticker master provider={name} rows={len(rows)}")
+            return name, snapshot_date, rows
+        except Exception as exc:
+            errors.append(f"{name}: {type(exc).__name__}: {exc}")
+            print(f"[WARN] ticker master provider failed: {errors[-1]}")
+    raise RuntimeError("all ticker-master providers failed | " + " | ".join(errors))
 
 
 def build(output: Path = DEFAULT_OUTPUT, *, if_stale_days: int = 0, best_effort: bool = False) -> int:
@@ -73,42 +163,8 @@ def build(output: Path = DEFAULT_OUTPUT, *, if_stale_days: int = 0, best_effort:
         return 0
 
     try:
-        from pykrx import stock
-
-        snapshot_date, markets = _latest_market_snapshot(stock)
         existing = _read_existing(output)
-        rows: list[dict[str, str]] = []
-        seen = set()
-        for market, tickers in markets:
-            for ticker in tickers:
-                ticker = str(ticker).zfill(6)
-                if ticker in seen:
-                    continue
-                seen.add(ticker)
-                name = str(stock.get_market_ticker_name(ticker) or "").strip()
-                if not name:
-                    continue
-                old = existing.get(ticker, {})
-                aliases = str(old.get("aliases", "")).strip()
-                old_name = str(old.get("name", "")).strip()
-                if old_name and old_name != name:
-                    alias_values = [x for x in aliases.split("|") if x]
-                    if old_name not in alias_values:
-                        alias_values.append(old_name)
-                    aliases = "|".join(alias_values)
-                rows.append({
-                    "ticker": ticker,
-                    "name": name,
-                    "aliases": aliases,
-                    "market": market,
-                    "sector": str(old.get("sector", "")).strip(),
-                    "industry": str(old.get("industry", "")).strip(),
-                    "enabled": "1",
-                })
-
-        if not rows:
-            raise RuntimeError("KRX returned ticker ids but no ticker names could be resolved")
-
+        provider, snapshot_date, rows = _choose_provider(existing)
         rows.sort(key=lambda row: (row["market"], row["ticker"]))
         tmp = output.with_suffix(output.suffix + ".tmp")
         with tmp.open("w", encoding="utf-8-sig", newline="") as fp:
@@ -116,26 +172,28 @@ def build(output: Path = DEFAULT_OUTPUT, *, if_stale_days: int = 0, best_effort:
             writer.writeheader()
             writer.writerows(rows)
         tmp.replace(output)
-
         _meta_path(output).write_text(json.dumps({
             "built_at": datetime.now(timezone.utc).isoformat(),
             "snapshot_date": snapshot_date,
+            "provider": provider,
             "count": len(rows),
             "markets": ["KOSPI", "KOSDAQ"],
         }, ensure_ascii=False, indent=2), encoding="utf-8")
-
-        print(f"[OK] KRX ticker master {snapshot_date}: {len(rows)} tickers -> {output}")
+        print(f"[OK] ticker master {snapshot_date}: {len(rows)} tickers -> {output}")
         return len(rows)
     except Exception as exc:
         if best_effort:
             print(f"[WARN] ticker master refresh skipped: {type(exc).__name__}: {exc}")
-            print(f"[WARN] using existing generated master if present: {output}")
+            if output.exists():
+                print(f"[WARN] using existing generated master: {output}")
+            else:
+                print("[WARN] generated master unavailable; manual seed + EventExtractor bootstrap will be used")
             return 0
         raise
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Build KOSPI/KOSDAQ ticker_master_krx.csv from KRX via pykrx")
+    parser = argparse.ArgumentParser(description="Build KOSPI/KOSDAQ ticker_master_krx.csv with provider fallbacks")
     parser.add_argument("--output", default=str(DEFAULT_OUTPUT))
     parser.add_argument("--if-stale-days", type=int, default=0)
     parser.add_argument("--best-effort", action="store_true")
