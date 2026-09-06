@@ -111,12 +111,14 @@ lifecycle:
   discovery_rank_max: 50
   emerging_min_leader_score: 72
   emerging_rank_max: 20
+  emerging_max_top20_days_5d: 2
   emerging_hold_min_leader_score: 60
   emerging_hold_rank_max: 50
-  emerging_max_top20_days_5d: 2
   leader_min_leader_score: 75
   leader_rank_max: 20
   leader_min_top20_days_5d: 2
+  leader_evidence_required: 2
+  leader_evidence_window_observations: 10
   persistent_min_leader_score: 75
   persistent_min_persistence_score: 70
   persistent_min_top20_days_5d: 4
