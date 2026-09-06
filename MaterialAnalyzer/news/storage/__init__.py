@@ -5,6 +5,7 @@ from .event_repository import EventRepository
 from .material_score_repository import MaterialScoreRepository
 from .novelty_repository import NoveltyRepository
 from .source_state_repository import SourceStateRepository
+from .ticker_link_repository import TickerLinkRepository
 
 __all__ = [
     "Database",
@@ -14,4 +15,5 @@ __all__ = [
     "EventRepository",
     "NoveltyRepository",
     "MaterialScoreRepository",
+    "TickerLinkRepository",
 ]
