@@ -116,6 +116,14 @@ DEFAULT_CONFIG: dict[str, Any] = {
         "overheat_turnover_combo_penalty": 10.0,
         "momentum_spike_penalty_threshold": 20.0,
     },
+    "exhaustion_risk": {
+        "enabled": True,
+        "watch_score": 35.0,
+        "high_score": 55.0,
+        "critical_score": 75.0,
+        "event_states": ["LEADER", "PERSISTENT_LEADER"],
+        "observational_only": True,
+    },
     "lifecycle": {
         "enabled": True,
         "use_emerging_engine": True,
