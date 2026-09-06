@@ -119,6 +119,21 @@ class LeaderResult:
     strong_return_days_5d: int = 0
     leader_type: str = "NORMAL"
 
+    # Leader Lifecycle V1. Lifecycle is observational and does not yet modify
+    # Leader Score or confirmation status.
+    lifecycle_available: bool = False
+    lifecycle_state: str = "UNKNOWN"
+    lifecycle_prev_state: str = "UNKNOWN"
+    lifecycle_transition: bool = False
+    lifecycle_days_in_state: int = 0
+    lifecycle_observed_days: int = 0
+    lifecycle_state_start_date: str = ""
+    lifecycle_reason: str = ""
+    lifecycle_drawdown_20d_pct: float | None = None
+    lifecycle_below_ma20: bool = False
+    lifecycle_exhaustion_flags: int = 0
+    lifecycle_broken_flags: int = 0
+
     details: dict[str, Any] = field(default_factory=dict)
 
     def to_dict(self) -> dict[str, Any]:
