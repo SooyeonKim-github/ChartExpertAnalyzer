@@ -32,6 +32,7 @@ class ReferenceData:
         "event_theme_rules.csv",
         "theme_ticker_map.csv",
         "company_relationships.csv",
+        "company_status_overrides.csv",
     )
 
     def __init__(self, reference_dir: Path, bootstrap_pairs=()):
@@ -42,6 +43,9 @@ class ReferenceData:
         self.theme_rules = self._load_theme_rules(self.reference_dir / "event_theme_rules.csv")
         self.theme_tickers = self._load_theme_tickers(self.reference_dir / "theme_ticker_map.csv")
         self.relationships = self._load_relationships(self.reference_dir / "company_relationships.csv")
+        self.company_status_overrides = self._load_company_status_overrides(
+            self.reference_dir / "company_status_overrides.csv"
+        )
         self.by_ticker = {row.ticker: row for row in self.tickers}
         self.by_company, self.ambiguous_companies = self._company_index(self.tickers)
 
@@ -227,3 +231,19 @@ class ReferenceData:
                     evidence=evidence,
                 ))
         return rows
+
+    @staticmethod
+    def _load_company_status_overrides(path: Path) -> dict[str, tuple[str, str]]:
+        out: dict[str, tuple[str, str]] = {}
+        if not path.exists():
+            return out
+        with path.open("r", encoding="utf-8-sig", newline="") as fp:
+            for row in csv.DictReader(fp):
+                if not _enabled(row):
+                    continue
+                key = normalize_company(str(row.get("company", "")).strip())
+                status = str(row.get("status", "")).strip().upper()
+                reason = str(row.get("reason", "")).strip()
+                if key and status:
+                    out[key] = (status, reason)
+        return out
