@@ -24,7 +24,8 @@ def run(
     scorer = MaterialScorer(repository)
 
     print("=" * 76)
-    print(" MaterialScorer V1 - Deterministic 100 Point Material Score")
+    print(" MaterialScorer V1.1 - Deterministic 100 Point Material Score")
+    print(" Routine Governance Impact Guard")
     print("=" * 76)
     print(f"DB      : {db_path}")
     print(f"Report  : {output_path}")
@@ -48,7 +49,7 @@ def run(
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Deterministic MaterialScorer V1")
+    parser = argparse.ArgumentParser(description="Deterministic MaterialScorer V1.1")
     parser.add_argument("--db", default=str(DEFAULT_DB))
     parser.add_argument("--output", default=str(DEFAULT_REPORT))
     parser.add_argument("--rebuild", action="store_true")
