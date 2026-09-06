@@ -4,6 +4,7 @@ from datetime import datetime
 from difflib import SequenceMatcher
 
 from ..clustering.feature_extractor import normalize_title, tokenize
+from .litigation_rules import litigation_subject_conflict, same_litigation_subject
 from .models import EventView, RelationResult
 
 
@@ -17,6 +18,7 @@ GENERIC_EVENT_TOKENS = {
     "투자", "투자계획", "투자결정", "시설투자", "설비투자", "신규시설투자",
     "계획", "예정", "추진", "검토", "확정", "결정", "승인", "허가", "신청",
     "임상시험", "시험계획", "발표", "공시", "관련", "대한", "정부", "정책",
+    "가처분", "소송", "항고", "재항고", "판결", "제기",
 }
 
 
@@ -141,15 +143,30 @@ class RelationScorer:
         if identity_present and not stock_overlap and not company_overlap:
             score = min(score, 49.0)
 
+        # Litigation needs a concrete legal-subject guard. '전환사채발행금지 가처분' and
+        # '신주발행금지 가처분' are separate disputes even when the same company and day match.
+        if current.event_type == "LITIGATION" and candidate.event_type == "LITIGATION":
+            if litigation_subject_conflict(current.event_title, candidate.event_title):
+                score = min(score, 49.0)
+                reasons.append("litigation_subject_conflict")
+            elif same_litigation_subject(current.event_title, candidate.event_title):
+                score += 15
+                reasons.append("litigation_subject_match")
+
         # Same company + event type is insufficient. Require a shared event-specific anchor,
         # a shared meaningful number, or a very strong stage-linked title continuation.
         if stock_overlap or company_overlap:
             no_anchor = not (set(current_info) & set(candidate_info))
             stage_link = current.event_stage != candidate.event_stage and title_ratio >= 0.65
-            if no_anchor and not number_overlap and not stage_link:
+            litigation_link = (
+                current.event_type == "LITIGATION"
+                and candidate.event_type == "LITIGATION"
+                and same_litigation_subject(current.event_title, candidate.event_title)
+            )
+            if no_anchor and not number_overlap and not stage_link and not litigation_link:
                 score = min(score, 62.0)
                 reasons.append("event_anchor_guard")
-            elif title_ratio < 0.35 and token_overlap < 0.25:
+            elif title_ratio < 0.35 and token_overlap < 0.25 and not litigation_link:
                 score = min(score, 62.0)
                 reasons.append("weak_title_guard")
 
