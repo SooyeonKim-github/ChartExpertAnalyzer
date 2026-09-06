@@ -87,6 +87,14 @@ class HistoricalMaterialPipeline:
             rebuild=True,
         )
 
+    def _derived_tables_available(self) -> bool:
+        database = Database(self.db_path)
+        with database.connect() as conn:
+            row = conn.execute(
+                "SELECT 1 FROM sqlite_master WHERE type='table' AND name='material_ticker_links' LIMIT 1"
+            ).fetchone()
+        return row is not None
+
     def run(self, *, collect: bool = True, reprocess_derived: bool = True) -> HistoricalPipelineResult:
         run_id = self.state.begin_run(self.config)
         failed_chunks = 0
@@ -104,15 +112,23 @@ class HistoricalMaterialPipeline:
             if reprocess_derived:
                 self._derived()
 
-            reporter = HistoricalMaterialReporter(
-                self.db_path,
-                self.config.requested_start,
-                self.config.requested_end,
-            )
-            history_csv, backtest_csv, history_rows, backtest_rows = reporter.export(
-                self.history_dir / "material_history.csv",
-                self.history_dir / "material_history_backtest.csv",
-            )
+            history_csv = self.history_dir / "material_history.csv"
+            backtest_csv = self.history_dir / "material_history_backtest.csv"
+            history_rows = 0
+            backtest_rows = 0
+            if reprocess_derived or self._derived_tables_available():
+                reporter = HistoricalMaterialReporter(
+                    self.db_path,
+                    self.config.requested_start,
+                    self.config.requested_end,
+                )
+                history_csv, backtest_csv, history_rows, backtest_rows = reporter.export(
+                    history_csv,
+                    backtest_csv,
+                )
+            else:
+                print("[INFO] collect-only mode: final history/backtest CSV export deferred until --derive-only")
+
             coverage_csv = self.state.export_coverage(self.history_dir / "historical_source_coverage.csv")
             status = "PARTIAL" if failed_chunks else "COMPLETE"
             self.state.finish_run(run_id, status)
