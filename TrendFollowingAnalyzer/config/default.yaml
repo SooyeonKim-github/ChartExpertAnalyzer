@@ -36,6 +36,9 @@ market_regime:
     short_window: 5
     long_window: 20
     min_coverage_ratio: 0.60
+    # KRX all-ticker snapshot이 반복 실패하면 MarketData 공통 fallback으로 전환.
+    snapshot_fail_fast: 2
+    allow_current_universe_fallback: true
 
   intraday_strength:
     mode: BACKTEST_ONLY
