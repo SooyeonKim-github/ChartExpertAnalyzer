@@ -43,14 +43,19 @@ selection:
   reject_if_below_long_ma: false
   require_market_uptrend_for_pyramiding: true
 
-# KJB CONFIRMED V1
-# 2026-01-01~2026-08-21 range backtest의 단기(D+5/D+10) 진입 품질을 기준으로 잡은 초기 검증값.
-# 향후 별도 holdout 기간에서 재검증 후 조정한다.
+# KJB CONFIRMED V1 - D+5 short swing target.
+# Max thresholds default to 100 so existing screen behavior is preserved.
+# The D+5 walk-forward optimizer may recommend lower upper bounds to
+# reclassify overextended names as WATCH instead of CONFIRMED.
 confirmation_v1:
   selection_min: 70
+  selection_max: 100
   timing_min: 72
+  timing_max: 100
   leader_min: 70
+  leader_max: 100
   relative_strength_min: 40
+  relative_strength_max: 100
   risk_max_exclusive: 60
   reject_high_chase: true
   watch_selection_min: 62
