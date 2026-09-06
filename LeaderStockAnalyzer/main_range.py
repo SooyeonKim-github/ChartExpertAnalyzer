@@ -8,6 +8,7 @@ import pandas as pd
 from leader_stock_analyzer import load_config, screen_date
 from leader_stock_analyzer.data_provider import PyKrxLeaderDataProvider
 from leader_stock_analyzer.emerging_reporting import EmergingTransitionAnalyzerV12
+from leader_stock_analyzer.exhaustion import ExhaustionTransitionAnalyzer
 from leader_stock_analyzer.lifecycle import LeaderLifecycleEngine
 from leader_stock_analyzer.performance import ForwardPerformanceEngine, PerformanceAttributionEngine
 
@@ -37,6 +38,7 @@ def main() -> None:
     performance = ForwardPerformanceEngine(cfg)
     attribution = PerformanceAttributionEngine(cfg)
     emerging_report = EmergingTransitionAnalyzerV12(cfg)
+    exhaustion_report = ExhaustionTransitionAnalyzer(cfg)
 
     provider.prepare_range(start, end, args.top_n)
     dates = provider.get_trading_dates(start, end)
@@ -54,6 +56,10 @@ def main() -> None:
         "[INFO] Leader Lifecycle V2.4 enabled | Emerging activation=Rank Velocity x2 "
         "| hold=LeaderScore>=60 & Rank<=50 | Leader Core evidence=2 hits / 10 observations "
         "| fast-track=OFF | BROKEN requires structural price failure"
+    )
+    print(
+        "[INFO] Exhaustion Risk V1 enabled | Overextension25 + Deceleration25 + "
+        "Distribution20 + MoneyDecay15 + Structure15 | observational_only=ON"
     )
 
     max_horizon = max(performance.horizons + performance.excursion_horizons)
@@ -109,6 +115,8 @@ def main() -> None:
     lifecycle_path = out_dir / "lifecycle_transitions.csv"
     emerging_events_path = out_dir / "emerging_events.csv"
     emerging_summary_path = out_dir / "emerging_summary.csv"
+    exhaustion_events_path = out_dir / "exhaustion_events.csv"
+    exhaustion_summary_path = out_dir / "exhaustion_summary.csv"
 
     df.to_csv(all_path, index=False, encoding="utf-8-sig")
     if not df.empty:
@@ -128,6 +136,11 @@ def main() -> None:
     emerging_events.to_csv(emerging_events_path, index=False, encoding="utf-8-sig")
     emerging_summary.to_csv(emerging_summary_path, index=False, encoding="utf-8-sig")
 
+    exhaustion_events = exhaustion_report.events(df)
+    exhaustion_summary = exhaustion_report.summary(exhaustion_events)
+    exhaustion_events.to_csv(exhaustion_events_path, index=False, encoding="utf-8-sig")
+    exhaustion_summary.to_csv(exhaustion_summary_path, index=False, encoding="utf-8-sig")
+
     perf_dir = out_dir / "performance"
     report_paths = attribution.write_reports(df, perf_dir)
 
@@ -136,6 +149,8 @@ def main() -> None:
     print(f"[DONE] {lifecycle_path}")
     print(f"[DONE] {emerging_events_path}")
     print(f"[DONE] {emerging_summary_path}")
+    print(f"[DONE] {exhaustion_events_path}")
+    print(f"[DONE] {exhaustion_summary_path}")
     print(f"[DONE] performance reports -> {perf_dir}")
     for name, path in report_paths.items():
         print(f"       {name}: {path.name}")
@@ -167,6 +182,26 @@ def main() -> None:
                     f"  {cohort:<26} count={count:<4} "
                     f"leader10={leader10} reversion5={reversion5} "
                     f"priceFail20={price_fail20} avgD20={avg20}"
+                )
+
+    if not df.empty and "exhaustion_risk_label" in df.columns:
+        counts = df["exhaustion_risk_label"].value_counts()
+        print("\n[EXHAUSTION RISK V1]")
+        for label in ("LOW", "WATCH", "HIGH", "CRITICAL"):
+            print(f"  {label:<18} {int(counts.get(label, 0))}")
+        print(f"  {'EVENTS':<18} {len(exhaustion_events)}")
+        if not exhaustion_summary.empty:
+            print("\n[EXHAUSTION COHORT SUMMARY]")
+            for _, row in exhaustion_summary.iterrows():
+                cohort = row.get("cohort", "UNKNOWN")
+                count = int(row.get("event_count", 0))
+                exhausting5 = row.get("exhausting_within_5d_rate", "-")
+                broken10 = row.get("broken_within_10d_rate", "-")
+                avg20 = row.get("avg_D+20", "-")
+                mae20 = row.get("avg_MAE_D20", "-")
+                print(
+                    f"  {cohort:<12} count={count:<4} exhausting5={exhausting5} "
+                    f"broken10={broken10} avgD20={avg20} avgMAE20={mae20}"
                 )
 
     if not df.empty and "lifecycle_state" in df.columns:
