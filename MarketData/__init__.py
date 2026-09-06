@@ -5,7 +5,7 @@ directly. Provider failures, cache policy, market indexes and universe construct
 are centralized here so all analyzers see the same data semantics.
 """
 
-from .liquidity import build_liquidity_universe
+from .liquidity import build_liquidity_universe, build_market_close_history
 from .naver_index import fetch_naver_index_ohlcv
 from .service import (
     MarketDataService,
@@ -39,4 +39,5 @@ __all__ = [
     "normalize_ticker",
     "read_universe_excel",
     "build_liquidity_universe",
+    "build_market_close_history",
 ]
