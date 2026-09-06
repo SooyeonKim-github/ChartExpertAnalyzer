@@ -119,6 +119,14 @@ def main():
                 "SELECT event_id, ticker, relation_type, relation_weight, ticker_material_score "
                 "FROM material_ticker_links ORDER BY event_id, ticker"
             ).fetchall()
+            state = conn.execute(
+                "SELECT t.event_updated_at, t.score_updated_at, e.updated_at AS event_source_updated_at, "
+                "s.updated_at AS score_source_updated_at "
+                "FROM ticker_link_states t "
+                "JOIN material_events e ON e.event_id=t.event_id "
+                "JOIN material_scores s ON s.event_id=t.event_id "
+                "WHERE t.event_id='E1'"
+            ).fetchone()
         finally:
             conn.close()
 
@@ -136,6 +144,12 @@ def main():
         assert "E6" not in by_event
         assert "E7" not in by_event
 
+        assert state is not None
+        assert state["event_updated_at"] == state["event_source_updated_at"]
+        assert state["score_updated_at"] == state["score_source_updated_at"]
+        assert state["event_updated_at"] is not None
+        assert state["score_updated_at"] is not None
+
         repeat = TickerLinker(repo, ref).run()
         assert repeat.processed == 0
 
@@ -151,6 +165,7 @@ def main():
     print("     evidence-backed relationship -> SUPPLIER")
     print("     unknown company -> UNRESOLVED")
     print("     REJECT policy -> no theme expansion")
+    print("     incremental state timestamps -> stable")
     print("     incremental repeat -> processed=0")
     print("     fuzzy company match / embeddings / LLM -> DISABLED")
 
