@@ -1,4 +1,4 @@
-# Leader Lifecycle V2.1
+# Leader Lifecycle V2.2
 
 `LeaderLifecycleEngine` tracks how a stock's leadership evolves across scan dates while remaining independent from the existing Leader Score confirmation rules.
 
@@ -36,7 +36,7 @@ demotion_confirm_days  = 2
 recovery_confirm_days  = 2
 ```
 
-## V2.1 Emerging Leader integration
+## V2.2 Emerging Leader integration
 
 When `EmergingLeaderEngine` data is available, `DISCOVERY -> EMERGING` is no longer driven by current Leader Score/rank alone.
 
@@ -44,18 +44,27 @@ Normal promotion requires:
 
 - lifecycle Leader Score/rank activation conditions
 - `true_emerging_flag = true`
-- configured promotion confirmation
+- two-session promotion confirmation by default
 
-`true_emerging_flag` comes from the independent Emerging Leader Score:
+`true_emerging_flag` comes from Emerging Leader V1.1, which uses:
 
 ```text
 Rank Velocity               50
 Trading-value Acceleration  25
 Relative-strength Accel.    15
 Freshness                   10
+- Overheat Penalty
 ```
 
-A `STRONG_EMERGING` stock can fast-track `DISCOVERY -> EMERGING` when it also satisfies the strong current-rank and 5-day Rank Velocity requirements.
+Late momentum spikes are labeled `MOMENTUM_SPIKE` and cannot activate `true_emerging_flag`.
+
+Default behavior also disables one-observation fast-track:
+
+```text
+allow_strong_emerging_fast_track = false
+```
+
+So even a high-quality `STRONG_EMERGING` candidate normally needs repeated confirmation. Fast-track remains available only as an explicit experiment setting.
 
 Once a stock has entered `EMERGING`, Rank Velocity is allowed to cool. Promotion to `LEADER` is based on established Leader Score/rank/persistence evidence. This avoids penalizing a successful emerging leader simply because its rank has already reached the top of the market.
 
@@ -82,7 +91,8 @@ emerging_events.csv
 emerging_summary.csv
 ```
 
-`emerging_events.csv` is deduplicated to lifecycle episode starts so the same multi-day EMERGING episode is not counted repeatedly.
+`emerging_events.csv` contains only lifecycle episode starts and labels each event cohort.
+`emerging_summary.csv` separates `INITIAL_INFERENCE` from `RANK_VELOCITY_CONFIRMED` so Rank Velocity performance can be measured without mixing in mature initial-state inference.
 
 ## Decision-rule isolation
 
