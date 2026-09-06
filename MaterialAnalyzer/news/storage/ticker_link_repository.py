@@ -97,8 +97,12 @@ class TickerLinkRepository:
             conn.close()
 
     def get_pending_events(self, *, link_version: str, limit: int | None = None):
+        # Keep the source timestamps under explicit aliases.  e.* exposes the column as
+        # "updated_at", while LinkInput deliberately consumes "event_updated_at".
+        # Without the alias the saved state becomes NULL and every repeat run looks stale.
         sql = (
-            "SELECT e.*, s.material_score, s.material_status, s.updated_at AS score_updated_at, "
+            "SELECT e.*, e.updated_at AS event_updated_at, "
+            "s.material_score, s.material_status, s.updated_at AS score_updated_at, "
             "n.novelty_status, a.source_grade, a.source_type "
             "FROM material_scores s "
             "JOIN material_events e ON e.event_id = s.event_id "
