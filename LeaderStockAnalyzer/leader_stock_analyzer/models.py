@@ -149,7 +149,7 @@ class LeaderResult:
     true_emerging_flag: bool = False
     strong_emerging_flag: bool = False
 
-    # Exhaustion Risk V1. Observational only until range backtests validate it.
+    # Exhaustion Risk V1.1. Observational only until range backtests validate it.
     exhaustion_risk_available: bool = False
     exhaustion_risk_score: float | None = None
     exhaustion_risk_label: str = "UNKNOWN"
@@ -169,10 +169,23 @@ class LeaderResult:
     exhaustion_distance_ma10_pct: float | None = None
     exhaustion_distance_ma20_pct: float | None = None
     atr_extension: float | None = None
+    exhaustion_ma10_slope_5d_pct: float | None = None
     exhaustion_ma20_slope_5d_pct: float | None = None
     exhaustion_drawdown_20d_pct: float | None = None
     exhaustion_below_ma10: bool = False
     exhaustion_below_ma20: bool = False
+    exhaustion_momentum_3d: float | None = None
+    exhaustion_momentum_peak_10d: float | None = None
+    exhaustion_momentum_drop_from_peak: float | None = None
+    exhaustion_leader_score_peak_5obs: float | None = None
+    exhaustion_leader_score_decay: float | None = None
+    exhaustion_rs_current: float | None = None
+    exhaustion_rs_peak_5obs: float | None = None
+    exhaustion_rs_decay_from_peak: float | None = None
+    exhaustion_persistence_peak_5obs: float | None = None
+    exhaustion_persistence_decay_from_peak: float | None = None
+    exhaustion_distance_ma10_decay_5d: float | None = None
+    exhaustion_distance_ma20_decay_5d: float | None = None
 
     # Leader Lifecycle V2. Lifecycle is observational and does not yet modify
     # Leader Score or confirmation status.
