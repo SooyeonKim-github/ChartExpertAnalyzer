@@ -8,7 +8,7 @@ import pandas as pd
 from leader_stock_analyzer import load_config, screen_date
 from leader_stock_analyzer.data_provider import PyKrxLeaderDataProvider
 from leader_stock_analyzer.emerging_reporting import EmergingTransitionAnalyzerV12
-from leader_stock_analyzer.exhaustion import ExhaustionTransitionAnalyzer
+from leader_stock_analyzer.exhaustion import ExhaustionRiskEngine, ExhaustionTransitionAnalyzer
 from leader_stock_analyzer.lifecycle import LeaderLifecycleEngine
 from leader_stock_analyzer.performance import ForwardPerformanceEngine, PerformanceAttributionEngine
 
@@ -35,6 +35,7 @@ def main() -> None:
     cfg = load_config(base_dir / args.config)
     provider = PyKrxLeaderDataProvider(cfg, base_dir)
     lifecycle = LeaderLifecycleEngine(cfg)
+    exhaustion_engine = ExhaustionRiskEngine(cfg)
     performance = ForwardPerformanceEngine(cfg)
     attribution = PerformanceAttributionEngine(cfg)
     emerging_report = EmergingTransitionAnalyzerV12(cfg)
@@ -58,8 +59,9 @@ def main() -> None:
         "| fast-track=OFF | BROKEN requires structural price failure"
     )
     print(
-        "[INFO] Exhaustion Risk V1 enabled | Overextension25 + Deceleration25 + "
-        "Distribution20 + MoneyDecay15 + Structure15 | observational_only=ON"
+        "[INFO] Exhaustion Risk V1.1 enabled | Overextension5 + MomentumRollover30 + "
+        "Distribution25 + MoneyDecay20 + StructureDeterioration20 "
+        "| peak-to-current=ON | observational_only=ON"
     )
 
     max_horizon = max(performance.horizons + performance.excursion_horizons)
@@ -78,6 +80,7 @@ def main() -> None:
             progress=False,
             provider=provider,
             lifecycle_engine=lifecycle,
+            exhaustion_engine=exhaustion_engine,
         )
         for r in results:
             rec = r.to_dict()
@@ -117,6 +120,7 @@ def main() -> None:
     emerging_summary_path = out_dir / "emerging_summary.csv"
     exhaustion_events_path = out_dir / "exhaustion_events.csv"
     exhaustion_summary_path = out_dir / "exhaustion_summary.csv"
+    exhaustion_score_report_path = out_dir / "exhaustion_score_report.csv"
 
     df.to_csv(all_path, index=False, encoding="utf-8-sig")
     if not df.empty:
@@ -138,8 +142,14 @@ def main() -> None:
 
     exhaustion_events = exhaustion_report.events(df)
     exhaustion_summary = exhaustion_report.summary(exhaustion_events)
+    exhaustion_score_report = exhaustion_report.score_report(df)
     exhaustion_events.to_csv(exhaustion_events_path, index=False, encoding="utf-8-sig")
     exhaustion_summary.to_csv(exhaustion_summary_path, index=False, encoding="utf-8-sig")
+    exhaustion_score_report.to_csv(
+        exhaustion_score_report_path,
+        index=False,
+        encoding="utf-8-sig",
+    )
 
     perf_dir = out_dir / "performance"
     report_paths = attribution.write_reports(df, perf_dir)
@@ -151,6 +161,7 @@ def main() -> None:
     print(f"[DONE] {emerging_summary_path}")
     print(f"[DONE] {exhaustion_events_path}")
     print(f"[DONE] {exhaustion_summary_path}")
+    print(f"[DONE] {exhaustion_score_report_path}")
     print(f"[DONE] performance reports -> {perf_dir}")
     for name, path in report_paths.items():
         print(f"       {name}: {path.name}")
@@ -186,12 +197,24 @@ def main() -> None:
 
     if not df.empty and "exhaustion_risk_label" in df.columns:
         counts = df["exhaustion_risk_label"].value_counts()
-        print("\n[EXHAUSTION RISK V1]")
+        print("\n[EXHAUSTION RISK V1.1]")
         for label in ("LOW", "WATCH", "HIGH", "CRITICAL"):
             print(f"  {label:<18} {int(counts.get(label, 0))}")
         print(f"  {'EVENTS':<18} {len(exhaustion_events)}")
+        if not exhaustion_score_report.empty:
+            print("\n[ESTABLISHED LEADER EXHAUSTION SCORE REPORT]")
+            for _, row in exhaustion_score_report.iterrows():
+                label = row.get("label", "UNKNOWN")
+                count = int(row.get("count", 0))
+                score = row.get("avg_exhaustion_score", "-")
+                avg20 = row.get("avg_D+20", "-")
+                mae20 = row.get("avg_MAE_D20", "-")
+                print(
+                    f"  {label:<10} count={count:<4} score={score} "
+                    f"avgD20={avg20} avgMAE20={mae20}"
+                )
         if not exhaustion_summary.empty:
-            print("\n[EXHAUSTION COHORT SUMMARY]")
+            print("\n[EXHAUSTION EVENT SUMMARY]")
             for _, row in exhaustion_summary.iterrows():
                 cohort = row.get("cohort", "UNKNOWN")
                 count = int(row.get("event_count", 0))
