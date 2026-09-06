@@ -101,10 +101,11 @@ class NoveltyRepository:
                 "INSERT INTO event_novelty("
                 "event_id, family_id, parent_event_id, novelty_status, novelty_score, relation_score, "
                 "days_since_parent, stage_changed, stage_progressed, number_changed, company_changed, "
-                "polarity_changed, source_reliability_increased, confirmation_source_added, "
-                "new_information_count, previous_stage, current_stage, previous_numbers_json, "
-                "current_numbers_json, novelty_reason, analysis_version, event_updated_at"
-                ") VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) "
+                "polarity_changed, litigation_procedure_changed, litigation_procedure_progressed, "
+                "source_reliability_increased, confirmation_source_added, new_information_count, "
+                "previous_stage, current_stage, previous_numbers_json, current_numbers_json, "
+                "novelty_reason, analysis_version, event_updated_at"
+                ") VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) "
                 "ON CONFLICT(event_id) DO UPDATE SET "
                 "family_id=excluded.family_id, parent_event_id=excluded.parent_event_id, "
                 "novelty_status=excluded.novelty_status, novelty_score=excluded.novelty_score, "
@@ -112,6 +113,8 @@ class NoveltyRepository:
                 "stage_changed=excluded.stage_changed, stage_progressed=excluded.stage_progressed, "
                 "number_changed=excluded.number_changed, company_changed=excluded.company_changed, "
                 "polarity_changed=excluded.polarity_changed, "
+                "litigation_procedure_changed=excluded.litigation_procedure_changed, "
+                "litigation_procedure_progressed=excluded.litigation_procedure_progressed, "
                 "source_reliability_increased=excluded.source_reliability_increased, "
                 "confirmation_source_added=excluded.confirmation_source_added, "
                 "new_information_count=excluded.new_information_count, previous_stage=excluded.previous_stage, "
@@ -132,6 +135,8 @@ class NoveltyRepository:
                     int(record.number_changed),
                     int(record.company_changed),
                     int(record.polarity_changed),
+                    int(record.litigation_procedure_changed),
+                    int(record.litigation_procedure_progressed),
                     int(record.source_reliability_increased),
                     int(record.confirmation_source_added),
                     int(record.new_information_count),
@@ -248,6 +253,7 @@ class NoveltyRepository:
             "market_date", "event_type", "event_stage", "positive_negative", "novelty_status",
             "novelty_score", "relation_score", "days_since_parent", "stage_changed",
             "stage_progressed", "number_changed", "company_changed", "polarity_changed",
+            "litigation_procedure_changed", "litigation_procedure_progressed",
             "source_reliability_increased", "confirmation_source_added", "new_information_count",
             "previous_stage", "current_stage", "previous_numbers", "current_numbers",
             "companies", "stock_codes", "numbers", "original_source_id", "original_source_name",
@@ -277,6 +283,8 @@ class NoveltyRepository:
                     "number_changed": row["number_changed"],
                     "company_changed": row["company_changed"],
                     "polarity_changed": row["polarity_changed"],
+                    "litigation_procedure_changed": row["litigation_procedure_changed"],
+                    "litigation_procedure_progressed": row["litigation_procedure_progressed"],
                     "source_reliability_increased": row["source_reliability_increased"],
                     "confirmation_source_added": row["confirmation_source_added"],
                     "new_information_count": row["new_information_count"],
