@@ -23,7 +23,7 @@ ROUTINE_GOVERNANCE_RE = re.compile(
 
 
 class MaterialScorer:
-    VERSION = "RULE_MATERIAL_SCORE_V1_1"
+    VERSION = "RULE_MATERIAL_SCORE_V1_2"
 
     def __init__(self, repository):
         self.repository = repository
@@ -85,6 +85,7 @@ class MaterialScorer:
             limit=limit,
         )
         result = MaterialScoreRunResult()
+        total = len(rows)
 
         for row in rows:
             result.processed += 1
@@ -95,6 +96,11 @@ class MaterialScorer:
                 result.inserted += 1
             else:
                 result.updated += 1
+            if result.processed % 5000 == 0 or result.processed == total:
+                print(
+                    f"  [score progress] processed={result.processed:,}/{total:,} "
+                    f"inserted={result.inserted:,} updated={result.updated:,}"
+                )
 
         result.total_scores = self.repository.score_count()
         counts = self.repository.status_counts()
