@@ -21,10 +21,11 @@ def run(db_path=DEFAULT_DB, reference_dir=DEFAULT_REFERENCE, output_path=DEFAULT
     linker = TickerLinker(repository, reference_dir)
 
     print("=" * 76)
-    print(" TickerLinker V1 - Direct / Exact Company / Evidence / Theme")
+    print(" TickerLinker V1.1 - Precision Theme Materiality / Exact Company")
     print("=" * 76)
     print(f"DB         : {db_path}")
     print(f"Reference  : {reference_dir}")
+    print(f"Ref Sig    : {linker.reference_signature}")
     print(f"Report     : {output_path}")
     print(f"Unresolved : {unresolved_path}")
     print(f"Mode       : {'REBUILD' if rebuild else 'INCREMENTAL'}")
@@ -51,7 +52,7 @@ def run(db_path=DEFAULT_DB, reference_dir=DEFAULT_REFERENCE, output_path=DEFAULT
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Deterministic TickerLinker V1")
+    parser = argparse.ArgumentParser(description="Deterministic TickerLinker V1.1")
     parser.add_argument("--db", default=str(DEFAULT_DB))
     parser.add_argument("--reference", default=str(DEFAULT_REFERENCE))
     parser.add_argument("--output", default=str(DEFAULT_REPORT))
