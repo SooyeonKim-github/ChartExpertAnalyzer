@@ -226,6 +226,52 @@ def main():
                 company="에이사",
                 ticker="000001",
             )
+
+            # Litigation V1.1 regression: different legal subject => separate NEW_EVENT.
+            _insert_event(
+                conn,
+                event_id="EV10",
+                market_date="20260909",
+                source_id="DART",
+                source_grade="S",
+                article_class="DISCLOSURE",
+                title="코퍼스코리아 전환사채발행금지 가처분 신청",
+                event_type="LITIGATION",
+                stage="CONFIRMED",
+                company="코퍼스코리아",
+                ticker="322780",
+                polarity="NEGATIVE",
+            )
+            _insert_event(
+                conn,
+                event_id="EV11",
+                market_date="20260910",
+                source_id="DART",
+                source_grade="S",
+                article_class="DISCLOSURE",
+                title="코퍼스코리아 신주발행금지 가처분-항고",
+                event_type="LITIGATION",
+                stage="CONFIRMED",
+                company="코퍼스코리아",
+                ticker="322780",
+                polarity="NEGATIVE",
+            )
+
+            # Same legal subject with procedure progression => FOLLOW_UP, not REHASH.
+            _insert_event(
+                conn,
+                event_id="EV12",
+                market_date="20260911",
+                source_id="DART",
+                source_grade="S",
+                article_class="DISCLOSURE",
+                title="코퍼스코리아 전환사채발행금지 가처분 항고",
+                event_type="LITIGATION",
+                stage="CONFIRMED",
+                company="코퍼스코리아",
+                ticker="322780",
+                polarity="NEGATIVE",
+            )
             conn.commit()
         finally:
             conn.close()
@@ -233,20 +279,21 @@ def main():
         repository = NoveltyRepository(database)
         result = NoveltyAnalyzer(repository).run()
 
-        assert result.processed == 9
-        assert result.total_novelty == 9
-        assert result.new_event == 4
+        assert result.processed == 12
+        assert result.total_novelty == 12
+        assert result.new_event == 6
         assert result.confirmation == 1
         assert result.rehash == 1
-        assert result.follow_up == 2
+        assert result.follow_up == 3
         assert result.market_reaction == 1
-        assert result.total_families == 4
+        assert result.total_families == 6
 
         conn = database.connect()
         try:
             rows = conn.execute(
                 "SELECT event_id, family_id, parent_event_id, novelty_status, number_changed, "
-                "stage_progressed FROM event_novelty ORDER BY event_id"
+                "stage_progressed, litigation_procedure_changed, litigation_procedure_progressed "
+                "FROM event_novelty ORDER BY event_id"
             ).fetchall()
         finally:
             conn.close()
@@ -263,18 +310,26 @@ def main():
         assert by_id["EV8"]["novelty_status"] == "MARKET_REACTION"
         assert by_id["EV9"]["novelty_status"] == "NEW_EVENT"
 
+        assert by_id["EV10"]["novelty_status"] == "NEW_EVENT"
+        assert by_id["EV11"]["novelty_status"] == "NEW_EVENT"
+        assert by_id["EV10"]["family_id"] != by_id["EV11"]["family_id"]
+        assert by_id["EV12"]["novelty_status"] == "FOLLOW_UP"
+        assert by_id["EV12"]["family_id"] == by_id["EV10"]["family_id"]
+        assert int(by_id["EV12"]["litigation_procedure_changed"]) == 1
+        assert int(by_id["EV12"]["litigation_procedure_progressed"]) == 1
+
         assert by_id["EV1"]["family_id"] == by_id["EV2"]["family_id"]
         assert by_id["EV1"]["family_id"] == by_id["EV4"]["family_id"]
         assert by_id["EV1"]["family_id"] != by_id["EV9"]["family_id"]
 
         repeat = NoveltyAnalyzer(repository).run()
         assert repeat.processed == 0
-        assert repeat.total_novelty == 9
+        assert repeat.total_novelty == 12
 
         report = repository.export_report(Path(td) / "novelty_report.csv")
         assert report.exists()
 
-    print("[OK] NoveltyAnalyzer V1 smoke test")
+    print("[OK] NoveltyAnalyzer V1.1 smoke test")
     print("     first material -> NEW_EVENT")
     print("     same event upgraded to DART -> CONFIRMATION")
     print("     same content without delta -> REHASH")
@@ -283,6 +338,8 @@ def main():
     print("     market reaction -> MARKET_REACTION")
     print("     different company -> separate NEW_EVENT")
     print("     same company, different contract anchor -> separate NEW_EVENT")
+    print("     litigation different subject -> separate NEW_EVENT")
+    print("     litigation same subject + appeal -> FOLLOW_UP")
     print("     incremental repeat -> processed=0")
     print("     novelty_report.csv -> OK")
     print("     embeddings / semantic similarity -> DISABLED")
