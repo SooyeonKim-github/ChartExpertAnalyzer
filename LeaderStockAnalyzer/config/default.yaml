@@ -1,5 +1,6 @@
 universe:
   top_n: 100
+  candidate_multiplier: 3
   min_price: 500
   exclude_spac: true
   market_cap_enabled: false
