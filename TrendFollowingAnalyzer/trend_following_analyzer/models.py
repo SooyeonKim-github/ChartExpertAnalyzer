@@ -94,9 +94,33 @@ class StageScreenResult:
     rs_experimental_60d_outperform_pass: bool
     rs_experimental_percentile_pass: bool
     rs_filter_applied: bool
+    base_status: str
+    base_measurement: str
+    base_start_date: str | None
+    base_end_date: str | None
+    base_duration_sessions: int | None
+    base_high_date: str | None
+    base_high: float | None
+    base_low_date: str | None
+    base_low: float | None
+    base_depth_pct: float | None
+    base_current_vs_high_pct: float | None
+    base_atr_early_pct: float | None
+    base_atr_late_pct: float | None
+    base_atr_contraction_ratio: float | None
+    base_range_early_pct: float | None
+    base_range_late_pct: float | None
+    base_range_contraction_ratio: float | None
+    base_close_dispersion_pct: float | None
+    base_experimental_quality_score: float | None
+    base_experimental_depth_pass: bool
+    base_experimental_end_near_high_pass: bool
+    base_experimental_resistance_pass: bool
+    base_filter_applied: bool
     prior_advance_status: str
     prior_advance_measurement: str
     prior_advance_anchor_mode: str
+    prior_advance_anchor_is_base: bool
     prior_advance_lookback_sessions: int
     prior_advance_recent_window_sessions: int
     prior_advance_low_date: str | None
@@ -106,8 +130,12 @@ class StageScreenResult:
     prior_advance_pct: float | None
     prior_advance_duration_sessions: int | None
     prior_advance_sessions_from_peak_to_anchor: int | None
+    prior_advance_peak_to_base_sessions: int | None
     prior_advance_current_vs_peak_pct: float | None
     prior_advance_peak_vs_ma150_pct: float | None
+    prior_advance_drawdown_to_base_low_pct: float | None
+    prior_advance_retention_ratio: float | None
+    prior_advance_current_retention_ratio: float | None
     prior_return_60d_pct: float | None
     prior_return_120d_pct: float | None
     prior_advance_experimental_min_pass: bool

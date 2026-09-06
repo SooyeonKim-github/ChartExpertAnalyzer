@@ -60,5 +60,15 @@ prior_advance:
   recent_window_sessions: 20
   experimental_min_advance_pct: 30.0
 
+base:
+  mode: BACKTEST_ONLY
+  enabled: true
+  min_base_sessions: 15
+  max_base_sessions: 60
+  experimental_max_depth_pct: 35.0
+  experimental_max_end_drawdown_pct: 12.0
+  experimental_resistance_tolerance_pct: 3.0
+  experimental_loose_ratio: 1.25
+
 output:
   encoding: utf-8-sig
