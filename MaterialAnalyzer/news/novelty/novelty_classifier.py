@@ -43,6 +43,12 @@ class NoveltyClassifier:
         if delta.polarity_changed:
             score += 15
             follow_up_reasons.append("polarity_changed")
+        if delta.litigation_procedure_changed:
+            score += 10
+            follow_up_reasons.append("litigation_procedure_changed")
+        if delta.litigation_procedure_progressed:
+            score += 5
+            follow_up_reasons.append("litigation_procedure_progressed")
 
         if follow_up_reasons:
             return NoveltyDecision(
