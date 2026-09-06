@@ -3,11 +3,15 @@ setlocal
 cd /d "%~dp0\..\.."
 
 echo ============================================================================
-echo MaterialAnalyzer - TickerLinker V1
-echo Direct / Exact Company / Evidence / Theme Linking
+echo MaterialAnalyzer - TickerLinker V1.1
+echo Direct / Exact Company / Evidence / Material Theme Linking
 echo ============================================================================
 echo.
-echo [1/2] TickerLinker smoke test
+echo [0/3] Refresh KOSPI/KOSDAQ ticker master if stale
+python -m MaterialAnalyzer.news.build_ticker_master --if-stale-days 7 --best-effort
+
+echo.
+echo [1/3] TickerLinker smoke test
 python -m MaterialAnalyzer.news.ticker_linker_smoke_test
 if errorlevel 1 (
   echo.
@@ -17,7 +21,7 @@ if errorlevel 1 (
 )
 
 echo.
-echo [2/2] Incremental ticker linking
+echo [2/3] Incremental ticker linking
 python -m MaterialAnalyzer.news.run_ticker_linker %*
 set RC=%ERRORLEVEL%
 
