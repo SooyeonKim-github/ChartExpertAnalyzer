@@ -15,12 +15,14 @@ NoveltyAnalyzer V1.1
         ↓
 MaterialScorer V1.1
         ↓
-TickerLinker V1.1
+TickerLinker V1.2
         ↓
-MaterialBacktester  ← next
+HistoricalMaterialRangeCollector  ← next
+        ↓
+MaterialBacktester
 ```
 
-Semantic similarity, embeddings, fuzzy company matching, and LLM inference are intentionally disabled in the current deterministic stages.
+Semantic similarity, embeddings, fuzzy company matching, and LLM inference are intentionally disabled in the deterministic linking stages.
 
 ## Main execution order
 
@@ -37,15 +39,9 @@ Each stage is incremental unless `--rebuild` is explicitly used.
 
 ## MaterialScorer V1.1
 
-```bat
-MaterialAnalyzer\news\run_material_scorer.bat
-```
-
 Output: `MaterialAnalyzer\data\material_score_report.csv`
 
-100-point components are Direct Company / Specificity 25, Event Certainty 20, Financial Impact 15, Quantification 15, Novelty 10, Source Reliability 10, and Multi-source Confirmation 5.
-
-Status:
+100-point components: Direct Company / Specificity 25, Event Certainty 20, Financial Impact 15, Quantification 15, Novelty 10, Source Reliability 10, Multi-source Confirmation 5.
 
 ```text
 85-100  STRONG
@@ -54,9 +50,9 @@ Status:
 0-54    REJECT
 ```
 
-V1.1 caps the financial-impact component for routine governance housekeeping such as ordinary shareholder-record dates and ordinary shareholder-meeting notices/results.
+Routine governance housekeeping has capped financial impact so ordinary shareholder-record dates and ordinary shareholder-meeting notices/results do not become strong catalysts simply because they are official disclosures.
 
-## TickerLinker V1.1
+## TickerLinker V1.2
 
 ```bat
 MaterialAnalyzer\news\run_ticker_linker.bat
@@ -69,31 +65,31 @@ MaterialAnalyzer\data\ticker_link_report.csv
 MaterialAnalyzer\data\ticker_link_unresolved.csv
 ```
 
-Storage:
+### Robust ticker master
+
+Before linking, the generated KOSPI/KOSDAQ master is refreshed best-effort when the last successful refresh is older than 7 days.
+
+Provider order:
 
 ```text
-material_ticker_links
-ticker_link_states
+1. MarketData.service shared pykrx transport
+   - reuses the repository's KRX session/header fixes
+2. FinanceDataReader StockListing("KRX")
+3. direct pykrx
+4. existing ticker_master_krx.csv if every live provider fails
+5. tracked ticker_master.csv + proven EventExtractor bootstrap pairs always remain available
 ```
 
-### KRX ticker master
-
-Before linking, `run_ticker_linker.bat` performs a best-effort refresh of the generated KOSPI/KOSDAQ master when the last successful refresh is older than 7 days. The builder uses `pykrx`. If KRX or pykrx is unavailable, the existing generated master is kept and linking continues.
-
-Manual refresh:
-
-```bat
-MaterialAnalyzer\news\run_build_ticker_master.bat
-```
-
-Reference data is split intentionally:
+Reference split:
 
 ```text
 ticker_master.csv       = tracked manual seed / aliases
-ticker_master_krx.csv   = generated KRX full list, gitignored
+ticker_master_krx.csv   = generated full KRX list, gitignored
 ```
 
-TickerLinker merges both at runtime and then adds proven one-company/one-ticker pairs from historical EventExtractor rows. This avoids dirtying the tracked seed file while still giving exact resolution against the full listed universe.
+Known listed companies that previously remained unresolved are also seeded manually so temporary KRX outages do not block exact DIRECT resolution.
+
+`company_status_overrides.csv` explicitly marks known non-listed companies such as pre-IPO firms. Those return `NON_LISTED_COMPANY` rather than being mistaken for a missing ticker-master entry.
 
 ### Relation types
 
@@ -105,80 +101,70 @@ SECTOR    base 0.50
 THEME     base 0.35
 ```
 
-For `SECTOR` / `THEME`, V1.1 applies stock-specific mapping relevance:
+For `SECTOR` / `THEME`:
 
 ```text
 effective_relation_weight = base relation weight × mapping_relevance
 ticker_material_score     = material_score × effective_relation_weight
 ```
 
-`material_score` itself is never overwritten; it remains the importance of the event.
+### Linking safeguards
 
-### Linking order and safeguards
-
-1. EventExtractor stock code -> `DIRECT`, confidence 100.
-2. Exact normalized company/alias match -> `DIRECT`, confidence 98.
-3. Evidence-backed `company_relationships.csv` -> `SUPPLIER` / `CUSTOMER` only when evidence is present.
-4. A company-specific event never falls back to broad theme peers. If the company cannot be resolved, it remains `COMPANY_NOT_IN_MASTER` or `AMBIGUOUS_COMPANY`.
-5. Company-less policy/sector events can enter theme analysis.
-6. Theme recognition and ticker fan-out are separate decisions. `ThemeMaterialityGuard` must pass before stocks are emitted.
-7. `REJECT` events do not fan out into theme stocks.
+1. EventExtractor stock code -> `DIRECT`.
+2. Exact normalized company/alias -> `DIRECT`.
+3. Evidence-backed relationships only -> `SUPPLIER` / `CUSTOMER`.
+4. Company-specific events never fall back to broad theme peers.
+5. Company-less policy/sector events may enter theme analysis.
+6. `ThemeMaterialityGuard` must pass before ticker fan-out.
+7. REJECT events do not fan out.
 8. Indirect links are capped: total 8, SECTOR 5, THEME 3.
-9. Fuzzy company matching, embeddings, and LLM linking are disabled.
+9. Fuzzy company matching, embeddings, and LLM linking remain disabled.
 
 ### Theme Materiality Guard
 
-`event_theme_rules.csv` contains theme keywords plus `strong_keywords`, `weak_keywords`, and `min_materiality`.
+`event_theme_rules.csv` contains theme keywords, strong triggers, weak triggers, and per-theme threshold.
 
-The materiality score starts from a theme match and adds evidence for material event types, strong business triggers, meaningful quantities/money/capacity, and progressed stages. It subtracts for weak informational triggers such as meetings, forums, education, contests, ceremonies, or seminars.
+Noise such as meetings, forums, education, contests, ceremonies, and seminars is penalized. Strong business triggers include concrete investment, construction, capacity, supply, production, launch, cluster/industrial-belt activation, and other theme-specific real-economy signals.
 
-Typical behavior:
+Examples:
 
 ```text
-AI 데이터센터 5조원 대규모 투자
-→ AI theme recognized
-→ materiality >= threshold
-→ ticker fan-out allowed
-
 AI 경진대회 참가자 모집
-→ AI theme recognized
-→ weak trigger penalty
 → THEME_NOT_MATERIAL
-→ no ticker emitted
 
 IAEA 출범식 참석
-→ nuclear theme may be recognized
-→ weak event
 → no nuclear-stock fan-out
 
-해상풍력 25GW 보급 계획
-→ offshore-wind theme + strong trigger + capacity
-→ SECTOR links allowed
+반도체·첨단소재 미국기업 20억달러 투자유치
+→ strong semiconductor trigger + meaningful amount
+→ semiconductor SECTOR links
+
+배터리 삼각벨트 본격 가동
+→ strong secondary-battery industrial trigger
+→ secondary-battery SECTOR links
+
+AI 데이터센터 대규모 투자
+→ strong AI infrastructure trigger
+→ eligible theme links
 ```
 
-### Editable reference data
+### Editable references
 
 ```text
 MaterialAnalyzer\data\reference\ticker_master.csv
-MaterialAnalyzer\data\reference\ticker_master_krx.csv   # generated / ignored
+MaterialAnalyzer\data\reference\ticker_master_krx.csv
 MaterialAnalyzer\data\reference\event_theme_rules.csv
 MaterialAnalyzer\data\reference\theme_ticker_map.csv
 MaterialAnalyzer\data\reference\company_relationships.csv
+MaterialAnalyzer\data\reference\company_status_overrides.csv
 ```
 
-`company_relationships.csv` intentionally starts empty; add SUPPLIER/CUSTOMER only with concrete evidence.
-
-### Reference-aware incremental behavior
-
-V1.1 computes a SHA-256-based `reference_signature` from both ticker masters, theme rules, theme mappings, company relationships, and proven bootstrap company/ticker pairs. `ticker_link_states` stores that signature.
-
-Therefore any relevant reference edit or successful KRX-master refresh automatically makes prior events pending for relinking. No manual `--rebuild` is required. With no event/score/reference changes, a repeat run returns `processed=0`.
+Any reference edit or successful generated-master refresh changes the SHA-based `reference_signature` and automatically relinks prior events. No manual `--rebuild` is needed. An unchanged repeat should return `processed=0`.
 
 ### Unresolved reasons
 
-V1.1 exports specific reasons including:
-
 ```text
+NON_LISTED_COMPANY
 COMPANY_NOT_IN_MASTER
 AMBIGUOUS_COMPANY
 NO_COMPANY_OR_THEME
@@ -189,17 +175,6 @@ REJECT_NOT_EXPANDED
 NO_ELIGIBLE_LINK
 ```
 
-This makes the unresolved report directly actionable instead of treating every failure identically.
+## Next stage
 
-## Next stage: MaterialBacktester
-
-After reviewing the V1.1 link report, the next development step is `MaterialBacktester`.
-
-Recommended backtest unit:
-
-```text
-event_id + ticker + relation_type + effective relation weight
-+ material_score + ticker_material_score + positive_negative
-```
-
-Calculate D+1 / D+5 / D+10 / D+20 / D+40 / D+60 forward returns and compare performance by material score/status, positive vs negative, event type, novelty status, relation type, theme-materiality score, and ticker-material-score band. The goal is to replace hand-picked thresholds and relation weights with evidence from actual forward returns.
+After the V1.2 link output is validated, build `HistoricalMaterialRangeCollector` to accumulate enough historical events before implementing `MaterialBacktester`. The backtester should calculate D+1 / D+5 / D+10 / D+20 / D+40 / D+60 and compare performance by material score/status, polarity, event type, novelty, relation type, theme materiality, and ticker-material-score band. Those results can then calibrate the current thresholds and relation weights.
