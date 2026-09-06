@@ -27,12 +27,11 @@ class _LifecycleMemory:
 class LeaderLifecycleEngine:
     """Track leader-stock lifecycle with hysteresis and structural breakdown rules.
 
-    V2 principles:
-    - Leader Score collapse alone never means BROKEN.
-    - Established leaders pass through EXHAUSTING before BROKEN.
-    - Normal upward promotion advances one state at a time.
-    - Promotion/demotion requires repeated confirmation to reduce one-day noise.
-    - The first observation may infer a mature state from historical persistence.
+    V2.1 adds EmergingLeaderEngine evidence to DISCOVERY -> EMERGING:
+    - true emerging candidates require rank/money-flow/RS acceleration.
+    - STRONG_EMERGING may fast-track the normal two-day confirmation.
+    - once EMERGING, promotion to LEADER is based on established leadership,
+      so Rank Velocity is allowed to cool as the stock matures.
     """
 
     def __init__(self, cfg: dict):
@@ -96,15 +95,19 @@ class LeaderLifecycleEngine:
                 or item.leader_persistence_level in {"MEDIUM", "HIGH"}
             )
         )
+
+        legacy_emerging = bool(
+            not item.persistence_available
+            or top20_days <= int(c.get("emerging_max_top20_days_5d", 2))
+            or item.leader_persistence_level in {"MEDIUM", "HIGH"}
+        )
+        use_emerging_engine = bool(c.get("use_emerging_engine", True) and item.emerging_available)
+        emerging_feature_ok = bool(item.true_emerging_flag) if use_emerging_engine else legacy_emerging
         emerging = bool(
             item.leader_score >= float(c.get("emerging_min_leader_score", 72.0))
             and item.market_leader_rank <= int(c.get("emerging_rank_max", 20))
             and not persistent
-            and (
-                not item.persistence_available
-                or top20_days <= int(c.get("emerging_max_top20_days_5d", 2))
-                or item.leader_persistence_level in {"MEDIUM", "HIGH"}
-            )
+            and emerging_feature_ok
         )
         discovery = bool(
             item.leader_score >= float(c.get("discovery_min_leader_score", 60.0))
@@ -115,6 +118,7 @@ class LeaderLifecycleEngine:
             "leader": leader,
             "emerging": emerging,
             "discovery": discovery,
+            "emerging_engine_active": use_emerging_engine,
         }
 
     def _degradation(
@@ -150,7 +154,6 @@ class LeaderLifecycleEngine:
             ):
                 exhaustion.append("persistence_decay")
 
-        # BROKEN is structural in V2. A weak Leader Score is deliberately absent.
         broken: list[str] = []
         deep_drawdown = bool(
             drawdown is not None
@@ -247,12 +250,24 @@ class LeaderLifecycleEngine:
                 return "EXHAUSTING", ",".join(exhaustion), "", 0, 0, 0
 
         if state == "DISCOVERY":
-            if readiness["emerging"] or readiness["leader"] or readiness["persistent"]:
+            if readiness.get("emerging_engine_active", False):
+                if item.strong_emerging_flag and readiness["emerging"]:
+                    return "EMERGING", "strong_emerging_fast_track", "", 0, 0, 0
+                promotion_ready = readiness["emerging"]
+            else:
+                promotion_ready = readiness["emerging"] or readiness["leader"] or readiness["persistent"]
+
+            if promotion_ready:
                 done, promotion_target, promotion_streak = self._promotion_progress(
                     previous, "EMERGING", promotion_confirm
                 )
                 if done:
-                    return "EMERGING", "confirmed_discovery_to_emerging", "", 0, 0, 0
+                    reason = (
+                        "confirmed_rank_velocity_emerging"
+                        if readiness.get("emerging_engine_active", False)
+                        else "confirmed_discovery_to_emerging"
+                    )
+                    return "EMERGING", reason, "", 0, 0, 0
                 return (
                     "DISCOVERY",
                     f"emerging_confirmation_pending_{promotion_streak}/{promotion_confirm}",
@@ -373,8 +388,6 @@ class LeaderLifecycleEngine:
             prev_state = previous.state if previous is not None else "UNKNOWN"
             exhaustion, broken = self._degradation(item, price_ctx, prev_state)
 
-            # Recovery logic needs today's MA20 context while LeaderResult still
-            # contains the default lifecycle value at this point.
             state_item = replace(
                 item,
                 lifecycle_below_ma20=bool(price_ctx.get("below_ma20", False)),
