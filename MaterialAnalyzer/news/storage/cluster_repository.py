@@ -23,11 +23,15 @@ class ClusterRepository:
             conn.execute("DELETE FROM article_cluster_members")
             conn.execute("DELETE FROM article_clusters")
 
+    @staticmethod
+    def _analysis_eligible_sql(alias: str = "a") -> str:
+        return f"COALESCE({alias}.analysis_status, 'PENDING') NOT LIKE 'SKIP_HISTORY%'"
+
     def get_unclustered_articles(self, limit: int | None = None):
         sql = (
             "SELECT a.* FROM articles a "
             "LEFT JOIN article_cluster_members m ON m.article_id = a.article_id "
-            "WHERE m.article_id IS NULL "
+            "WHERE m.article_id IS NULL AND " + self._analysis_eligible_sql("a") + " "
             "ORDER BY COALESCE(a.first_seen_at, a.collected_at) ASC, a.article_id ASC"
         )
         params = ()
@@ -40,7 +44,8 @@ class ClusterRepository:
     def get_disclosure_articles(self):
         with self.database.connect() as conn:
             return conn.execute(
-                "SELECT * FROM articles WHERE source_id IN ('DART','KIND') "
+                "SELECT * FROM articles WHERE source_id IN ('DART','KIND') AND "
+                + self._analysis_eligible_sql("articles") + " "
                 "ORDER BY COALESCE(first_seen_at, collected_at) ASC, article_id ASC"
             ).fetchall()
 
