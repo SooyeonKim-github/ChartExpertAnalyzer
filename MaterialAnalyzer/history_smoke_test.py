@@ -5,6 +5,7 @@ from datetime import date, datetime, time, timezone
 
 from .history.chunk_planner import plan_chunks
 from .history.collectors.dart_range import DartRangeCollector
+from .history.dart_prefilter import classify_dart_analysis
 from .history.historical_market_date import HistoricalMarketDateResolver
 from .news.models import SourceEndpoint
 
@@ -61,11 +62,19 @@ def main():
     assert http.calls == 2
     assert candidates[0].metadata["historical_range"] is True
 
-    print("[OK] HistoricalMaterialRangeCollector V1 smoke test")
+    assert classify_dart_analysis("단일판매ㆍ공급계약체결", "005930") == "PENDING"
+    assert classify_dart_analysis("주주총회소집공고", "005930") == "SKIP_HISTORY_ROUTINE"
+    assert classify_dart_analysis("분기보고서", "005930") == "SKIP_HISTORY_ROUTINE"
+    assert classify_dart_analysis("단일판매ㆍ공급계약체결", "") == "SKIP_HISTORY_NONLISTED"
+
+    print("[OK] HistoricalMaterialRangeCollector V1.1 smoke test")
     print("     chunk planning -> OK")
     print("     DATE-only signal -> next trading day")
     print("     exact intraday timestamp -> same/next trading day")
     print("     DART range pagination -> 2 pages / 101 rows")
+    print("     DART strong catalyst -> analysis eligible")
+    print("     DART routine disclosure -> raw kept / derived skipped")
+    print("     DART non-listed disclosure -> raw kept / derived skipped")
     print("     live KIND historical mode -> disabled by capability map")
 
 
