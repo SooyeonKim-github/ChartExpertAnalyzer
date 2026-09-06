@@ -11,14 +11,11 @@ from .models import LeaderResult
 class EmergingLeaderEngine:
     """Score stocks that are rapidly becoming market leaders.
 
-    The score is intentionally independent from Leader Score:
+    Score composition:
       - Rank Velocity               50
       - Trading-value Acceleration  25
       - Relative-strength Accel.    15
       - Freshness                   10
-
-    This distinguishes a newly accelerating TOP10 stock from a stock that has
-    already occupied TOP10 for many sessions.
     """
 
     def __init__(self, cfg: dict):
@@ -85,7 +82,7 @@ class EmergingLeaderEngine:
         return 0.0
 
     @staticmethod
-    def _rs_component(rs_3d: float | None, rs_5d: float | None, rs_acceleration: float | None) -> float:
+    def _rs_component(rs_3d: float | None, rs_acceleration: float | None) -> float:
         rs3 = float(rs_3d or 0.0)
         if rs3 >= 8.0:
             level = 10.0
@@ -182,6 +179,7 @@ class EmergingLeaderEngine:
 
             stock_ret_3d = self._period_return(close, 3)
             stock_ret_5d = self._period_return(close, 5)
+            stock_prev_3d = self._period_return(close, 3, offset=3)
             market_map = market_period_returns.get(str(item.market).upper(), {})
             market_ret_3d = market_map.get(3)
             market_ret_5d = market_map.get(5)
@@ -195,9 +193,13 @@ class EmergingLeaderEngine:
                 if stock_ret_5d is not None and market_ret_5d is not None
                 else stock_ret_5d
             )
+            # Acceleration compares the latest 3-day relative strength with the
+            # stock's immediately preceding 3-day momentum. This avoids the
+            # structural bias of RS_3D - RS_5D, which is often negative even in
+            # a healthy steady uptrend simply because 5D spans more days.
             rs_acceleration = (
-                float(rs_3d) - float(rs_5d)
-                if rs_3d is not None and rs_5d is not None
+                float(rs_3d) - float(stock_prev_3d)
+                if rs_3d is not None and stock_prev_3d is not None
                 else None
             )
 
@@ -205,7 +207,7 @@ class EmergingLeaderEngine:
                 rank_today, velocity_3d, velocity_5d, rank_acceleration
             )
             money_score = self._money_flow_component(tv_ratio_5d, tv_ratio_20d)
-            rs_score = self._rs_component(rs_3d, rs_5d, rs_acceleration)
+            rs_score = self._rs_component(rs_3d, rs_acceleration)
             freshness_score = self._freshness_component(item.turnover_top20_days_5d)
             score = round(rank_score + money_score + rs_score + freshness_score, 2)
 
