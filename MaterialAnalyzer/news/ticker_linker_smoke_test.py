@@ -49,7 +49,7 @@ def _write_reference(root: Path):
         root / "company_relationships.csv",
         ["subject_name", "subject_ticker", "related_ticker", "related_name", "relation_type", "relation_weight", "confidence", "evidence", "enabled"],
         [
-            {"subject_name": "삼성전자", "subject_ticker": "005930", "related_ticker": "999001", "related_name": "테스트장비", "relation_type": "SUPPLIER", "relation_weight": 0.8, "confidence": 0.9, "evidence": "verified test supply relationship", "enabled": 1},
+            {"subject_name": "테스트고객", "subject_ticker": "999999", "related_ticker": "999001", "related_name": "테스트장비", "relation_type": "SUPPLIER", "relation_weight": 0.8, "confidence": 0.9, "evidence": "verified test supply relationship", "enabled": 1},
         ],
     )
 
@@ -94,7 +94,7 @@ def main():
             _insert(conn, "E2", "삼성전자 회사명만 확인", "ORDER_CONTRACT", 80, "CONFIRMED", company="삼성전자㈜")
             _insert(conn, "E3", "해상풍력 25GW 보급 계획", "GOV_POLICY", 70, "CONFIRMED")
             _insert(conn, "E4", "삼성전자 인공지능 투자", "AI", 82, "CONFIRMED", company="삼성전자")
-            _insert(conn, "E5", "삼성전자 신규 장비 투자", "CAPEX", 88, "STRONG", company="삼성전자", ticker="005930")
+            _insert(conn, "E5", "테스트고객 신규 장비 투자", "CAPEX", 88, "STRONG", company="테스트고객", ticker="999999")
             _insert(conn, "E6", "알수없는기업 신규사업", "PRODUCT", 60, "WATCH", company="알수없는기업")
             _insert(conn, "E7", "AI 산업 정책 참고자료", "GOV_POLICY", 50, "REJECT")
             conn.commit()
@@ -130,8 +130,8 @@ def main():
         assert by_event["E2"][0]["ticker"] == "005930" and by_event["E2"][0]["relation_type"] == "DIRECT"
         assert {row["ticker"] for row in by_event["E3"]} == {"112610", "100090"}
         assert all(row["relation_type"] == "SECTOR" for row in by_event["E3"])
-        assert len(by_event["E4"]) == 2  # DIRECT + evidence-backed supplier; no broad AI theme expansion.
-        assert {row["relation_type"] for row in by_event["E4"]} == {"DIRECT", "SUPPLIER"}
+        assert len(by_event["E4"]) == 1 and by_event["E4"][0]["relation_type"] == "DIRECT"
+        assert {row["relation_type"] for row in by_event["E5"]} == {"DIRECT", "SUPPLIER"}
         assert float(next(row for row in by_event["E5"] if row["relation_type"] == "SUPPLIER")["ticker_material_score"]) == 70.4
         assert "E6" not in by_event
         assert "E7" not in by_event
