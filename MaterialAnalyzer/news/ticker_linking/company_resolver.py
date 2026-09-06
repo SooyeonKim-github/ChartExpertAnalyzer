@@ -19,6 +19,9 @@ class CompanyResolver:
         key = normalize_company(company)
         if not key:
             return "NO_COMPANY"
+        override = self.reference_data.company_status_overrides.get(key)
+        if override:
+            return override[0]
         if key in self.reference_data.ambiguous_companies:
             return "AMBIGUOUS_COMPANY"
         if key in self.reference_data.by_company:
