@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import re
+
 from .models import MaterialScoreRecord, MaterialScoreRunResult, ScoreInput
 from .rules import (
     direct_company_score,
@@ -13,8 +15,15 @@ from .rules import (
 )
 
 
+ROUTINE_GOVERNANCE_RE = re.compile(
+    r"주주명부.*(?:기준일|폐쇄)|(?:기준일설정|기준일 설정)|"
+    r"(?:임시|정기)?주주총회소집(?:결의|공고)?|(?:임시|정기)?주주총회결과",
+    re.I,
+)
+
+
 class MaterialScorer:
-    VERSION = "RULE_MATERIAL_SCORE_V1"
+    VERSION = "RULE_MATERIAL_SCORE_V1_1"
 
     def __init__(self, repository):
         self.repository = repository
@@ -24,6 +33,14 @@ class MaterialScorer:
         direct, direct_reason = direct_company_score(event)
         certainty, certainty_reason = event_certainty_score(event)
         impact, impact_reason = financial_impact_score(event)
+
+        # Routine governance disclosures are official and certain, but usually have low
+        # standalone price-impact. Keep them as events while preventing an automatic
+        # CONFIRMED result just because they are direct DART/KIND filings.
+        if event.event_type == "CORPORATE_GOVERNANCE" and ROUTINE_GOVERNANCE_RE.search(event.event_title or ""):
+            impact = min(impact, 2.0)
+            impact_reason = "routine governance disclosure"
+
         quant, quant_reason = quantification_score(event)
         novelty, novelty_reason = novelty_component_score(event)
         source, source_reason = source_reliability_score(event)
