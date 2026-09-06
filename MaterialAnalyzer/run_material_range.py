@@ -23,19 +23,22 @@ def _parse_range(value: str):
 
 
 def main():
-    parser = argparse.ArgumentParser(description="HistoricalMaterialRangeCollector V1")
+    parser = argparse.ArgumentParser(description="HistoricalMaterialRangeCollector V1.1")
     parser.add_argument("--date-range", default="")
     parser.add_argument("--warmup-days", type=int, default=180)
     parser.add_argument("--chunk-days", type=int, default=7)
     parser.add_argument("--government-max-pages", type=int, default=500)
-    parser.add_argument("--no-collect", action="store_true", help="reuse raw history and rebuild derived layers only")
-    parser.add_argument("--collection-only", action="store_true", help="collect raw history without rebuilding derived layers")
+    mode = parser.add_mutually_exclusive_group()
+    mode.add_argument("--collect-only", "--collection-only", dest="collect_only", action="store_true",
+                      help="collect/resume raw history only; skip derived rebuild")
+    mode.add_argument("--derive-only", "--no-collect", dest="derive_only", action="store_true",
+                      help="reuse raw history and rebuild derived layers only")
     parser.add_argument("--strict", action="store_true", help="stop on first failed source/chunk")
     args = parser.parse_args()
 
     print("=" * 80)
-    print("MaterialAnalyzer - HistoricalMaterialRangeCollector V1")
-    print("Point-in-Time Raw History / Resume / Derived Rebuild")
+    print("MaterialAnalyzer - HistoricalMaterialRangeCollector V1.1")
+    print("Fast DART Bulk / Point-in-Time / Resume / Prefiltered Derived Rebuild")
     print("=" * 80)
     date_range = args.date_range.strip()
     if not date_range:
@@ -51,18 +54,17 @@ def main():
         continue_on_error=not args.strict,
     )
     config.validate()
+    collect = not args.derive_only
+    derived = not args.collect_only
     print(f"Requested     : {config.requested_start} ~ {config.requested_end}")
     print(f"Context start : {config.context_start} (warmup={config.warmup_days}d)")
     print(f"Chunk days    : {config.chunk_days}")
-    print(f"Collection    : {'OFF' if args.no_collect else 'ON'}")
-    print(f"Derived       : {'OFF' if args.collection_only else 'REBUILD'}")
+    print(f"Collection    : {'ON' if collect else 'OFF (derive-only)'}")
+    print(f"Derived       : {'REBUILD' if derived else 'OFF (collect-only)'}")
     print("=" * 80)
 
     pipeline = HistoricalMaterialPipeline(ROOT, config)
-    result = pipeline.run(
-        collect=not args.no_collect,
-        reprocess_derived=not args.collection_only,
-    )
+    result = pipeline.run(collect=collect, reprocess_derived=derived)
     print("\n" + "=" * 80)
     print(f"STATUS        : {result.status}")
     print(f"failed_chunks : {result.failed_chunks}")
