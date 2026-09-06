@@ -28,7 +28,7 @@ def _write_reference(root: Path):
     _write_csv(root / "event_theme_rules.csv",
         ["theme","event_types","keywords","strong_keywords","weak_keywords","confidence","min_materiality","enabled"], [
         {"theme":"해상풍력","event_types":"GOV_POLICY","keywords":"해상풍력|풍력발전","strong_keywords":"보급 계획|사업자 선정|건설|투자","weak_keywords":"회의|포럼","confidence":0.95,"min_materiality":70,"enabled":1},
-        {"theme":"AI","event_types":"AI|GOV_POLICY","keywords":"인공지능|AI 산업|AI 데이터센터","strong_keywords":"AI 데이터센터|GPU|HBM|대규모 투자","weak_keywords":"경진대회|교육|포럼|간담회","confidence":0.82,"min_materiality":70,"enabled":1},
+        {"theme":"AI","event_types":"AI|GOV_POLICY","keywords":"AI|인공지능|AI 산업|AI 데이터센터","strong_keywords":"AI 데이터센터|GPU|HBM|대규모 투자","weak_keywords":"경진대회|교육|포럼|간담회","confidence":0.82,"min_materiality":70,"enabled":1},
     ])
     _write_csv(root / "theme_ticker_map.csv",
         ["theme","ticker","name","relation_type","relation_weight","confidence","mapping_relevance","reason","enabled"], [
@@ -62,9 +62,14 @@ def _insert(conn, event_id, title, event_type, score, status, *, company="", tic
 
 def main():
     with tempfile.TemporaryDirectory() as td:
-        root = Path(td); ref = root / "reference"; _write_reference(ref)
-        database = Database(root / "ticker.db"); database.initialize()
-        with database.connect() as conn:
+        root = Path(td)
+        ref = root / "reference"
+        _write_reference(ref)
+        database = Database(root / "ticker.db")
+        database.initialize()
+
+        conn = database.connect()
+        try:
             _insert(conn,"E1","삼성전자 직접 공시","ORDER_CONTRACT",90,"STRONG",company="삼성전자",ticker="005930")
             _insert(conn,"E2","삼성전자 회사명만 확인","ORDER_CONTRACT",80,"CONFIRMED",company="삼성전자㈜")
             _insert(conn,"E3","해상풍력 25GW 보급 계획","GOV_POLICY",70,"CONFIRMED")
@@ -74,6 +79,9 @@ def main():
             _insert(conn,"E7","AI 산업 정책 참고자료","GOV_POLICY",50,"REJECT")
             _insert(conn,"E8","AI 경진대회 참가자 모집","AI",72,"CONFIRMED")
             _insert(conn,"E9","AI 데이터센터 5조원 대규모 투자","GOV_POLICY",80,"CONFIRMED")
+            conn.commit()
+        finally:
+            conn.close()
 
         repo = TickerLinkRepository(database)
         linker = TickerLinker(repo, ref)
@@ -83,11 +91,20 @@ def main():
         assert result.total_links == 8
         assert result.direct == 4 and result.supplier == 1 and result.sector == 2 and result.theme == 1
 
-        with database.connect() as conn:
-            rows = conn.execute("SELECT event_id,ticker,relation_type,relation_weight,mapping_relevance,ticker_material_score,theme_materiality_score FROM material_ticker_links ORDER BY event_id,ticker").fetchall()
+        conn = database.connect()
+        try:
+            rows = conn.execute(
+                "SELECT event_id,ticker,relation_type,relation_weight,mapping_relevance,ticker_material_score,theme_materiality_score "
+                "FROM material_ticker_links ORDER BY event_id,ticker"
+            ).fetchall()
             states = {r["event_id"]: r for r in conn.execute("SELECT * FROM ticker_link_states").fetchall()}
+        finally:
+            conn.close()
+
         by_event = {}
-        for row in rows: by_event.setdefault(row["event_id"], []).append(row)
+        for row in rows:
+            by_event.setdefault(row["event_id"], []).append(row)
+
         assert len(by_event["E1"]) == 1 and by_event["E1"][0]["relation_type"] == "DIRECT"
         assert by_event["E2"][0]["ticker"] == "005930"
         assert {r["ticker"] for r in by_event["E3"]} == {"112610","100090"}
@@ -124,6 +141,7 @@ def main():
     print("     mapping relevance -> effective ticker material score")
     print("     reference edit -> automatic relink")
     print("     unchanged repeat -> processed=0")
+    print("     windows sqlite cleanup -> OK")
     print("     fuzzy company match / embeddings / LLM -> DISABLED")
 
 
