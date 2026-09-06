@@ -279,9 +279,21 @@ class Database:
         self.path = Path(path)
         self.path.parent.mkdir(parents=True, exist_ok=True)
 
+    def _is_history_db(self) -> bool:
+        return self.path.name == "material_history.db" or "history" in {part.lower() for part in self.path.parts}
+
     def connect(self):
-        conn = sqlite3.connect(self.path)
+        conn = sqlite3.connect(self.path, timeout=30.0)
         conn.row_factory = sqlite3.Row
+        conn.execute("PRAGMA busy_timeout=30000")
+        if self._is_history_db():
+            # Historical range processing is append/bulk heavy. WAL is persistent;
+            # the connection-local pragmas reduce fsync/temp overhead without using
+            # unsafe OFF settings. Live news.db keeps SQLite defaults.
+            conn.execute("PRAGMA journal_mode=WAL")
+            conn.execute("PRAGMA synchronous=NORMAL")
+            conn.execute("PRAGMA temp_store=MEMORY")
+            conn.execute("PRAGMA cache_size=-65536")
         return conn
 
     def initialize(self):
