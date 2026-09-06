@@ -14,7 +14,7 @@ if not "%RC%"=="0" (
   echo [ERROR] TickerMaster build failed with code %RC%.
 ) else (
   echo [DONE] TickerMaster build finished.
-  echo File: MaterialAnalyzer\data\reference\ticker_master.csv
+  echo File: MaterialAnalyzer\data\reference\ticker_master_krx.csv
 )
 echo.
 if not "%NEWS_COLLECTOR_NO_PAUSE%"=="1" pause
