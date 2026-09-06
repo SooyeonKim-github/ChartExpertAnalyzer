@@ -9,7 +9,7 @@
 3. Stage Detector ✅
 4. Market Regime
    - 4A. 지수 vs MA150 + MA150 기울기 ✅
-   - 4B. 52주 신고가 Breadth
+   - 4B. 52주 신고가 Breadth ✅
    - 4C. 전약후강 / 전강후약
    - 4D. 호재/악재 민감도
 5. Relative Strength
@@ -45,13 +45,14 @@
 
 ### 현재 BACKTEST_ONLY
 
-강의에는 정확한 최소 기울기 값이 없으므로 아래는 실전 필터에 쓰지 않습니다.
-
 - `MA150 slope >= 0.30%`
 - 시장 `MA50 > MA150`
 - 시장의 MA150 이격도
+- 52주 신고가 Breadth
+- 52주 신저가 Breadth / 신고가-신저가 spread
+- Breadth 5일/20일 변화량 및 방향
 
-이 값들은 추후 Range/Ablation Backtest에서 유효성이 확인된 경우에만 승격합니다.
+이 값들은 후보를 제거하지 않으며 Range/Ablation Backtest 후에만 승격합니다.
 
 ## Stage 규칙
 
@@ -73,6 +74,40 @@ Stage 1/3 전환 방식은 구현상 휴리스틱이므로 별도 검증 대상�
 
 `BULL/NEUTRAL/BEAR` 3단계 이름 자체는 Analyzer 구현을 위한 정형화입니다.
 
+## 52주 신고가 Breadth 4B
+
+강의에서 시장 체력을 판단하는 두 번째 요소인 `52주 신고가 비율`을 수집합니다.
+
+현재 구현은 다음 원칙을 지킵니다.
+
+- Top100 후보가 아닌 **KOSPI/KOSDAQ 전체 point-in-time snapshot** 사용
+- 252개 유효 거래일 기록이 있는 종목만 52주 분모에 포함
+- 신규상장/데이터 부족 종목 때문에 분모가 왜곡되지 않도록 `coverage_ratio` 저장
+- 공통 snapshot이 종가를 제공하므로 현재는 **52주 종가 신고가 proxy**
+- 따라서 강의의 개념은 `LECTURE_CORE`지만 이 측정값은 아직 `BACKTEST_ONLY`
+
+저장값:
+
+```text
+market_breadth_universe_count
+market_breadth_eligible_count
+market_breadth_coverage_ratio
+market_new_high_52w_count
+market_new_low_52w_count
+market_new_high_52w_ratio
+market_new_low_52w_ratio
+market_new_high_low_spread
+market_breadth_5d_avg
+market_breadth_20d_avg
+market_breadth_5d_change
+market_breadth_20d_change
+market_breadth_direction
+```
+
+`breadth_direction`은 `IMPROVING / WEAKENING / MIXED / INSUFFICIENT`이며 구현상 실험 지표입니다.
+
+첫 실행은 약 272거래일 × KOSPI/KOSDAQ의 전체시장 snapshot을 준비하므로 시간이 걸릴 수 있습니다. 각 일자 snapshot은 공통 MarketData 캐시에 저장되어 이후 실행에서는 재사용됩니다.
+
 ## 출력
 
 ```text
@@ -81,12 +116,14 @@ results/<YYYYMMDD>/
 ├─ stage_screen.csv
 ├─ stage2_candidates.csv
 ├─ lecture_core_candidates.csv
+├─ market_breadth_summary.csv
 └─ rule_catalog.csv
 ```
 
 - `stage2_candidates.csv`: 종목 추세 조건만 통과
 - `lecture_core_candidates.csv`: 종목 Stage 2 + 해당 시장 BULL까지 통과
-- Experimental 조건은 현재 어떤 CSV에서도 후보 제거 조건으로 사용하지 않습니다.
+- `market_breadth_summary.csv`: KOSPI/KOSDAQ 각각의 52주 Breadth 측정값
+- Breadth/Experimental 조건은 현재 어떤 후보 CSV에서도 제거 조건으로 사용하지 않습니다.
 
 ## 실행
 
@@ -117,16 +154,13 @@ python -m pytest tests -q
 5. 기간/시장 Regime 안정성 확인
 6. 최종 ACTIVE_FILTER 승격
 
-예:
+Breadth 예시는 다음처럼 비교합니다.
 
 ```text
-MA150 slope > 0
-vs
-MA150 slope >= 0.1%
-vs
-MA150 slope >= 0.3%
-vs
-MA150 slope >= 0.5%
+A. MA150 시장 필터만
+B. A + 52주 신고가 비율 수준
+C. A + 52주 신고가 비율 5일 개선
+D. A + 신고가-신저가 spread
 ```
 
-최고 한 점만 고르지 않고 인접 구간에서도 성능이 유지되는지 확인합니다.
+최고 한 점만 고르지 않고 인접 임계값과 여러 시장 구간에서 성능이 유지되는지 확인합니다.
