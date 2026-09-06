@@ -39,6 +39,7 @@ def main() -> None:
     legacy_path = out_dir / "stage_screen.csv"
     stage2_path = out_dir / "stage2_candidates.csv"
     core_path = out_dir / "lecture_core_candidates.csv"
+    breadth_path = out_dir / "market_breadth_summary.csv"
     rule_path = out_dir / "rule_catalog.csv"
 
     df.to_csv(all_path, index=False, encoding=encoding)
@@ -48,17 +49,44 @@ def main() -> None:
     if df.empty:
         df.to_csv(stage2_path, index=False, encoding=encoding)
         df.to_csv(core_path, index=False, encoding=encoding)
+        pd.DataFrame().to_csv(breadth_path, index=False, encoding=encoding)
     else:
         df[df["stage"].eq("STAGE_2")].to_csv(stage2_path, index=False, encoding=encoding)
         df[df["lecture_core_pass"].eq(True)].to_csv(core_path, index=False, encoding=encoding)
 
+        breadth_cols = [
+            "market",
+            "market_breadth_status",
+            "market_breadth_measurement",
+            "market_breadth_universe_count",
+            "market_breadth_eligible_count",
+            "market_breadth_coverage_ratio",
+            "market_new_high_52w_count",
+            "market_new_low_52w_count",
+            "market_new_high_52w_ratio",
+            "market_new_low_52w_ratio",
+            "market_new_high_low_spread",
+            "market_breadth_5d_avg",
+            "market_breadth_20d_avg",
+            "market_breadth_5d_change",
+            "market_breadth_20d_change",
+            "market_breadth_direction",
+            "market_breadth_snapshot_dates_loaded",
+            "market_breadth_snapshot_dates_expected",
+            "market_breadth_snapshot_date_coverage_ratio",
+            "market_breadth_filter_applied",
+        ]
+        df[breadth_cols].drop_duplicates("market").sort_values("market").to_csv(
+            breadth_path, index=False, encoding=encoding
+        )
+
     print("\n============================================")
     print(f" TrendFollowingAnalyzer | {resolved}")
-    print(" Phase 1-4A: MA50 / MA150 / Stage / Market Regime")
+    print(" Phase 1-4B: Stage / Market Regime / 52W Breadth")
     print("============================================")
-    print(" Active filters : LECTURE_CORE only")
+    print(" Active filters : LECTURE_CORE MA150 rules only")
+    print(" 52W Breadth    : BACKTEST_ONLY (close-high proxy, not gating)")
     print(" Experimental   : recorded only, not gating")
-    print(" 52W Breadth    : planned for Phase 4B")
 
     if df.empty:
         print("No analyzable symbols.")
@@ -75,6 +103,21 @@ def main() -> None:
         market_view = df[market_cols].drop_duplicates("market").sort_values("market")
         print("\n[MARKET REGIME]")
         print(market_view.to_string(index=False))
+
+        breadth_cols = [
+            "market",
+            "market_breadth_status",
+            "market_breadth_coverage_ratio",
+            "market_new_high_52w_ratio",
+            "market_new_low_52w_ratio",
+            "market_new_high_low_spread",
+            "market_breadth_5d_change",
+            "market_breadth_20d_change",
+            "market_breadth_direction",
+        ]
+        breadth_view = df[breadth_cols].drop_duplicates("market").sort_values("market")
+        print("\n[52W BREADTH - BACKTEST ONLY]")
+        print(breadth_view.to_string(index=False))
 
         cols = [
             "ticker",
@@ -99,6 +142,7 @@ def main() -> None:
     print(f"\n[DONE] {all_path}")
     print(f"[DONE] {stage2_path}")
     print(f"[DONE] {core_path}")
+    print(f"[DONE] {breadth_path}")
     print(f"[DONE] {rule_path}")
 
 

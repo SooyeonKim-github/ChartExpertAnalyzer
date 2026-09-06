@@ -30,7 +30,30 @@ RULE_CATALOG = (
     RuleSpec("market.slope_threshold_pct", EXPERIMENTAL, BACKTEST_ONLY, "시장 MA150 기울기 최소 절대값 임계치"),
     RuleSpec("market.ma50_alignment", EXPERIMENTAL, BACKTEST_ONLY, "지수 MA50 > MA150 정렬"),
     RuleSpec("market.ma150_distance", EXPERIMENTAL, BACKTEST_ONLY, "지수와 MA150 이격도"),
-    RuleSpec("market.52w_high_breadth", LECTURE_CORE, PLANNED, "52주 신고가 비율/추세"),
+    RuleSpec(
+        "market.52w_high_breadth",
+        LECTURE_CORE,
+        BACKTEST_ONLY,
+        "52주 신고가 비율이 증가하는지 보는 강의 원칙; 현재는 종가 신고가 proxy로 측정하며 실전 필터에는 미사용",
+    ),
+    RuleSpec(
+        "market.52w_high_close_proxy",
+        EXPERIMENTAL,
+        BACKTEST_ONLY,
+        "전체 시장 일별 종가 snapshot으로 계산한 252거래일 종가 신고가 비율",
+    ),
+    RuleSpec(
+        "market.52w_low_breadth",
+        EXPERIMENTAL,
+        BACKTEST_ONLY,
+        "252거래일 종가 신저가 비율 및 신고가-신저가 spread",
+    ),
+    RuleSpec(
+        "market.breadth_velocity",
+        EXPERIMENTAL,
+        BACKTEST_ONLY,
+        "52주 종가 신고가 비율의 5일/20일 평균과 변화량 및 방향",
+    ),
     RuleSpec("market.intraday_strength", LECTURE_CORE, PLANNED, "전약후강/전강후약"),
     RuleSpec("market.news_reaction", LECTURE_CORE, PLANNED, "호재/악재 민감도"),
 )

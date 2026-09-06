@@ -22,3 +22,9 @@ def test_lecture_core_has_active_market_and_trend_rules():
     assert "trend.ma150_slope" in active_core
     assert "market.ma150_position" in active_core
     assert "market.ma150_slope" in active_core
+
+
+def test_52w_breadth_is_lecture_core_but_backtest_only():
+    rule = next(r for r in RULE_CATALOG if r.key == "market.52w_high_breadth")
+    assert rule.origin == LECTURE_CORE
+    assert rule.mode == BACKTEST_ONLY

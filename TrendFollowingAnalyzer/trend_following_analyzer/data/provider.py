@@ -17,7 +17,8 @@ class TrendFollowingDataProvider:
     """Market-data adapter for TrendFollowingAnalyzer.
 
     Strategy logic stays inside TrendFollowingAnalyzer while raw OHLCV,
-    universe, and index retrieval reuse the repository-wide MarketData service.
+    universe, index, and point-in-time market snapshots reuse the repository-wide
+    MarketData service.
     """
 
     def __init__(
@@ -32,6 +33,7 @@ class TrendFollowingDataProvider:
         self.universe_xlsx = self._resolve_universe_xlsx(universe_xlsx)
         self._history_cache: dict[str, pd.DataFrame] = {}
         self._index_cache: dict[str, pd.DataFrame] = {}
+        self._breadth_source_cache: dict[str, tuple[pd.DataFrame, dict]] = {}
         self._candidate_infos: list = []
         self._candidate_top_n: int | None = None
 
@@ -216,3 +218,75 @@ class TrendFollowingDataProvider:
         out = out[out.index.normalize() <= end].copy()
         self._index_cache[market_key] = out
         return out.copy()
+
+    def get_market_breadth_source(self, market: str, scan_date: str) -> tuple[pd.DataFrame, dict]:
+        """Build point-in-time all-market close history for 52-week breadth.
+
+        The source uses KOSPI/KOSDAQ all-ticker snapshots for each trading date,
+        not the screen's Top-N candidate universe. MarketData caches each daily
+        snapshot, so the first run is the expensive one and later runs can reuse it.
+        """
+        market_key = str(market).upper()
+        cache_key = f"{market_key}:{scan_date}"
+        if cache_key in self._breadth_source_cache:
+            frame, meta = self._breadth_source_cache[cache_key]
+            return frame.copy(), dict(meta)
+
+        bcfg = self.cfg.get("market_regime", {}).get("breadth_52w", {})
+        if not bool(bcfg.get("enabled", True)):
+            meta = {"expected_dates": 0, "loaded_dates": 0, "failed_dates": 0}
+            return pd.DataFrame(columns=["date", "ticker", "close"]), meta
+
+        lookback_sessions = int(bcfg.get("lookback_sessions", 252))
+        long_window = int(bcfg.get("long_window", 20))
+        required_sessions = max(lookback_sessions + long_window, lookback_sessions)
+        index_df = self.get_market_index(market_key, scan_date)
+        dates = pd.DatetimeIndex(pd.to_datetime(index_df.index, errors="coerce")).dropna()
+        end = pd.Timestamp(scan_date).normalize()
+        dates = dates[dates.normalize() <= end]
+        dates = pd.DatetimeIndex(sorted(set(pd.Timestamp(x).normalize() for x in dates)))
+        if len(dates) > required_sessions:
+            dates = dates[-required_sessions:]
+
+        rows: list[pd.DataFrame] = []
+        loaded_dates = 0
+        failed_dates = 0
+        total = len(dates)
+        print(
+            f"[INFO] {market_key} 52W breadth source | dates={total} "
+            f"| full-market point-in-time snapshots"
+        )
+        for idx, dt in enumerate(dates, start=1):
+            try:
+                snap = self.market_data.get_market_snapshot(dt.strftime("%Y%m%d"), market_key)
+                if snap is None or snap.empty or not {"ticker", "close"}.issubset(snap.columns):
+                    raise RuntimeError("snapshot missing ticker/close")
+                day = snap[["ticker", "close"]].copy()
+                day["ticker"] = day["ticker"].astype(str).str.zfill(6)
+                day["close"] = pd.to_numeric(day["close"], errors="coerce")
+                day = day.dropna(subset=["close"])
+                day = day[day["close"] > 0]
+                day["date"] = dt
+                rows.append(day[["date", "ticker", "close"]])
+                loaded_dates += 1
+            except Exception as exc:
+                failed_dates += 1
+                print(f"[WARN] {market_key} breadth snapshot failed {dt:%Y-%m-%d}: {exc}")
+            if idx == total or idx % 50 == 0:
+                print(
+                    f"[INFO] {market_key} breadth snapshots {idx}/{total} "
+                    f"| loaded={loaded_dates} | failed={failed_dates}"
+                )
+
+        source = (
+            pd.concat(rows, ignore_index=True)
+            if rows
+            else pd.DataFrame(columns=["date", "ticker", "close"])
+        )
+        meta = {
+            "expected_dates": int(total),
+            "loaded_dates": int(loaded_dates),
+            "failed_dates": int(failed_dates),
+        }
+        self._breadth_source_cache[cache_key] = (source.copy(), dict(meta))
+        return source, meta

@@ -33,9 +33,18 @@ market_regime:
   # EXPERIMENTAL + BACKTEST_ONLY
   experimental_slope_threshold_pct: 0.30
 
-  # LECTURE_CORE but not implemented yet in Phase 4A.
   breadth_52w:
-    mode: PLANNED
+    # LECTURE_CORE concept, but current measurement is a closing-price proxy.
+    # Keep BACKTEST_ONLY until Range/Ablation validation.
+    mode: BACKTEST_ONLY
+    enabled: true
+    lookback_sessions: 252
+    min_history_sessions: 252
+    short_window: 5
+    long_window: 20
+    min_coverage_ratio: 0.60
+
+  # LECTURE_CORE but not implemented yet.
   intraday_strength:
     mode: PLANNED
   news_reaction:
