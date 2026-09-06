@@ -121,8 +121,12 @@ class LeaderResult:
 
     # Emerging Leader / Rank Velocity. Independent from the original Leader Score.
     emerging_available: bool = False
+    emerging_raw_score: float | None = None
     emerging_leader_score: float | None = None
     emerging_label: str = "UNKNOWN"
+    emerging_overheat_penalty: float = 0.0
+    emerging_overheat_flags: str = ""
+    momentum_spike_flag: bool = False
     emerging_rank_today: float | None = None
     emerging_rank_1d_ago: float | None = None
     emerging_rank_3d_ago: float | None = None
