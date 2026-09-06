@@ -29,8 +29,9 @@ def screen_date(
     top_n: int | None = None,
     base_dir: str | Path,
     progress: bool = True,
+    provider: PyKrxLeaderDataProvider | None = None,
 ) -> tuple[str, list[LeaderResult]]:
-    provider = PyKrxLeaderDataProvider(cfg, base_dir)
+    provider = provider or PyKrxLeaderDataProvider(cfg, base_dir)
     resolved = provider.resolve_scan_date(scan_date)
     universe = provider.build_universe(resolved, top_n=top_n)
     analyzer = LeaderStockAnalyzer(cfg)
