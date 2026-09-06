@@ -51,7 +51,8 @@ def main() -> None:
         "| overheat penalty=ON | max_chase=40"
     )
     print(
-        "[INFO] Leader Lifecycle V2.2 enabled | Emerging gate=Rank Velocity x2 confirmation "
+        "[INFO] Leader Lifecycle V2.3 enabled | Emerging activation=Rank Velocity x2 "
+        "| hold=LeaderScore>=60 & Rank<=50 | initial emerging confirmation=ON "
         "| fast-track=OFF | BROKEN requires structural price failure"
     )
 
