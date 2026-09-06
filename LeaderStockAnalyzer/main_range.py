@@ -123,6 +123,17 @@ def main() -> None:
         df.to_csv(lifecycle_path, index=False, encoding="utf-8-sig")
 
     emerging_events = emerging_report.events(df)
+    if not emerging_events.empty:
+        transition_mask = emerging_events.get(
+            "lifecycle_transition", pd.Series(False, index=emerging_events.index)
+        ).fillna(False)
+        first_day_mask = pd.to_numeric(
+            emerging_events.get(
+                "lifecycle_days_in_state", pd.Series(0, index=emerging_events.index)
+            ),
+            errors="coerce",
+        ).fillna(0).eq(1)
+        emerging_events = emerging_events[transition_mask | first_day_mask].copy()
     emerging_summary = emerging_report.summary(emerging_events)
     emerging_events.to_csv(emerging_events_path, index=False, encoding="utf-8-sig")
     emerging_summary.to_csv(emerging_summary_path, index=False, encoding="utf-8-sig")
