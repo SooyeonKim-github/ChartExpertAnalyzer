@@ -29,6 +29,7 @@ MaterialAnalyzer/data/material_items.csv
 MaterialAnalyzer/data/schedule_items.csv
 MaterialAnalyzer/data/reference/ticker_master_krx.csv
 MaterialAnalyzer/data/reference/ticker_master_krx.refresh.json
+MaterialAnalyzer/data/history/
 
 Thumbs.db
 .DS_Store
