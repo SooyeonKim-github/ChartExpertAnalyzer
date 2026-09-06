@@ -27,17 +27,19 @@ class _LifecycleMemory:
 class LeaderLifecycleEngine:
     """Track leader-stock lifecycle with hysteresis and structural breakdown rules.
 
-    V2.3 separates Emerging activation from Emerging hold:
-    - DISCOVERY -> EMERGING still requires fresh Rank Velocity evidence.
-    - Once EMERGING, Rank Velocity may cool while broader leadership holds.
-    - First-observation Emerging candidates no longer bypass confirmation.
-    - Mature LEADER/PERSISTENT_LEADER evidence may still be inferred directly.
+    V2.4 principles:
+    - DISCOVERY -> EMERGING requires fresh Rank Velocity activation evidence.
+    - Once EMERGING, Rank Velocity may cool while broad leadership holds.
+    - EMERGING -> LEADER uses accumulated Leader Core evidence, not consecutive days.
+    - Initial EMERGING observations still require confirmation.
+    - Mature LEADER/PERSISTENT_LEADER evidence may be inferred directly at warm start.
     """
 
     def __init__(self, cfg: dict):
         self.cfg = cfg
         self.lcfg = cfg.get("lifecycle", {})
         self._memory: dict[str, _LifecycleMemory] = {}
+        self._leader_evidence: dict[str, list[bool]] = {}
 
     @staticmethod
     def _price_context(df: pd.DataFrame) -> dict[str, float | bool | None]:
@@ -80,15 +82,18 @@ class LeaderLifecycleEngine:
         persistence_score = float(item.leader_persistence_score or 0.0)
         top20_days = int(item.turnover_top20_days_5d or 0)
 
+        leader_core = bool(
+            item.leader_score >= float(c.get("leader_min_leader_score", 75.0))
+            and item.market_leader_rank <= int(c.get("leader_rank_max", 20))
+        )
         persistent = bool(
-            item.leader_score >= float(c.get("persistent_min_leader_score", 75.0))
+            leader_core
             and item.persistence_available
             and persistence_score >= float(c.get("persistent_min_persistence_score", 70.0))
             and top20_days >= int(c.get("persistent_min_top20_days_5d", 4))
         )
         leader = bool(
-            item.leader_score >= float(c.get("leader_min_leader_score", 75.0))
-            and item.market_leader_rank <= int(c.get("leader_rank_max", 20))
+            leader_core
             and (
                 not item.persistence_available
                 or top20_days >= int(c.get("leader_min_top20_days_5d", 2))
@@ -111,10 +116,6 @@ class LeaderLifecycleEngine:
             and not persistent
             and activation_feature_ok
         )
-
-        # V2.3: once Rank Velocity has already activated EMERGING, do not keep
-        # requiring fresh acceleration every day. A maturing leader naturally
-        # sees rank velocity cool after reaching the top of the market.
         emerging_hold = bool(
             item.leader_score >= float(c.get("emerging_hold_min_leader_score", 60.0))
             and item.market_leader_rank <= int(c.get("emerging_hold_rank_max", 50))
@@ -126,7 +127,7 @@ class LeaderLifecycleEngine:
         return {
             "persistent": persistent,
             "leader": leader,
-            # Keep the legacy key as an activation alias for older call sites.
+            "leader_core": leader_core,
             "emerging": emerging_activation,
             "emerging_activation": emerging_activation,
             "emerging_hold": emerging_hold,
@@ -218,6 +219,8 @@ class LeaderLifecycleEngine:
         readiness: dict[str, bool],
         exhaustion: list[str],
         broken: list[str],
+        *,
+        leader_evidence_count: int = 0,
     ) -> tuple[str, str, str, int, int, int]:
         c = self.lcfg
         state = previous.state
@@ -230,6 +233,7 @@ class LeaderLifecycleEngine:
         demotion_confirm = max(1, int(c.get("demotion_confirm_days", 2)))
         recovery_confirm = max(1, int(c.get("recovery_confirm_days", 2)))
         exhausting_min_flags = max(1, int(c.get("exhausting_min_flags", 2)))
+        leader_evidence_required = max(1, int(c.get("leader_evidence_required", 2)))
         hard_broken = bool(broken)
 
         if state == "BROKEN":
@@ -300,27 +304,16 @@ class LeaderLifecycleEngine:
             if hard_broken:
                 return "BROKEN", ",".join(broken), "", 0, 0, 0
 
-            # Promotion to LEADER is independent from fresh Rank Velocity.
-            # This is the expected maturation path after an Emerging stock has
-            # already accelerated into the top of the market.
-            if readiness["leader"] or readiness["persistent"]:
-                done, promotion_target, promotion_streak = self._promotion_progress(
-                    previous, "LEADER", promotion_confirm
-                )
-                if done:
-                    return "LEADER", "confirmed_emerging_to_leader", "", 0, 0, 0
+            if leader_evidence_count >= leader_evidence_required:
                 return (
-                    "EMERGING",
-                    f"leader_confirmation_pending_{promotion_streak}/{promotion_confirm}",
-                    promotion_target,
-                    promotion_streak,
+                    "LEADER",
+                    f"confirmed_emerging_to_leader_evidence_{leader_evidence_count}/{leader_evidence_required}",
+                    "",
+                    0,
                     0,
                     0,
                 )
 
-            # Activation and hold are deliberately different. A stock does not
-            # need to keep accelerating after it has entered EMERGING; it only
-            # needs to remain broadly strong enough to stay in the lifecycle.
             if not readiness["emerging_hold"]:
                 weakness_streak += 1
                 if weakness_streak >= demotion_confirm:
@@ -331,6 +324,16 @@ class LeaderLifecycleEngine:
                     "",
                     0,
                     weakness_streak,
+                    0,
+                )
+
+            if leader_evidence_count > 0:
+                return (
+                    "EMERGING",
+                    f"leader_core_evidence_{leader_evidence_count}/{leader_evidence_required}",
+                    "",
+                    0,
+                    0,
                     0,
                 )
             return "EMERGING", "emerging_hold_conditions_held", "", 0, 0, 0
@@ -399,6 +402,7 @@ class LeaderLifecycleEngine:
         out: list[LeaderResult] = []
         reset_days = max(1, int(self.lcfg.get("memory_reset_calendar_days", 10)))
         promotion_confirm = max(1, int(self.lcfg.get("promotion_confirm_days", 2)))
+        evidence_window = max(1, int(self.lcfg.get("leader_evidence_window_observations", 10)))
 
         for item in results:
             ticker = str(item.ticker).zfill(6)
@@ -409,6 +413,7 @@ class LeaderLifecycleEngine:
                 gap_days = (target_date - pd.Timestamp(previous.last_observed_date).normalize()).days
                 if gap_days > reset_days:
                     previous = None
+                    self._leader_evidence.pop(ticker, None)
 
             price_ctx = self._price_context(daily_by_ticker.get(ticker, pd.DataFrame()))
             readiness = self._readiness(item)
@@ -420,6 +425,12 @@ class LeaderLifecycleEngine:
                 lifecycle_below_ma20=bool(price_ctx.get("below_ma20", False)),
             )
 
+            evidence_history = list(self._leader_evidence.get(ticker, []))
+            if previous is not None and previous.state == "EMERGING":
+                evidence_history.append(bool(readiness["leader_core"]))
+                evidence_history = evidence_history[-evidence_window:]
+            leader_evidence_count = int(sum(evidence_history))
+
             if previous is None:
                 state, reason = self._highest_initial_state(readiness)
                 promotion_target = ""
@@ -427,10 +438,6 @@ class LeaderLifecycleEngine:
                 weakness_streak = 0
                 recovery_streak = 0
 
-                # V2.3: an initial EMERGING observation is only the first
-                # confirmation, not an automatic state assignment. Mature
-                # LEADER/PERSISTENT evidence is still allowed to initialize
-                # directly because persistence already encodes prior history.
                 initial_requires_confirmation = bool(
                     self.lcfg.get("initial_emerging_requires_confirmation", True)
                 )
@@ -462,6 +469,7 @@ class LeaderLifecycleEngine:
                     readiness,
                     exhaustion,
                     broken,
+                    leader_evidence_count=leader_evidence_count,
                 )
                 changed = previous.state != state
                 observed_days = previous.observed_days + 1
@@ -475,6 +483,14 @@ class LeaderLifecycleEngine:
                 else:
                     days_in_state = previous.days_in_state + 1
                     state_start_date = previous.state_start_date
+
+            if state == "EMERGING":
+                if previous is None or previous.state != "EMERGING":
+                    evidence_history = [bool(readiness["leader_core"])]
+                    evidence_history = evidence_history[-evidence_window:]
+                self._leader_evidence[ticker] = evidence_history
+            else:
+                self._leader_evidence.pop(ticker, None)
 
             self._memory[ticker] = _LifecycleMemory(
                 state=state,
