@@ -27,11 +27,10 @@ class _LifecycleMemory:
 class LeaderLifecycleEngine:
     """Track leader-stock lifecycle with hysteresis and structural breakdown rules.
 
-    V2.1 adds EmergingLeaderEngine evidence to DISCOVERY -> EMERGING:
-    - true emerging candidates require rank/money-flow/RS acceleration.
-    - STRONG_EMERGING may fast-track the normal two-day confirmation.
-    - once EMERGING, promotion to LEADER is based on established leadership,
-      so Rank Velocity is allowed to cool as the stock matures.
+    V2.2 uses EmergingLeaderEngine evidence to gate DISCOVERY -> EMERGING.
+    Fast-track is disabled by default so even strong candidates normally require
+    repeated confirmation. Once EMERGING, Rank Velocity may cool while the
+    stock matures into LEADER through established leadership evidence.
     """
 
     def __init__(self, cfg: dict):
@@ -251,7 +250,8 @@ class LeaderLifecycleEngine:
 
         if state == "DISCOVERY":
             if readiness.get("emerging_engine_active", False):
-                if item.strong_emerging_flag and readiness["emerging"]:
+                allow_fast_track = bool(c.get("allow_strong_emerging_fast_track", False))
+                if allow_fast_track and item.strong_emerging_flag and readiness["emerging"]:
                     return "EMERGING", "strong_emerging_fast_track", "", 0, 0, 0
                 promotion_ready = readiness["emerging"]
             else:
