@@ -1,6 +1,6 @@
-# Leader Lifecycle V2.3
+# Leader Lifecycle V2.4
 
-`LeaderLifecycleEngine` tracks how a stock's leadership evolves across scan dates while remaining independent from the existing Leader Score confirmation rules.
+`LeaderLifecycleEngine` tracks how a stock's leadership evolves across scan dates while keeping Lifecycle independent from the existing confirmation status.
 
 ## State flow
 
@@ -13,10 +13,84 @@ DISCOVERY
   -> BROKEN
 ```
 
-A recovered `BROKEN` stock re-enters through `EMERGING`.
-Mature `LEADER` / `PERSISTENT_LEADER` evidence may still be inferred directly on first observation because persistence already contains prior-history evidence.
+## Emerging activation
 
-## Structural rules
+`DISCOVERY -> EMERGING` still requires fresh Rank Velocity evidence.
+
+Default gate:
+
+```text
+Leader Score >= 72
+Market Leader Rank <= 20
+true_emerging_flag = true
+promotion_confirm_days = 2
+```
+
+`MOMENTUM_SPIKE` cannot activate Emerging and strong fast-track remains disabled by default.
+
+## Emerging hold
+
+After activation, fresh Rank Velocity is no longer required every day.
+
+```text
+Leader Score >= 60
+AND
+Market Leader Rank <= 50
+```
+
+If the hold condition fails for `demotion_confirm_days`, the stock returns to `DISCOVERY`.
+
+## V2.4 Emerging -> Leader evidence
+
+The V2.3 range result showed that requiring Leader conditions on consecutive observations was too sensitive to daily Leader Score fluctuations.
+
+V2.4 defines Leader Core Evidence as:
+
+```text
+Leader Score >= 75
+AND
+Market Leader Rank <= 20
+```
+
+While a stock is `EMERGING`, these hits are accumulated in a rolling observation window:
+
+```text
+leader_evidence_required = 2
+leader_evidence_window_observations = 10
+```
+
+The hits do not need to be consecutive.
+
+Example:
+
+```text
+Day 1  Leader Core O   evidence 1/2
+Day 2  cooldown        evidence 1/2
+Day 3  Leader Core O   evidence 2/2
+       -> LEADER
+```
+
+This is intended to capture leaders that alternate between expansion and short consolidation rather than requiring two perfectly consecutive strong days.
+
+Persistence is still evaluated at the next stage:
+
+```text
+LEADER -> PERSISTENT_LEADER
+```
+
+so Leader Core accumulation does not weaken the persistent-leader definition.
+
+## Initial observation
+
+An initial Emerging observation cannot bypass activation confirmation:
+
+```text
+initial_emerging_requires_confirmation = true
+```
+
+Mature `LEADER` / `PERSISTENT_LEADER` warm-start inference remains allowed when historical persistence already proves the mature state.
+
+## Structural failure
 
 Leader Score collapse alone never means `BROKEN`.
 
@@ -28,132 +102,39 @@ Leader Score collapse alone never means `BROKEN`.
 
 Established leaders pass through `EXHAUSTING` before `BROKEN`.
 
-Default hysteresis:
+## Emerging validation terminology
+
+Range reporting now distinguishes lifecycle behavior from price outcome.
 
 ```text
-promotion_confirm_days = 2
-demotion_confirm_days  = 2
-recovery_confirm_days  = 2
+lifecycle_reversion
+= EMERGING returned to DISCOVERY before LEADER conversion
+
+price_failure_D20
+= D+20 return <= 0
+
+strong_price_success_D20
+= D+20 return >= +10%
 ```
 
-## V2.3 Emerging Activation vs Hold
-
-The V1.1 backtest showed that using fresh Rank Velocity for both activation and maintenance was too strict. A successful Emerging stock naturally loses rank velocity after reaching the top of the market.
-
-V2.3 therefore separates two concepts.
-
-### Emerging Activation
-
-`DISCOVERY -> EMERGING` requires fresh Emerging Leader evidence:
-
-```text
-Leader Score >= 72
-Market Leader Rank <= 20
-true_emerging_flag = true
-promotion confirmation = 2 observations by default
-```
-
-`true_emerging_flag` comes from Emerging Leader V1.1:
-
-```text
-Rank Velocity               50
-Trading-value Acceleration  25
-Relative-strength Accel.    15
-Freshness                   10
-- Overheat Penalty
-```
-
-`MOMENTUM_SPIKE` cannot activate Emerging.
-
-### Emerging Hold
-
-Once the stock is already `EMERGING`, fresh Rank Velocity is no longer required every day.
-
-Default hold condition:
-
-```text
-Leader Score >= 60
-AND
-Market Leader Rank <= 50
-```
-
-If this hold condition remains true, the stock stays `EMERGING` even when `true_emerging_flag` becomes false.
-
-If established Leader conditions are met for the configured confirmation period, it moves to:
-
-```text
-EMERGING -> LEADER
-```
-
-If the hold condition fails for `demotion_confirm_days`, it moves back to:
-
-```text
-EMERGING -> DISCOVERY
-```
-
-### Initial observation
-
-A first observation that is only Emerging no longer bypasses confirmation.
-
-Default behavior:
-
-```text
-initial_emerging_requires_confirmation = true
-```
-
-So:
-
-```text
-first Emerging observation
--> DISCOVERY / confirmation 1 of 2
-
-second confirming observation
--> EMERGING
-```
-
-Direct first-observation `LEADER` / `PERSISTENT_LEADER` inference remains allowed when historical persistence already supports the mature state.
-
-Fast-track remains disabled by default:
-
-```text
-allow_strong_emerging_fast_track = false
-```
+The legacy `false_emerging_*` columns remain for backward compatibility, but `lifecycle_reversion_*` should be used for interpretation.
 
 ## Output
-
-Range and screen results include lifecycle columns such as:
-
-- `lifecycle_state`
-- `lifecycle_prev_state`
-- `lifecycle_transition`
-- `lifecycle_days_in_state`
-- `lifecycle_reason`
-- `lifecycle_drawdown_20d_pct`
-- `lifecycle_exhaustion_flags`
-- `lifecycle_broken_flags`
 
 Range analysis writes:
 
 ```text
+range_all_results.csv
+range_candidates.csv
 lifecycle_transitions.csv
 emerging_events.csv
 emerging_summary.csv
 ```
 
-The primary V2.3 validation is whether `RANK_VELOCITY_CONFIRMED` events now have a higher `LEADER` conversion rate without reintroducing the large false-Emerging population from pre-overheat versions.
-
-## Decision-rule isolation
-
-Lifecycle still does not modify:
-
-- Leader Score
-- Timing Score
-- STRONG_CONFIRMED / CONFIRMED / WATCH / REJECT
-
-## Test
+## Tests
 
 From `LeaderStockAnalyzer`:
 
 ```bash
-python -m pytest tests/test_lifecycle.py tests/test_emerging.py -q
+python -m pytest tests/test_lifecycle.py tests/test_emerging.py tests/test_lifecycle_leader_evidence.py tests/test_emerging_reporting.py -q
 ```
