@@ -6,6 +6,7 @@ import pandas as pd
 
 from .analyzer import LeaderStockAnalyzer
 from .data_provider import PyKrxLeaderDataProvider
+from .lifecycle import LeaderLifecycleEngine
 from .models import LeaderResult
 from .persistence import PersistenceEngine
 from .sector_context import SectorContextEngine
@@ -30,6 +31,7 @@ def screen_date(
     base_dir: str | Path,
     progress: bool = True,
     provider: PyKrxLeaderDataProvider | None = None,
+    lifecycle_engine: LeaderLifecycleEngine | None = None,
 ) -> tuple[str, list[LeaderResult]]:
     provider = provider or PyKrxLeaderDataProvider(cfg, base_dir)
     resolved = provider.resolve_scan_date(scan_date)
@@ -93,4 +95,7 @@ def screen_date(
             daily_by_ticker=daily_by_ticker,
         )
 
-    return resolved, analyzer.finalize(enriched)
+    finalized = analyzer.finalize(enriched)
+    lifecycle = lifecycle_engine or LeaderLifecycleEngine(cfg)
+    finalized = lifecycle.enrich(finalized, daily_by_ticker=daily_by_ticker)
+    return resolved, finalized
