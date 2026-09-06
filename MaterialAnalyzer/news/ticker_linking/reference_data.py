@@ -26,13 +26,19 @@ def _split(value) -> tuple[str, ...]:
 
 
 class ReferenceData:
-    FILES = ("ticker_master.csv", "event_theme_rules.csv", "theme_ticker_map.csv", "company_relationships.csv")
+    FILES = (
+        "ticker_master.csv",
+        "ticker_master_krx.csv",
+        "event_theme_rules.csv",
+        "theme_ticker_map.csv",
+        "company_relationships.csv",
+    )
 
     def __init__(self, reference_dir: Path, bootstrap_pairs=()):
         self.reference_dir = Path(reference_dir)
         self.bootstrap_pairs = tuple(sorted((str(t).zfill(6), str(c).strip()) for t, c in bootstrap_pairs if t and c))
         self.signature = self._signature()
-        self.tickers = self._load_ticker_master(self.reference_dir / "ticker_master.csv", self.bootstrap_pairs)
+        self.tickers = self._load_combined_ticker_master(self.reference_dir, self.bootstrap_pairs)
         self.theme_rules = self._load_theme_rules(self.reference_dir / "event_theme_rules.csv")
         self.theme_tickers = self._load_theme_tickers(self.reference_dir / "theme_ticker_map.csv")
         self.relationships = self._load_relationships(self.reference_dir / "company_relationships.csv")
@@ -68,32 +74,68 @@ class ReferenceData:
         return out, ambiguous
 
     @staticmethod
-    def _load_ticker_master(path: Path, bootstrap_pairs) -> list[TickerRef]:
-        by_ticker: dict[str, TickerRef] = {}
-        if path.exists():
-            with path.open("r", encoding="utf-8-sig", newline="") as fp:
-                for row in csv.DictReader(fp):
-                    if not _enabled(row):
-                        continue
-                    ticker = str(row.get("ticker", "")).strip().zfill(6)
-                    name = str(row.get("name", "")).strip()
-                    if not ticker or not name:
-                        continue
-                    by_ticker[ticker] = TickerRef(
-                        ticker=ticker,
-                        name=name,
-                        aliases=_split(row.get("aliases", "")),
-                        market=str(row.get("market", "")).strip(),
-                        sector=str(row.get("sector", "")).strip(),
-                        industry=str(row.get("industry", "")).strip(),
-                    )
+    def _load_ticker_file(path: Path) -> dict[str, TickerRef]:
+        out: dict[str, TickerRef] = {}
+        if not path.exists():
+            return out
+        with path.open("r", encoding="utf-8-sig", newline="") as fp:
+            for row in csv.DictReader(fp):
+                if not _enabled(row):
+                    continue
+                ticker = str(row.get("ticker", "")).strip().zfill(6)
+                name = str(row.get("name", "")).strip()
+                if not ticker or not name:
+                    continue
+                out[ticker] = TickerRef(
+                    ticker=ticker,
+                    name=name,
+                    aliases=_split(row.get("aliases", "")),
+                    market=str(row.get("market", "")).strip(),
+                    sector=str(row.get("sector", "")).strip(),
+                    industry=str(row.get("industry", "")).strip(),
+                )
+        return out
+
+    @classmethod
+    def _load_combined_ticker_master(cls, reference_dir: Path, bootstrap_pairs) -> list[TickerRef]:
+        manual = cls._load_ticker_file(reference_dir / "ticker_master.csv")
+        krx = cls._load_ticker_file(reference_dir / "ticker_master_krx.csv")
+        by_ticker = dict(manual)
+
+        for ticker, runtime in krx.items():
+            seed = manual.get(ticker)
+            if seed is None:
+                by_ticker[ticker] = runtime
+                continue
+            aliases = list(runtime.aliases)
+            if seed.name != runtime.name and seed.name not in aliases:
+                aliases.append(seed.name)
+            for alias in seed.aliases:
+                if alias not in aliases:
+                    aliases.append(alias)
+            by_ticker[ticker] = TickerRef(
+                ticker=ticker,
+                name=runtime.name,
+                aliases=tuple(aliases),
+                market=runtime.market or seed.market,
+                sector=runtime.sector or seed.sector,
+                industry=runtime.industry or seed.industry,
+            )
+
         for ticker, company in bootstrap_pairs:
             current = by_ticker.get(ticker)
             if current is None:
                 by_ticker[ticker] = TickerRef(ticker=ticker, name=company)
             else:
                 aliases = tuple(dict.fromkeys((*current.aliases, company)))
-                by_ticker[ticker] = TickerRef(current.ticker, current.name, aliases, current.market, current.sector, current.industry)
+                by_ticker[ticker] = TickerRef(
+                    ticker=current.ticker,
+                    name=current.name,
+                    aliases=aliases,
+                    market=current.market,
+                    sector=current.sector,
+                    industry=current.industry,
+                )
         return list(by_ticker.values())
 
     @staticmethod
@@ -144,9 +186,16 @@ class ReferenceData:
                 name = str(row.get("name", "")).strip()
                 relation_type = str(row.get("relation_type", "THEME")).strip().upper()
                 if theme and ticker and name and relation_type in {"SECTOR", "THEME"}:
-                    rows.append(ThemeTickerRef(theme, ticker, name, relation_type,
-                        max(0.0, min(1.0, weight)), max(0.0, min(1.0, confidence)),
-                        max(0.0, min(1.0, relevance)), str(row.get("reason", "")).strip()))
+                    rows.append(ThemeTickerRef(
+                        theme=theme,
+                        ticker=ticker,
+                        name=name,
+                        relation_type=relation_type,
+                        relation_weight=max(0.0, min(1.0, weight)),
+                        confidence=max(0.0, min(1.0, confidence)),
+                        mapping_relevance=max(0.0, min(1.0, relevance)),
+                        reason=str(row.get("reason", "")).strip(),
+                    ))
         return rows
 
     @staticmethod
@@ -168,9 +217,13 @@ class ReferenceData:
                 except (TypeError, ValueError):
                     continue
                 rows.append(CompanyRelationship(
-                    str(row.get("subject_name", "")).strip(),
-                    str(row.get("subject_ticker", "")).strip().zfill(6) if str(row.get("subject_ticker", "")).strip() else "",
-                    str(row.get("related_ticker", "")).strip().zfill(6),
-                    str(row.get("related_name", "")).strip(), relation_type,
-                    max(0.0, min(1.0, weight)), max(0.0, min(1.0, confidence)), evidence))
+                    subject_name=str(row.get("subject_name", "")).strip(),
+                    subject_ticker=str(row.get("subject_ticker", "")).strip().zfill(6) if str(row.get("subject_ticker", "")).strip() else "",
+                    related_ticker=str(row.get("related_ticker", "")).strip().zfill(6),
+                    related_name=str(row.get("related_name", "")).strip(),
+                    relation_type=relation_type,
+                    relation_weight=max(0.0, min(1.0, weight)),
+                    confidence=max(0.0, min(1.0, confidence)),
+                    evidence=evidence,
+                ))
         return rows
