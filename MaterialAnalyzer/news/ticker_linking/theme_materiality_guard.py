@@ -6,7 +6,7 @@ from .models import LinkInput, ThemeMatch, ThemeMaterialityResult
 
 
 MEANINGFUL_NUMBER_RE = re.compile(
-    r"\d[\d,]*(?:\.\d+)?\s*(?:조원|억원|만원|달러|%|퍼센트|GW|MW|GWh|MWh|kW|개|건|대|척|명|곳|종|회)",
+    r"\d[\d,]*(?:\.\d+)?\s*(?:조원|억원|만원|조달러|억달러|백만달러|만달러|달러|%|퍼센트|GW|MW|GWh|MWh|kW|개|건|대|척|명|곳|종|회)",
     re.I,
 )
 
