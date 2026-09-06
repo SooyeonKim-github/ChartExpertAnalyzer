@@ -35,6 +35,7 @@ def screen_date(
     progress: bool = True,
     provider: PyKrxLeaderDataProvider | None = None,
     lifecycle_engine: LeaderLifecycleEngine | None = None,
+    exhaustion_engine: ExhaustionRiskEngine | None = None,
 ) -> tuple[str, list[LeaderResult]]:
     provider = provider or PyKrxLeaderDataProvider(cfg, base_dir)
     resolved = provider.resolve_scan_date(scan_date)
@@ -114,9 +115,11 @@ def screen_date(
             history=history,
             market_period_returns=market_period_returns,
         )
-        # Exhaustion Risk V1 is observational. It is calculated before
-        # lifecycle assignment but does not feed back into lifecycle yet.
-        enriched = ExhaustionRiskEngine(cfg).enrich(
+        # Exhaustion Risk V1.1 is observational. Range scans pass a persistent
+        # engine so Leader Score / RS / Persistence peak-to-current decay uses
+        # only previously observed scan dates without future leakage.
+        exhaustion = exhaustion_engine or ExhaustionRiskEngine(cfg)
+        enriched = exhaustion.enrich(
             enriched,
             daily_by_ticker=daily_by_ticker,
             history=history,
