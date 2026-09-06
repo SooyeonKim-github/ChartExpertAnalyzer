@@ -33,7 +33,8 @@ class GovernmentRangeCollector:
 
     Only candidates whose list row exposes a publication date are accepted. This is
     intentional: an undated historical row must not be assigned today's collection
-    timestamp and leak into a point-in-time backtest.
+    timestamp and leak into a point-in-time backtest. A source is considered usable
+    only when pagination demonstrably reaches the requested historical window.
     """
 
     def __init__(self, endpoint, start_date: date, end_date: date, *, max_pages: int = 500):
@@ -49,6 +50,11 @@ class GovernmentRangeCollector:
         accepted = []
         seen = set()
         previous_signature = None
+        reached_window = False
+        reached_start = False
+        exhausted = False
+        duplicate_page = False
+        last_oldest = None
 
         for page in range(1, self.max_pages + 1):
             paged = replace(
@@ -61,18 +67,22 @@ class GovernmentRangeCollector:
             except Exception:
                 if page == 1:
                     raise
+                exhausted = True
                 break
             signature = tuple(sorted((row.external_id or row.url) for row in rows))
             if signature == previous_signature:
+                duplicate_page = True
                 break
             previous_signature = signature
 
             dated = [row for row in rows if row.published_at_hint is not None]
             if not dated:
-                # Do not guess dates in historical mode.
                 continue
 
             oldest = min(row.published_at_hint.date() for row in dated)
+            last_oldest = oldest
+            if oldest <= self.end_date:
+                reached_window = True
             for row in dated:
                 published = row.published_at_hint.date()
                 if not (self.start_date <= published <= self.end_date):
@@ -85,7 +95,27 @@ class GovernmentRangeCollector:
                 accepted.append(row)
 
             if oldest < self.start_date:
+                reached_start = True
                 break
+        else:
+            exhausted = False
+
+        if not reached_window:
+            reason = "pagination did not reach requested historical window"
+            if duplicate_page:
+                reason += "; page parameter appears to be ignored"
+            if last_oldest:
+                reason += f"; oldest_seen={last_oldest.isoformat()} requested_end={self.end_date.isoformat()}"
+            raise DiscoverError(f"{self.endpoint.source_id}: {reason}")
+
+        if not reached_start and not exhausted:
+            reason = f"historical traversal incomplete before requested_start={self.start_date.isoformat()}"
+            if duplicate_page:
+                reason += "; repeated page signature"
+            else:
+                reason += f"; max_pages={self.max_pages}"
+            raise DiscoverError(f"{self.endpoint.source_id}: {reason}")
+
         return accepted
 
     def fetch(self, candidate):
