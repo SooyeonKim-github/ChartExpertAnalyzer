@@ -69,7 +69,7 @@ def test_emerging_engine_detects_fast_rank_velocity():
         )
 
     rising = _frame(
-        np.linspace(100, 125, dates),
+        np.array([100, 100, 100, 100, 100, 100, 100, 102, 110, 125], dtype=float),
         np.array([3, 4, 5, 6, 8, 10, 15, 22, 30, 38], dtype=float) * 1_000_000_000.0,
     )
     frames["999999"] = rising
@@ -85,7 +85,8 @@ def test_emerging_engine_detects_fast_rank_velocity():
     assert out.emerging_available is True
     assert out.emerging_rank_today <= 5
     assert out.rank_velocity_5d is not None and out.rank_velocity_5d >= 30
-    assert out.emerging_leader_score is not None and out.emerging_leader_score >= 70
+    assert out.emerging_rs_acceleration is not None and out.emerging_rs_acceleration > 0
+    assert out.emerging_leader_score is not None and out.emerging_leader_score >= 85
     assert out.true_emerging_flag is True
     assert out.strong_emerging_flag is True
 
