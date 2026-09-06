@@ -45,6 +45,10 @@ RULE_CATALOG = (
     RuleSpec("stock.relative_strength_windows", EXPERIMENTAL, BACKTEST_ONLY, "강의에 없는 20/60 거래일 관측창"),
     RuleSpec("stock.relative_strength_percentile", EXPERIMENTAL, BACKTEST_ONLY, "동일 시장의 스캔 Top-N 유니버스 내 20/60일 RS percentile 및 단순 평균 composite"),
     RuleSpec("stock.relative_strength_percentile_threshold", EXPERIMENTAL, BACKTEST_ONLY, "기본 composite percentile 80 이상 여부"),
+    RuleSpec("stock.prior_advance", LECTURE_CORE, BACKTEST_ONLY, "유효한 베이스 이전에 강한 선행 상승이 있어야 한다는 강의 원칙"),
+    RuleSpec("stock.prior_advance_window_proxy", EXPERIMENTAL, BACKTEST_ONLY, "Base Detector 전에는 최근 20거래일을 잠정 Base로 제외하고 이전 120거래일의 최대 시간순 저점→고점 상승을 측정"),
+    RuleSpec("stock.prior_advance_threshold", EXPERIMENTAL, BACKTEST_ONLY, "선행 상승폭 30% 이상 여부; 강의에 없는 실험 임계값"),
+    RuleSpec("stock.prior_advance_ma150_expansion", EXPERIMENTAL, BACKTEST_ONLY, "선행 고점의 MA150 대비 확장 정도"),
 )
 
 

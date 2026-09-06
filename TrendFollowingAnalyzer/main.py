@@ -1,190 +1,23 @@
 from __future__ import annotations
-
 import argparse
 from pathlib import Path
-
 import pandas as pd
-
-from trend_following_analyzer import load_config, screen_date
+from trend_following_analyzer import load_config,screen_date
 from trend_following_analyzer.rule_catalog import rule_catalog_rows
 
-
-def main() -> None:
-    parser = argparse.ArgumentParser(
-        description="Independent trend-following screener for Korean equities"
-    )
-    parser.add_argument("--date", help="Scan date YYYYMMDD. Defaults to latest trading date.")
-    parser.add_argument("--top-n", type=int, default=None, help="Top N by scan-date trading value")
-    parser.add_argument("--config", default="config/default.yaml")
-    parser.add_argument("--universe-xlsx", default=None)
-    parser.add_argument("--out", default="results")
-    args = parser.parse_args()
-
-    base_dir = Path(__file__).resolve().parent
-    cfg = load_config(base_dir / args.config)
-    resolved, results = screen_date(
-        cfg,
-        scan_date=args.date,
-        top_n=args.top_n,
-        base_dir=base_dir,
-        universe_xlsx=args.universe_xlsx,
-    )
-
-    df = pd.DataFrame([r.to_dict() for r in results])
-    out_dir = base_dir / args.out / resolved
-    out_dir.mkdir(parents=True, exist_ok=True)
-    encoding = cfg.get("output", {}).get("encoding", "utf-8-sig")
-
-    all_path = out_dir / "stage_market_screen.csv"
-    legacy_path = out_dir / "stage_screen.csv"
-    stage2_path = out_dir / "stage2_candidates.csv"
-    core_path = out_dir / "lecture_core_candidates.csv"
-    breadth_path = out_dir / "market_breadth_summary.csv"
-    intraday_path = out_dir / "market_intraday_summary.csv"
-    rs_path = out_dir / "relative_strength_summary.csv"
-    rule_path = out_dir / "rule_catalog.csv"
-
-    df.to_csv(all_path, index=False, encoding=encoding)
-    df.to_csv(legacy_path, index=False, encoding=encoding)
-    pd.DataFrame(rule_catalog_rows()).to_csv(rule_path, index=False, encoding=encoding)
-
+def main():
+    p=argparse.ArgumentParser(description="Independent trend-following screener for Korean equities"); p.add_argument("--date"); p.add_argument("--top-n",type=int,default=None); p.add_argument("--config",default="config/default.yaml"); p.add_argument("--universe-xlsx",default=None); p.add_argument("--out",default="results"); a=p.parse_args(); base=Path(__file__).resolve().parent; cfg=load_config(base/a.config); resolved,results=screen_date(cfg,scan_date=a.date,top_n=a.top_n,base_dir=base,universe_xlsx=a.universe_xlsx); df=pd.DataFrame([r.to_dict() for r in results]); out=base/a.out/resolved; out.mkdir(parents=True,exist_ok=True); enc=cfg.get("output",{}).get("encoding","utf-8-sig")
+    paths={"all":out/"stage_market_screen.csv","legacy":out/"stage_screen.csv","stage2":out/"stage2_candidates.csv","core":out/"lecture_core_candidates.csv","breadth":out/"market_breadth_summary.csv","intraday":out/"market_intraday_summary.csv","rs":out/"relative_strength_summary.csv","prior":out/"prior_advance_summary.csv","rules":out/"rule_catalog.csv"}; df.to_csv(paths["all"],index=False,encoding=enc); df.to_csv(paths["legacy"],index=False,encoding=enc); pd.DataFrame(rule_catalog_rows()).to_csv(paths["rules"],index=False,encoding=enc)
     if df.empty:
-        df.to_csv(stage2_path, index=False, encoding=encoding)
-        df.to_csv(core_path, index=False, encoding=encoding)
-        pd.DataFrame().to_csv(breadth_path, index=False, encoding=encoding)
-        pd.DataFrame().to_csv(intraday_path, index=False, encoding=encoding)
-        pd.DataFrame().to_csv(rs_path, index=False, encoding=encoding)
+        for k in ("stage2","core","breadth","intraday","rs","prior"): pd.DataFrame().to_csv(paths[k],index=False,encoding=enc)
     else:
-        df[df["stage"].eq("STAGE_2")].to_csv(stage2_path, index=False, encoding=encoding)
-        df[df["lecture_core_pass"].eq(True)].to_csv(core_path, index=False, encoding=encoding)
-
-        breadth_cols = [
-            "market", "market_breadth_status", "market_breadth_measurement",
-            "market_breadth_universe_count", "market_breadth_eligible_count",
-            "market_breadth_coverage_ratio", "market_new_high_52w_count",
-            "market_new_low_52w_count", "market_new_high_52w_ratio",
-            "market_new_low_52w_ratio", "market_new_high_low_spread",
-            "market_breadth_5d_avg", "market_breadth_20d_avg",
-            "market_breadth_5d_change", "market_breadth_20d_change",
-            "market_breadth_direction", "market_breadth_snapshot_dates_loaded",
-            "market_breadth_snapshot_dates_expected",
-            "market_breadth_snapshot_date_coverage_ratio",
-            "market_breadth_filter_applied",
-        ]
-        df[breadth_cols].drop_duplicates("market").sort_values("market").to_csv(
-            breadth_path, index=False, encoding=encoding
-        )
-
-        intraday_cols = [
-            "market", "market_intraday_status", "market_intraday_measurement",
-            "market_gap_return_pct", "market_open_close_return_pct",
-            "market_close_return_pct", "market_close_location_value",
-            "market_recovery_strength_pct", "market_fade_strength_pct",
-            "market_intraday_label", "market_experimental_intraday_strength_score",
-            "market_weak_open_strong_close_5d_ratio",
-            "market_weak_open_strong_close_20d_ratio",
-            "market_strong_open_weak_close_5d_ratio",
-            "market_strong_open_weak_close_20d_ratio",
-            "market_strong_close_5d_ratio", "market_strong_close_20d_ratio",
-            "market_weak_close_5d_ratio", "market_weak_close_20d_ratio",
-            "market_intraday_direction", "market_intraday_filter_applied",
-        ]
-        df[intraday_cols].drop_duplicates("market").sort_values("market").to_csv(
-            intraday_path, index=False, encoding=encoding
-        )
-
-        rs_cols = [
-            "ticker", "name", "market", "trading_value_rank",
-            "rs_status", "rs_measurement", "rs_percentile_scope",
-            "stock_return_20d_pct", "benchmark_return_20d_pct", "rs_20d_pct",
-            "stock_return_60d_pct", "benchmark_return_60d_pct", "rs_60d_pct",
-            "rs_percentile_20d", "rs_percentile_60d", "rs_percentile_composite",
-            "rs_label", "rs_experimental_20d_outperform_pass",
-            "rs_experimental_60d_outperform_pass",
-            "rs_experimental_percentile_pass", "rs_filter_applied",
-        ]
-        df[rs_cols].sort_values(
-            ["rs_percentile_composite", "trading_value_rank"],
-            ascending=[False, True],
-            na_position="last",
-        ).to_csv(rs_path, index=False, encoding=encoding)
-
-    print("\n============================================")
-    print(f" TrendFollowingAnalyzer | {resolved}")
-    print(" Phase 1-5: Stage / Market Regime / Breadth / Intraday / RS")
-    print("============================================")
-    print(" Active filters : LECTURE_CORE MA150 rules only")
-    print(" 52W Breadth    : BACKTEST_ONLY")
-    print(" Intraday Proxy : BACKTEST_ONLY")
-    print(" Relative Str.  : BACKTEST_ONLY (20D/60D + same-market percentile)")
-    print(" Experimental   : recorded only, not gating")
-
+        df[df["stage"].eq("STAGE_2")].to_csv(paths["stage2"],index=False,encoding=enc); df[df["lecture_core_pass"].eq(True)].to_csv(paths["core"],index=False,encoding=enc)
+        bcols=["market","market_breadth_status","market_breadth_measurement","market_breadth_source_mode","market_breadth_membership_mode","market_breadth_source_ticker_count","market_breadth_failed_tickers","market_breadth_universe_count","market_breadth_eligible_count","market_breadth_coverage_ratio","market_new_high_52w_count","market_new_low_52w_count","market_new_high_52w_ratio","market_new_low_52w_ratio","market_new_high_low_spread","market_breadth_5d_avg","market_breadth_20d_avg","market_breadth_5d_change","market_breadth_20d_change","market_breadth_direction","market_breadth_snapshot_dates_loaded","market_breadth_snapshot_dates_expected","market_breadth_snapshot_date_coverage_ratio","market_breadth_filter_applied"]; df[bcols].drop_duplicates("market").sort_values("market").to_csv(paths["breadth"],index=False,encoding=enc)
+        icols=[c for c in df.columns if c=="market" or c.startswith("market_intraday_") or c.startswith("market_gap_") or c.startswith("market_open_close_") or c.startswith("market_close_location_") or c.startswith("market_recovery_") or c.startswith("market_fade_") or c.startswith("market_weak_open_") or c.startswith("market_strong_open_") or c.startswith("market_strong_close_") or c.startswith("market_weak_close_") or c.startswith("market_experimental_intraday_")]; df[icols].drop_duplicates("market").sort_values("market").to_csv(paths["intraday"],index=False,encoding=enc)
+        rcols=["ticker","name","market","trading_value_rank","rs_status","rs_measurement","rs_percentile_scope","stock_return_20d_pct","benchmark_return_20d_pct","rs_20d_pct","stock_return_60d_pct","benchmark_return_60d_pct","rs_60d_pct","rs_percentile_20d","rs_percentile_60d","rs_percentile_composite","rs_label","rs_experimental_20d_outperform_pass","rs_experimental_60d_outperform_pass","rs_experimental_percentile_pass","rs_filter_applied"]; df[rcols].sort_values(["rs_percentile_composite","trading_value_rank"],ascending=[False,True],na_position="last").to_csv(paths["rs"],index=False,encoding=enc)
+        pcols=["ticker","name","market","trading_value_rank","stage","lecture_core_pass","prior_advance_status","prior_advance_measurement","prior_advance_anchor_mode","prior_advance_lookback_sessions","prior_advance_recent_window_sessions","prior_advance_low_date","prior_advance_peak_date","prior_advance_low","prior_advance_peak","prior_advance_pct","prior_advance_duration_sessions","prior_advance_sessions_from_peak_to_anchor","prior_advance_current_vs_peak_pct","prior_advance_peak_vs_ma150_pct","prior_return_60d_pct","prior_return_120d_pct","prior_advance_experimental_min_pass","prior_advance_filter_applied"]; df[pcols].sort_values(["prior_advance_pct","trading_value_rank"],ascending=[False,True],na_position="last").to_csv(paths["prior"],index=False,encoding=enc)
+    print("\n============================================"); print(f" TrendFollowingAnalyzer | {resolved}"); print(" Phase 1-6: Stage / Market / Breadth / Intraday / RS / Prior Advance"); print("============================================"); print(" Active filters : LECTURE_CORE MA150 rules only"); print(" 52W Breadth    : BACKTEST_ONLY"); print(" Intraday Proxy : BACKTEST_ONLY"); print(" Relative Str.  : BACKTEST_ONLY"); print(" Prior Advance  : BACKTEST_ONLY (120D proxy, recent 20D excluded)")
     if not df.empty:
-        market_view = df[
-            [
-                "market", "market_regime", "market_eligible",
-                "market_index_close", "market_index_ma150",
-                "market_index_ma150_slope_pct", "market_regime_reason",
-            ]
-        ].drop_duplicates("market").sort_values("market")
-        print("\n[MARKET REGIME]")
-        print(market_view.to_string(index=False))
-
-        breadth_view = df[
-            [
-                "market", "market_breadth_status", "market_breadth_coverage_ratio",
-                "market_new_high_52w_ratio", "market_new_low_52w_ratio",
-                "market_new_high_low_spread", "market_breadth_5d_change",
-                "market_breadth_20d_change", "market_breadth_direction",
-            ]
-        ].drop_duplicates("market").sort_values("market")
-        print("\n[52W BREADTH - BACKTEST ONLY]")
-        print(breadth_view.to_string(index=False))
-
-        intraday_view = df[
-            [
-                "market", "market_intraday_status", "market_intraday_label",
-                "market_gap_return_pct", "market_open_close_return_pct",
-                "market_close_location_value", "market_strong_close_5d_ratio",
-                "market_strong_close_20d_ratio", "market_weak_close_5d_ratio",
-                "market_weak_close_20d_ratio", "market_intraday_direction",
-            ]
-        ].drop_duplicates("market").sort_values("market")
-        print("\n[INTRADAY STRENGTH PROXY - BACKTEST ONLY]")
-        print(intraday_view.to_string(index=False))
-
-        rs_view = df[
-            [
-                "ticker", "name", "market", "rs_label",
-                "rs_20d_pct", "rs_60d_pct",
-                "rs_percentile_20d", "rs_percentile_60d",
-                "rs_percentile_composite",
-                "rs_experimental_percentile_pass",
-            ]
-        ].sort_values(
-            "rs_percentile_composite", ascending=False, na_position="last"
-        )
-        print("\n[RELATIVE STRENGTH - BACKTEST ONLY]")
-        print(rs_view.head(30).to_string(index=False))
-
-        cols = [
-            "ticker", "name", "market", "market_regime", "stage",
-            "lecture_core_pass", "rs_label", "rs_20d_pct", "rs_60d_pct",
-            "rs_percentile_composite", "close", "ma150", "ma150_slope_pct",
-        ]
-        print("\n[TOP SCREEN]")
-        print(df[cols].head(30).to_string(index=False))
-        print("\n[STAGE COUNTS]")
-        print(df["stage"].value_counts(dropna=False).to_string())
-    else:
-        print("No analyzable symbols.")
-
-    for path in [
-        all_path, stage2_path, core_path, breadth_path,
-        intraday_path, rs_path, rule_path,
-    ]:
-        print(f"[DONE] {path}")
-
-
-if __name__ == "__main__":
-    main()
+        print("\n[MARKET COUNTS]"); print(df["market"].value_counts(dropna=False).to_string()); print("\n[52W BREADTH SOURCE]"); print(df[["market","market_breadth_source_mode","market_breadth_membership_mode","market_breadth_source_ticker_count","market_breadth_direction"]].drop_duplicates("market").sort_values("market").to_string(index=False)); print("\n[INTRADAY STRENGTH]"); print(df[["market","market_intraday_status","market_intraday_label","market_close_location_value","market_intraday_direction"]].drop_duplicates("market").sort_values("market").to_string(index=False)); print("\n[PRIOR ADVANCE - BACKTEST ONLY]"); print(df[["ticker","name","market","stage","prior_advance_pct","prior_advance_duration_sessions","prior_advance_current_vs_peak_pct","prior_advance_peak_vs_ma150_pct","prior_advance_experimental_min_pass"]].sort_values("prior_advance_pct",ascending=False,na_position="last").head(30).to_string(index=False)); print("\n[STAGE COUNTS]"); print(df["stage"].value_counts(dropna=False).to_string())
+    for x in paths.values(): print(f"[DONE] {x}")
+if __name__=="__main__": main()

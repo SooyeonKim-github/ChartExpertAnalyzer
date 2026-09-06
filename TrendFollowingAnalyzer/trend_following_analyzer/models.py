@@ -36,6 +36,10 @@ class StageScreenResult:
     market_regime_reason: str
     market_breadth_status: str
     market_breadth_measurement: str
+    market_breadth_source_mode: str
+    market_breadth_membership_mode: str
+    market_breadth_source_ticker_count: int
+    market_breadth_failed_tickers: int
     market_breadth_universe_count: int
     market_breadth_eligible_count: int
     market_breadth_coverage_ratio: float | None
@@ -90,6 +94,24 @@ class StageScreenResult:
     rs_experimental_60d_outperform_pass: bool
     rs_experimental_percentile_pass: bool
     rs_filter_applied: bool
+    prior_advance_status: str
+    prior_advance_measurement: str
+    prior_advance_anchor_mode: str
+    prior_advance_lookback_sessions: int
+    prior_advance_recent_window_sessions: int
+    prior_advance_low_date: str | None
+    prior_advance_peak_date: str | None
+    prior_advance_low: float | None
+    prior_advance_peak: float | None
+    prior_advance_pct: float | None
+    prior_advance_duration_sessions: int | None
+    prior_advance_sessions_from_peak_to_anchor: int | None
+    prior_advance_current_vs_peak_pct: float | None
+    prior_advance_peak_vs_ma150_pct: float | None
+    prior_return_60d_pct: float | None
+    prior_return_120d_pct: float | None
+    prior_advance_experimental_min_pass: bool
+    prior_advance_filter_applied: bool
     lecture_core_pass: bool
     experimental_filters_applied: bool
 
