@@ -11,8 +11,8 @@
    - 4A. 지수 vs MA150 + MA150 기울기 ✅
    - 4B. 52주 신고가 Breadth ✅
    - 4C. 전약후강 / 전강후약 Daily OHLC Proxy ✅
-   - 4D. 호재/악재 민감도 ⏳
-5. Relative Strength
+   - 4D. 호재/악재 민감도 ⏸ 보류
+5. Relative Strength ✅
 6. Prior Advance
 7. Generic Base Detector
 8. Volume Contraction
@@ -27,39 +27,45 @@
 17. Threshold Optimizer
 18. Ablation Backtest
 
-## Rule Provenance 원칙
+## 원칙
 
-모든 규칙은 `rule_catalog.csv`에 출처와 사용 상태를 기록합니다. `LECTURE_CORE`는 강의 원칙, `EXPERIMENTAL`은 구현상 추가, `ACTIVE_FILTER`는 실제 필터, `BACKTEST_ONLY`는 기록만, `PLANNED`는 미구현입니다.
+`LECTURE_CORE`와 구현상 추가한 `EXPERIMENTAL`을 구분하고, 검증 전 지표는 `BACKTEST_ONLY`로 저장만 합니다. 현재 ACTIVE_FILTER는 종목 `STAGE_2`와 해당 시장 `BULL`뿐입니다. Breadth, Intraday Proxy, RS는 아직 후보를 제거하지 않습니다.
 
-현재 ACTIVE_FILTER는 종목 `close > MA150 + slope > 0`의 STAGE_2와 시장 지수 `close > MA150 + slope > 0`의 BULL뿐입니다. Breadth와 Intraday Proxy는 후보를 제거하지 않습니다.
+## Phase 5 - Relative Strength
 
-## 4C 전약후강 / 전강후약
+강의의 RS는 RSI가 아니라 **종목이 시장보다 얼마나 강한지**를 뜻합니다. 특히 시장이 조정/횡보할 때 덜 빠지거나 오르는 종목을 선도주 후보로 보는 원칙을 구현합니다.
 
-지수 일봉 OHLC를 이용해 Daily Proxy로 근사합니다. 일봉만으로는 고가/저가 발생 순서를 알 수 없으므로 실제 오전/오후 순서를 의미하지 않습니다.
+현재 수치화 방식:
 
-저장값: `gap_return_pct`, `open_close_return_pct`, `close_return_pct`, `close_location_value`, `recovery_strength_pct`, `fade_strength_pct`, `experimental_intraday_strength_score`.
+```text
+stock_factor_N = stock_close_today / stock_close_N_sessions_ago
+benchmark_factor_N = benchmark_close_today / benchmark_close_N_sessions_ago
+RS_N = (stock_factor_N / benchmark_factor_N - 1) * 100
+```
 
-라벨은 `WEAK_OPEN_STRONG_CLOSE`, `STRONG_OPEN_WEAK_CLOSE`, `STRONG_CLOSE`, `WEAK_CLOSE`, `MIXED`, `INSUFFICIENT`입니다. 기본 실험 임계값은 Strong Close=`CLV >= 0.70 AND close > open`, Weak Close=`CLV <= 0.30 AND close < open`이며 강의 수치가 아니므로 EXPERIMENTAL+BACKTEST_ONLY입니다.
+- KOSPI 종목은 KOSPI 지수, KOSDAQ 종목은 KOSDAQ 지수와 비교
+- 20일 / 60일 RS 저장
+- 동일 시장의 당일 거래대금 Top-N 스크린 유니버스 안에서 20/60일 percentile 계산
+- `rs_percentile_composite`는 20/60일 percentile 단순 평균
+- `experimental_min_percentile=80` 여부도 기록
 
-최근 5일/20일의 전약후강·전강후약·Strong Close·Weak Close 비율과 `intraday_direction=IMPROVING/WEAKENING/MIXED/INSUFFICIENT`를 저장합니다. Recovery/Fade/복합점수도 저장하지만 V1 의사결정에는 쓰지 않습니다.
+강의에는 20/60일, percentile 80 같은 숫자가 없으므로 이 수치들은 모두 EXPERIMENTAL+BACKTEST_ONLY입니다.
 
-## 4D 뉴스 반응 설계 방향
-
-핵심은 뉴스 감성 자체보다 **시장이 악재를 흡수하는지, 악재에 민감하게 무너지는지**를 측정하는 것입니다.
-
-1. 시장 영향 뉴스 이벤트 수집
-2. `POSITIVE / NEGATIVE / NEUTRAL` 분류
-3. 발표 시각을 기준으로 같은 거래일/다음 거래일에 정렬
-4. KOSPI/KOSDAQ의 당일/익일 수익률, 시가 갭, 종가 회복, CLV, 변동성/거래대금 반응 측정
-5. `NEGATIVE_NEWS_ABSORBED`, `NEGATIVE_NEWS_SENSITIVE`, `POSITIVE_NEWS_RESPONSIVE`, `POSITIVE_NEWS_IGNORED` 등으로 반응 분류
-6. 최근 5일/20일 absorption/sensitivity 비율 계산
-7. 초기에는 전부 BACKTEST_ONLY
-
-뉴스 중요도·감성모델·반응시간창은 구현상 추가 요소이므로 Ablation/Threshold 검증 전까지 ACTIVE_FILTER로 사용하지 않습니다.
+라벨은 `WEAK_MARKET_RESILIENT`, `CONSISTENT_OUTPERFORM`, `MIXED_OUTPERFORMANCE`, `UNDERPERFORM`, `INSUFFICIENT`를 저장합니다.
 
 ## 출력
 
-`results/<YYYYMMDD>/` 아래 `stage_market_screen.csv`, `stage2_candidates.csv`, `lecture_core_candidates.csv`, `market_breadth_summary.csv`, `market_intraday_summary.csv`, `rule_catalog.csv`가 생성됩니다.
+```text
+results/<YYYYMMDD>/
+├─ stage_market_screen.csv
+├─ stage_screen.csv
+├─ stage2_candidates.csv
+├─ lecture_core_candidates.csv
+├─ market_breadth_summary.csv
+├─ market_intraday_summary.csv
+├─ relative_strength_summary.csv
+└─ rule_catalog.csv
+```
 
 ## 실행
 
@@ -69,6 +75,6 @@ run_screen.bat
 
 또는 `python main.py --date 20260904 --top-n 100`.
 
-## 백테스트 원칙
+## 향후 RS 백테스트
 
-A. MA150 시장 필터만 / B. A+Breadth / C. A+Intraday / D. A+Breadth+Intraday를 비교하고, 유효한 경우에만 Threshold Optimizer 후 ACTIVE_FILTER로 승격합니다.
+A. Stage2 + Market BULL / B. A+RS20>0 / C. A+RS20>0+RS60>0 / D. A+RS percentile>=70 / E. >=80 / F. >=90을 비교하고, 여러 기간과 시장 국면에서 안정적인 조건만 ACTIVE_FILTER 승격을 검토합니다.
