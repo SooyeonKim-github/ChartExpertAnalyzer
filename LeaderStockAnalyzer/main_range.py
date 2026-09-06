@@ -47,7 +47,10 @@ def main() -> None:
         f"[INFO] Leader range ready | trading_days={len(dates)} "
         f"| daily ranking=scan-date trading_value TOP {args.top_n}"
     )
-    print("[INFO] Leader Lifecycle V1 enabled | state is carried across scan dates")
+    print(
+        "[INFO] Leader Lifecycle V2 enabled | hysteresis=ON | "
+        "BROKEN requires structural price failure"
+    )
 
     max_horizon = max(performance.horizons + performance.excursion_horizons)
     future_calendar_days = max_horizon * 2 + 30
