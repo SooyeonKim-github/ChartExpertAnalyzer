@@ -1,29 +1,39 @@
-# Exhaustion Risk V1
+# Exhaustion Risk V1.1
 
-`ExhaustionRiskEngine` scores whether an active leader is losing quality before a confirmed structural breakdown.
+`ExhaustionRiskEngine` estimates whether an established leader is **rolling over from a recent peak**, before a confirmed structural breakdown.
 
-V1 is **observational only**. It does not change:
+V1.1 remains **observational only**. It does not change:
 
 - Leader Score
 - Timing Score
 - STRONG_CONFIRMED / CONFIRMED / WATCH / REJECT
 - Lifecycle state
 
-The purpose of V1 is to backtest whether high exhaustion scores predict weaker forward returns, larger MAE, and later `EXHAUSTING` / `BROKEN` transitions.
+The first V1 backtest showed that raw overextension was not predictive enough: strong healthy leaders are often far above MA20 and extended by ATR. V1.1 therefore changes the question from:
+
+```text
+How far has the leader already risen?
+```
+
+to:
+
+```text
+After becoming strong, how much has momentum / leadership / money flow / structure deteriorated from its recent peak?
+```
 
 ## Score
 
 ```text
-Overextension / Heat          25
-Momentum Deceleration         25
-Distribution / Breakout Fail  20
-Money-flow / Rank Decay       15
-Price Structure Damage        15
---------------------------------
-Total                        100
+Overextension Context             5
+Momentum Rollover                30
+Distribution / Breakout Failure  25
+Money-flow / Rank Decay          20
+Structure Deterioration          20
+-----------------------------------
+Total                           100
 ```
 
-Default labels:
+Default labels are unchanged for clean attribution against V1:
 
 ```text
 0 ~ 34    LOW
@@ -32,49 +42,68 @@ Default labels:
 75 ~ 100  CRITICAL
 ```
 
-## 1. Overextension / Heat — 25
+## 1. Overextension Context — 5
+
+Overextension is now only supporting context.
 
 Uses:
 
-- distance from MA20
+- MA20 distance
 - 5-day return
 - ATR-normalized extension
-- existing Chase Risk
+- Chase Risk
 
-Examples of risk evidence:
+A stock does **not** become HIGH merely because it is strongly extended.
 
 ```text
-MA20 distance >= +15~20%
-5-day return >= +15~25%
-ATR extension >= 2~3 ATR
-Chase Risk >= 50~70
+MA20 +20%
+ATR 3x
+strong 5-day return
+
+=> context points only
 ```
 
-This component tries to separate a healthy leader from a parabolic leader that may already be late in the move.
+The score becomes meaningful when extension is followed by rollover evidence.
 
-## 2. Momentum Deceleration — 25
+## 2. Momentum Rollover — 30
+
+This is the primary V1.1 component.
 
 Uses:
 
-- latest 3-day return vs previous 3-day return
-- RS deceleration
-- Rank Velocity reversal
-- negative day after a fast 5-day run
+- current 3-day momentum
+- highest 3-day momentum observed during the recent 10-day price window
+- drop from that momentum peak
+- current 3-day return vs the previous 3-day return
+- Leader Score peak over the previous 5 observed scan dates
+- Leader Score decay from that peak
+- RS peak over the previous 5 observed scan dates
+- RS decay from that peak
+- negative day after a strong momentum peak
 
-Conceptually:
+Example:
 
 ```text
-previous 3d +15%
-latest   3d  +4%
+3-day momentum peak   +16%
+current 3-day momentum +2%
 
-=> price momentum deceleration
+momentum drop = 14%p
 ```
 
-A leader can still be near its high while its rate of advance is already weakening.
+and:
 
-## 3. Distribution / Breakout Failure — 20
+```text
+Leader Score peak  92
+current score      63
 
-Reuses existing Breakout Quality evidence:
+Leader Score decay = 29
+```
+
+Range scans reuse one `ExhaustionRiskEngine` instance across scan dates, so Leader Score / RS / Persistence peak values are point-in-time historical observations only. No future observation is used.
+
+## 3. Distribution / Breakout Failure — 25
+
+Reuses existing Breakout Quality evidence with increased importance:
 
 - `false_breakout_flag`
 - `breakout_exhaustion_risk`
@@ -82,16 +111,18 @@ Reuses existing Breakout Quality evidence:
 - weak close location
 - high-volume down day
 
-This is intended to identify selling pressure appearing near the top of a leadership move.
+This component is intended to identify actual selling pressure rather than simple price extension.
 
-## 4. Money-flow / Rank Decay — 15
+## 4. Money-flow / Rank Decay — 20
 
-Uses shared `LeadershipHistoryContext`:
+Uses shared `LeadershipHistoryContext` plus observed Persistence history:
 
 - 3-day trading-value rank reversal
 - 5-day trading-value rank reversal
 - current trading value vs recent 5-day peak
-- Persistence Score decay
+- Persistence Score peak over previous observations
+- Persistence Score decay from that peak
+- currently weak Persistence Score
 
 Example:
 
@@ -99,32 +130,37 @@ Example:
 Trading-value rank
 3 -> 5 -> 12 -> 27
 
-price still near high
-=> money-flow decay before visible price damage
+Trading value
+peak 400B -> current 130B
 ```
 
-## 5. Price Structure Damage — 15
+This is stronger exhaustion evidence than simply being highly ranked today.
+
+## 5. Structure Deterioration — 20
+
+V1.1 focuses on **deterioration speed**, not only absolute MA breaks.
 
 Uses:
 
-- drawdown from 20-day high
+- MA10 distance decay from recent peak
+- MA20 distance decay from recent peak
+- drawdown from the 20-day high
 - MA10 break
 - MA20 break
-- 5-day change in MA20
+- MA20 5-day slope
 
-The distinction is intentional:
+Example:
 
 ```text
-MA10 break / moderate drawdown
-=> possible exhaustion
-
-MA20 break + deep drawdown / large selloff
-=> existing Lifecycle BROKEN evidence
+MA20 distance
++18% -> +14% -> +8% -> +2%
 ```
+
+The stock is still above MA20, but leadership structure is deteriorating quickly.
 
 ## Output columns
 
-Important columns include:
+Existing V1 diagnostics remain, with additional V1.1 fields:
 
 ```text
 exhaustion_risk_available
@@ -137,21 +173,31 @@ exhaustion_distribution_score
 exhaustion_money_flow_decay_score
 exhaustion_structure_score
 
-exhaustion_flags
-exhaustion_return_5d
-exhaustion_return_10d
-price_momentum_deceleration
-rs_deceleration
+exhaustion_momentum_3d
+exhaustion_momentum_peak_10d
+exhaustion_momentum_drop_from_peak
+
+exhaustion_leader_score_peak_5obs
+exhaustion_leader_score_decay
+
+exhaustion_rs_current
+exhaustion_rs_peak_5obs
+exhaustion_rs_decay_from_peak
+
+exhaustion_persistence_peak_5obs
+exhaustion_persistence_decay_from_peak
+
 rank_reversal_3d
 rank_reversal_5d
 trading_value_decay_ratio
+
 exhaustion_distance_ma10_pct
 exhaustion_distance_ma20_pct
-atr_extension
+exhaustion_distance_ma10_decay_5d
+exhaustion_distance_ma20_decay_5d
+exhaustion_ma10_slope_5d_pct
 exhaustion_ma20_slope_5d_pct
 exhaustion_drawdown_20d_pct
-exhaustion_below_ma10
-exhaustion_below_ma20
 ```
 
 ## Range validation
@@ -161,39 +207,61 @@ exhaustion_below_ma20
 ```text
 exhaustion_events.csv
 exhaustion_summary.csv
+exhaustion_score_report.csv
 ```
 
-An event is a new `HIGH` or `CRITICAL` risk episode while the stock is in:
+### exhaustion_events.csv
+
+A new `HIGH` or `CRITICAL` episode while the stock is in:
 
 ```text
 LEADER
 PERSISTENT_LEADER
 ```
 
-The report measures:
+It tracks:
 
-- 3/5/10 observed-session transition to `EXHAUSTING`
-- 3/5/10 observed-session transition to `BROKEN`
-- D+5 / D+20 / D+60 return
-- D+20 / D+60 MFE
-- D+20 / D+60 MAE
+- 3/5/10 observed-session transition to EXHAUSTING
+- 3/5/10 observed-session transition to BROKEN
+- D+5 / D+20 / D+60
+- MFE / MAE when available
+
+### exhaustion_summary.csv
+
+Episode summary for:
+
+```text
+ALL
+HIGH
+CRITICAL
+```
+
+### exhaustion_score_report.csv
+
+This report is important for V1.1 validation. It compares **all established leader observations**, not only HIGH/CRITICAL events:
+
+```text
+LOW
+WATCH
+HIGH
+CRITICAL
+```
+
+and reports count, average Exhaustion Score, forward returns, win rate, MFE and MAE.
 
 ## Validation target
 
-Before connecting the score to Lifecycle, check whether:
+Do not connect V1.1 to Lifecycle until the range backtest shows a stable ordering such as:
 
 ```text
-LOW/WATCH leaders
-vs
-HIGH/CRITICAL leaders
+LOW/WATCH
+  -> better D+20
+  -> smaller adverse excursion
+
+HIGH/CRITICAL
+  -> weaker D+20
+  -> larger adverse excursion
+  -> higher future EXHAUSTING/BROKEN rate
 ```
 
-show a stable difference in:
-
-- forward return
-- MAE
-- MFE
-- subsequent EXHAUSTING rate
-- subsequent BROKEN rate
-
-Only after that validation should the existing Lifecycle `exhausting_min_flags` heuristic be replaced or augmented by `exhaustion_risk_score`.
+If this ordering is not present, tune the component logic again rather than simply lowering the HIGH threshold.
