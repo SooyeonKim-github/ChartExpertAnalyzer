@@ -7,6 +7,7 @@ import pandas as pd
 
 from leader_stock_analyzer import load_config, screen_date
 from leader_stock_analyzer.data_provider import PyKrxLeaderDataProvider
+from leader_stock_analyzer.emerging import EmergingTransitionAnalyzer
 from leader_stock_analyzer.lifecycle import LeaderLifecycleEngine
 from leader_stock_analyzer.performance import ForwardPerformanceEngine, PerformanceAttributionEngine
 
@@ -35,10 +36,8 @@ def main() -> None:
     lifecycle = LeaderLifecycleEngine(cfg)
     performance = ForwardPerformanceEngine(cfg)
     attribution = PerformanceAttributionEngine(cfg)
+    emerging_report = EmergingTransitionAnalyzer(cfg)
 
-    # KJB/Swing range analyzers load per-ticker OHLCV once and reuse it.
-    # Leader follows the same pattern, then recalculates scan-date trading-value
-    # ranks inside that candidate pool for every trading day.
     provider.prepare_range(start, end, args.top_n)
     dates = provider.get_trading_dates(start, end)
     rows: list[dict] = []
@@ -48,7 +47,11 @@ def main() -> None:
         f"| daily ranking=scan-date trading_value TOP {args.top_n}"
     )
     print(
-        "[INFO] Leader Lifecycle V2 enabled | hysteresis=ON | "
+        "[INFO] Emerging Leader enabled | rank history=candidate pool | "
+        "score=Rank50 + Money25 + RS15 + Freshness10"
+    )
+    print(
+        "[INFO] Leader Lifecycle V2.1 enabled | Emerging gate=Rank Velocity | "
         "BROKEN requires structural price failure"
     )
 
@@ -103,6 +106,9 @@ def main() -> None:
     all_path = out_dir / "range_all_results.csv"
     cand_path = out_dir / "range_candidates.csv"
     lifecycle_path = out_dir / "lifecycle_transitions.csv"
+    emerging_events_path = out_dir / "emerging_events.csv"
+    emerging_summary_path = out_dir / "emerging_summary.csv"
+
     df.to_csv(all_path, index=False, encoding="utf-8-sig")
     if not df.empty:
         df[df["status"].isin(["STRONG_CONFIRMED", "CONFIRMED"])].to_csv(
@@ -116,15 +122,33 @@ def main() -> None:
         df.to_csv(cand_path, index=False, encoding="utf-8-sig")
         df.to_csv(lifecycle_path, index=False, encoding="utf-8-sig")
 
+    emerging_events = emerging_report.events(df)
+    emerging_summary = emerging_report.summary(emerging_events)
+    emerging_events.to_csv(emerging_events_path, index=False, encoding="utf-8-sig")
+    emerging_summary.to_csv(emerging_summary_path, index=False, encoding="utf-8-sig")
+
     perf_dir = out_dir / "performance"
     report_paths = attribution.write_reports(df, perf_dir)
 
     print(f"\n[DONE] {all_path}")
     print(f"[DONE] {cand_path}")
     print(f"[DONE] {lifecycle_path}")
+    print(f"[DONE] {emerging_events_path}")
+    print(f"[DONE] {emerging_summary_path}")
     print(f"[DONE] performance reports -> {perf_dir}")
     for name, path in report_paths.items():
         print(f"       {name}: {path.name}")
+
+    if not df.empty and "emerging_label" in df.columns:
+        counts = df["emerging_label"].value_counts()
+        print("\n[EMERGING LEADER]")
+        for label in ("STRONG_EMERGING", "EMERGING", "WATCH", "NOT_EMERGING"):
+            print(f"  {label:<18} {int(counts.get(label, 0))}")
+        print(f"  {'TRUE_EMERGING':<18} {int(df['true_emerging_flag'].fillna(False).sum())}")
+        print(f"  {'EVENTS':<18} {len(emerging_events)}")
+        if not emerging_summary.empty:
+            for key, value in emerging_summary.iloc[0].items():
+                print(f"  {key}: {value}")
 
     if not df.empty and "lifecycle_state" in df.columns:
         counts = df["lifecycle_state"].value_counts()
