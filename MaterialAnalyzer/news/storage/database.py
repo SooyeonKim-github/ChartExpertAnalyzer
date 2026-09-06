@@ -208,6 +208,8 @@ CREATE TABLE IF NOT EXISTS event_novelty (
     number_changed INTEGER NOT NULL DEFAULT 0,
     company_changed INTEGER NOT NULL DEFAULT 0,
     polarity_changed INTEGER NOT NULL DEFAULT 0,
+    litigation_procedure_changed INTEGER NOT NULL DEFAULT 0,
+    litigation_procedure_progressed INTEGER NOT NULL DEFAULT 0,
     source_reliability_increased INTEGER NOT NULL DEFAULT 0,
     confirmation_source_added INTEGER NOT NULL DEFAULT 0,
     new_information_count INTEGER NOT NULL DEFAULT 0,
@@ -227,6 +229,29 @@ CREATE INDEX IF NOT EXISTS idx_event_novelty_status
 ON event_novelty(novelty_status);
 CREATE INDEX IF NOT EXISTS idx_event_novelty_parent
 ON event_novelty(parent_event_id);
+
+CREATE TABLE IF NOT EXISTS material_scores (
+    event_id TEXT PRIMARY KEY,
+    material_score REAL NOT NULL,
+    material_status TEXT NOT NULL,
+    direct_company_score REAL NOT NULL DEFAULT 0,
+    event_certainty_score REAL NOT NULL DEFAULT 0,
+    financial_impact_score REAL NOT NULL DEFAULT 0,
+    quantification_score REAL NOT NULL DEFAULT 0,
+    novelty_component_score REAL NOT NULL DEFAULT 0,
+    source_reliability_score REAL NOT NULL DEFAULT 0,
+    multi_source_score REAL NOT NULL DEFAULT 0,
+    scoring_reason TEXT,
+    scoring_version TEXT NOT NULL,
+    event_updated_at TEXT,
+    novelty_updated_at TEXT,
+    created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+    updated_at TEXT DEFAULT CURRENT_TIMESTAMP
+);
+CREATE INDEX IF NOT EXISTS idx_material_scores_status
+ON material_scores(material_status);
+CREATE INDEX IF NOT EXISTS idx_material_scores_score
+ON material_scores(material_score DESC);
 """
 
 
@@ -241,6 +266,11 @@ MATERIAL_EVENT_MIGRATION_COLUMNS = {
     "material_candidate": "INTEGER NOT NULL DEFAULT 0",
     "material_candidate_reason": "TEXT",
     "classification_source": "TEXT DEFAULT 'NONE'",
+}
+
+NOVELTY_MIGRATION_COLUMNS = {
+    "litigation_procedure_changed": "INTEGER NOT NULL DEFAULT 0",
+    "litigation_procedure_progressed": "INTEGER NOT NULL DEFAULT 0",
 }
 
 
@@ -274,6 +304,11 @@ class Database:
         for column, definition in MATERIAL_EVENT_MIGRATION_COLUMNS.items():
             if column not in event_existing:
                 conn.execute(f"ALTER TABLE material_events ADD COLUMN {column} {definition}")
+
+        novelty_existing = {row[1] for row in conn.execute("PRAGMA table_info(event_novelty)")}
+        for column, definition in NOVELTY_MIGRATION_COLUMNS.items():
+            if column not in novelty_existing:
+                conn.execute(f"ALTER TABLE event_novelty ADD COLUMN {column} {definition}")
 
         conn.execute(
             "UPDATE articles SET external_id = CASE "
