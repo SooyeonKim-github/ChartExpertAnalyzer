@@ -3,8 +3,8 @@ setlocal
 cd /d "%~dp0\..\.."
 
 echo ============================================================================
-echo MaterialAnalyzer - MaterialScorer V1
-echo Deterministic 100 Point Material Score
+echo MaterialAnalyzer - MaterialScorer V1.1
+echo Deterministic 100 Point Material Score + Routine Governance Guard
 echo ============================================================================
 echo.
 echo [1/2] MaterialScorer smoke test
