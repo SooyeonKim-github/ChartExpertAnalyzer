@@ -20,7 +20,7 @@ RELATION_PRIORITY = {"DIRECT": 5, "SUPPLIER": 4, "CUSTOMER": 3, "SECTOR": 2, "TH
 
 
 class TickerLinker:
-    VERSION = "RULE_TICKER_LINK_V1_1"
+    VERSION = "RULE_TICKER_LINK_V1_2"
     MAX_INDIRECT = 8
     MAX_RELATION_PER_TYPE = 5
     MAX_SECTOR_LINKS = 5
@@ -131,8 +131,6 @@ class TickerLinker:
         return [(match, self.materiality_guard.evaluate(event, match)) for match in matches]
 
     def _theme_links(self, event: LinkInput, direct_links, analysis):
-        # Company-specific events must not fan out to broad theme peers. If company resolution
-        # fails, leave them unresolved so ticker_master can be fixed explicitly.
         if direct_links or event.companies or event.material_status == "REJECT":
             return []
 
@@ -190,6 +188,8 @@ class TickerLinker:
             return ""
         if event.companies:
             statuses = [self.company_resolver.status(company) for company in event.companies]
+            if "NON_LISTED_COMPANY" in statuses:
+                return "NON_LISTED_COMPANY"
             if "AMBIGUOUS_COMPANY" in statuses:
                 return "AMBIGUOUS_COMPANY"
             if "COMPANY_NOT_IN_MASTER" in statuses:
