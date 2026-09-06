@@ -1,0 +1,17 @@
+universe:
+  top_n: 100
+  candidate_multiplier: 3
+  min_price: 1000
+  exclude_spac: true
+
+data:
+  history_days: 520
+
+trend:
+  ma_short: 50
+  ma_long: 150
+  slope_lookback: 20
+  slope_threshold_pct: 0.30
+
+output:
+  encoding: utf-8-sig
