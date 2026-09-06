@@ -51,10 +51,13 @@ def _base_result(cfg, daily: pd.DataFrame):
         leader_persistence_score=55.0,
         leader_persistence_level="MEDIUM",
         turnover_top20_days_5d=3,
+        chase_risk=10.0,
+        breakout_exhaustion_risk=False,
+        false_breakout_flag=False,
     )
 
 
-def test_lifecycle_infers_persistent_leader_from_persistence_evidence():
+def test_lifecycle_initial_observation_can_infer_persistent_leader():
     cfg = deepcopy(DEFAULT_CONFIG)
     daily = _daily()
     item = replace(
@@ -74,40 +77,127 @@ def test_lifecycle_infers_persistent_leader_from_persistence_evidence():
     assert out.lifecycle_transition is False
 
 
-def test_lifecycle_tracks_leader_to_exhausting_to_broken():
+def test_lifecycle_promotion_is_one_step_with_confirmation():
+    cfg = deepcopy(DEFAULT_CONFIG)
+    engine = LeaderLifecycleEngine(cfg)
+    daily = _daily()
+    base = _base_result(cfg, daily)
+
+    discovery = replace(
+        base,
+        leader_score=65.0,
+        market_leader_rank=30,
+        leader_persistence_score=20.0,
+        leader_persistence_level="LOW",
+        turnover_top20_days_5d=0,
+    )
+    day1 = engine.enrich([discovery], {"111111": daily})[0]
+    assert day1.lifecycle_state == "DISCOVERY"
+
+    strong = replace(base, scan_date="20260826")
+    day2 = engine.enrich([strong], {"111111": daily})[0]
+    assert day2.lifecycle_state == "DISCOVERY"
+    assert "emerging_confirmation_pending" in day2.lifecycle_reason
+
+    day3 = engine.enrich(
+        [replace(strong, scan_date="20260827")],
+        {"111111": daily},
+    )[0]
+    assert day3.lifecycle_state == "EMERGING"
+
+    day4 = engine.enrich(
+        [replace(strong, scan_date="20260828")],
+        {"111111": daily},
+    )[0]
+    assert day4.lifecycle_state == "EMERGING"
+
+    day5 = engine.enrich(
+        [replace(strong, scan_date="20260829")],
+        {"111111": daily},
+    )[0]
+    assert day5.lifecycle_state == "LEADER"
+
+
+def test_leader_score_collapse_alone_does_not_break_lifecycle():
+    cfg = deepcopy(DEFAULT_CONFIG)
+    engine = LeaderLifecycleEngine(cfg)
+    daily = _daily()
+    leader = _base_result(cfg, daily)
+
+    day1 = engine.enrich([leader], {"111111": daily})[0]
+    assert day1.lifecycle_state == "LEADER"
+
+    weak = replace(
+        leader,
+        scan_date="20260826",
+        leader_score=45.0,
+        leader_persistence_score=55.0,
+        leader_persistence_level="MEDIUM",
+        chase_risk=10.0,
+        breakout_exhaustion_risk=False,
+        false_breakout_flag=False,
+    )
+    day2 = engine.enrich([weak], {"111111": daily})[0]
+    assert day2.lifecycle_state == "LEADER"
+    assert day2.lifecycle_broken_flags == 0
+    assert "weakness_pending" in day2.lifecycle_reason
+
+    day3 = engine.enrich(
+        [replace(weak, scan_date="20260827")],
+        {"111111": daily},
+    )[0]
+    assert day3.lifecycle_state == "EMERGING"
+    assert day3.lifecycle_broken_flags == 0
+
+
+def test_established_leader_structural_break_routes_through_exhausting():
     cfg = deepcopy(DEFAULT_CONFIG)
     engine = LeaderLifecycleEngine(cfg)
     healthy = _daily()
-
     leader = _base_result(cfg, healthy)
+
     day1 = engine.enrich([leader], {"111111": healthy})[0]
     assert day1.lifecycle_state == "LEADER"
-    assert day1.lifecycle_days_in_state == 1
-
-    exhausting = replace(
-        leader,
-        scan_date="20260826",
-        chase_risk=80.0,
-        breakout_exhaustion_risk=True,
-    )
-    day2 = engine.enrich([exhausting], {"111111": healthy})[0]
-    assert day2.lifecycle_prev_state == "LEADER"
-    assert day2.lifecycle_state == "EXHAUSTING"
-    assert day2.lifecycle_transition is True
-    assert day2.lifecycle_exhaustion_flags >= 2
 
     broken_daily = _daily(last_drop=True)
     broken = replace(
         leader,
-        scan_date="20260827",
+        scan_date="20260826",
         price=float(broken_daily.iloc[-1]["close"]),
         leader_score=58.0,
     )
-    day3 = engine.enrich([broken], {"111111": broken_daily})[0]
+    day2 = engine.enrich([broken], {"111111": broken_daily})[0]
+    assert day2.lifecycle_state == "EXHAUSTING"
+    assert day2.lifecycle_broken_flags >= 1
+
+    day3 = engine.enrich(
+        [replace(broken, scan_date="20260827")],
+        {"111111": broken_daily},
+    )[0]
     assert day3.lifecycle_prev_state == "EXHAUSTING"
     assert day3.lifecycle_state == "BROKEN"
-    assert day3.lifecycle_transition is True
-    assert day3.lifecycle_broken_flags >= 1
+
+
+def test_multiple_degradation_signals_mark_exhausting_before_structure_breaks():
+    cfg = deepcopy(DEFAULT_CONFIG)
+    engine = LeaderLifecycleEngine(cfg)
+    healthy = _daily()
+    leader = _base_result(cfg, healthy)
+
+    day1 = engine.enrich([leader], {"111111": healthy})[0]
+    assert day1.lifecycle_state == "LEADER"
+
+    exhausting = replace(
+        leader,
+        scan_date="20260826",
+        leader_score=55.0,
+        leader_persistence_score=30.0,
+        leader_persistence_level="LOW",
+    )
+    day2 = engine.enrich([exhausting], {"111111": healthy})[0]
+    assert day2.lifecycle_state == "EXHAUSTING"
+    assert day2.lifecycle_exhaustion_flags >= 2
+    assert day2.lifecycle_broken_flags == 0
 
 
 def test_lifecycle_keeps_days_in_state_for_consecutive_leader_days():
