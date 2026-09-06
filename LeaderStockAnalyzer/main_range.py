@@ -7,7 +7,7 @@ import pandas as pd
 
 from leader_stock_analyzer import load_config, screen_date
 from leader_stock_analyzer.data_provider import PyKrxLeaderDataProvider
-from leader_stock_analyzer.emerging import EmergingTransitionAnalyzer
+from leader_stock_analyzer.emerging_reporting import EmergingTransitionAnalyzerV12
 from leader_stock_analyzer.lifecycle import LeaderLifecycleEngine
 from leader_stock_analyzer.performance import ForwardPerformanceEngine, PerformanceAttributionEngine
 
@@ -36,7 +36,7 @@ def main() -> None:
     lifecycle = LeaderLifecycleEngine(cfg)
     performance = ForwardPerformanceEngine(cfg)
     attribution = PerformanceAttributionEngine(cfg)
-    emerging_report = EmergingTransitionAnalyzer(cfg)
+    emerging_report = EmergingTransitionAnalyzerV12(cfg)
 
     provider.prepare_range(start, end, args.top_n)
     dates = provider.get_trading_dates(start, end)
@@ -51,8 +51,8 @@ def main() -> None:
         "| overheat penalty=ON | max_chase=40"
     )
     print(
-        "[INFO] Leader Lifecycle V2.3 enabled | Emerging activation=Rank Velocity x2 "
-        "| hold=LeaderScore>=60 & Rank<=50 | initial emerging confirmation=ON "
+        "[INFO] Leader Lifecycle V2.4 enabled | Emerging activation=Rank Velocity x2 "
+        "| hold=LeaderScore>=60 & Rank<=50 | Leader Core evidence=2 hits / 10 observations "
         "| fast-track=OFF | BROKEN requires structural price failure"
     )
 
@@ -160,11 +160,13 @@ def main() -> None:
                 cohort = row.get("cohort", "UNKNOWN")
                 count = int(row.get("event_count", 0))
                 leader10 = row.get("leader_within_10d_rate", "-")
-                false5 = row.get("false_emerging_within_5d_rate", "-")
+                reversion5 = row.get("lifecycle_reversion_within_5d_rate", "-")
+                price_fail20 = row.get("price_failure_D20_rate", "-")
                 avg20 = row.get("avg_D+20", "-")
                 print(
                     f"  {cohort:<26} count={count:<4} "
-                    f"leader10={leader10} false5={false5} avgD20={avg20}"
+                    f"leader10={leader10} reversion5={reversion5} "
+                    f"priceFail20={price_fail20} avgD20={avg20}"
                 )
 
     if not df.empty and "lifecycle_state" in df.columns:
