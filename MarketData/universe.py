@@ -8,7 +8,20 @@ import pandas as pd
 
 TICKER_COLUMNS = ["종목코드", "단축코드", "Ticker", "ticker", "Code", "code"]
 NAME_COLUMNS = ["종목명", "한글 종목약명", "한글 종목명", "Name", "name"]
-SORT_ALIASES = {"market_cap": "시가총액", "trading_value": "거래대금", "volume": "거래량"}
+MARKET_COLUMNS = [
+    "시장",
+    "시장구분",
+    "시장구분명",
+    "시장명",
+    "소속시장",
+    "Market",
+    "market",
+]
+SORT_ALIASES = {
+    "market_cap": "시가총액",
+    "trading_value": "거래대금",
+    "volume": "거래량",
+}
 ETF_PREFIX = r"^(KODEX|TIGER|ACE|RISE|KBSTAR|SOL|PLUS|HANARO|TIMEFOLIO|KOACT|WOORI|ARIRANG|BNK|HK|VITA|히어로즈|마이다스)"
 
 
@@ -34,6 +47,18 @@ def normalize_ticker(value) -> str | None:
     return text.zfill(6) if text.isdigit() else None
 
 
+def normalize_market_name(value, default: str = "KOSPI") -> str:
+    if value is None or pd.isna(value):
+        return default
+    text = str(value).strip().upper()
+    compact = text.replace(" ", "").replace("-", "").replace("_", "")
+    if any(token in compact for token in ("KOSDAQ", "코스닥", "KQ")):
+        return "KOSDAQ"
+    if any(token in compact for token in ("KOSPI", "코스피", "유가증권", "KS")):
+        return "KOSPI"
+    return default
+
+
 def clean_numeric_series(series: pd.Series) -> pd.Series:
     return pd.to_numeric(
         series.astype(str)
@@ -52,6 +77,7 @@ def read_universe_excel(path: str | Path) -> pd.DataFrame:
     raw = pd.read_excel(p, dtype=str)
     ticker_col = next((c for c in TICKER_COLUMNS if c in raw.columns), None)
     name_col = next((c for c in NAME_COLUMNS if c in raw.columns), None)
+    market_col = next((c for c in MARKET_COLUMNS if c in raw.columns), None)
     if ticker_col is None:
         raise ValueError(f"종목코드 컬럼을 찾지 못했습니다: {list(raw.columns)}")
     name_col = name_col or ticker_col
@@ -59,7 +85,10 @@ def read_universe_excel(path: str | Path) -> pd.DataFrame:
     out = raw.copy()
     out["Ticker"] = out[ticker_col].map(normalize_ticker)
     out["Name"] = out[name_col].fillna("").astype(str).str.strip()
-    out["market"] = out["시장"].fillna("KOSPI").astype(str).str.upper() if "시장" in out.columns else "KOSPI"
+    if market_col is None:
+        out["market"] = "KOSPI"
+    else:
+        out["market"] = out[market_col].map(normalize_market_name)
     out = out[out["Ticker"].notna()].drop_duplicates("Ticker", keep="first").copy()
     out["Name"] = out["Name"].where(out["Name"].ne(""), out["Ticker"])
     return out
@@ -114,7 +143,9 @@ class ExcelUniverseService:
         if sort_by and top_n > 0:
             column = SORT_ALIASES.get(sort_by, sort_by)
             if column not in df.columns:
-                raise ValueError(f"정렬 기준 컬럼 없음: {sort_by}; columns={list(df.columns)}")
+                raise ValueError(
+                    f"정렬 기준 컬럼 없음: {sort_by}; columns={list(df.columns)}"
+                )
             df["_sort"] = clean_numeric_series(df[column])
             df = df.sort_values("_sort", ascending=False, na_position="last")
         if top_n > 0:
