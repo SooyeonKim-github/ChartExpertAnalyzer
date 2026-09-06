@@ -3,7 +3,7 @@ setlocal
 cd /d "%~dp0"
 
 echo ============================================
-echo TrendFollowingAnalyzer - Stage Screen
+echo TrendFollowingAnalyzer - Stage + Market Regime
 echo ============================================
 set /p SCAN_DATE=Scan date YYYYMMDD (blank=latest): 
 set /p TOP_N=Top N (blank=100): 

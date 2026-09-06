@@ -16,16 +16,18 @@ def add_stage_labels(
     *,
     slope_threshold_pct: float = 0.30,
 ) -> pd.DataFrame:
-    """Classify the 4-stage price cycle using MA150 and its slope.
+    """Classify the lecture's 4-stage cycle without look-ahead.
 
-    Definitive states follow the lecture directly:
-      - Stage 2: close > MA150 and MA150 slope is rising
-      - Stage 4: close < MA150 and MA150 slope is falling
+    Active lecture-core gate:
+      - Stage 2: close > MA150 and MA150 slope > 0
+      - Stage 4: close < MA150 and MA150 slope < 0
 
-    Stage 1/3 are transition states. To distinguish them without look-ahead,
-    the detector remembers the most recent definitive Stage 4/2:
-      - after Stage 4 -> Stage 1
-      - after Stage 2 -> Stage 3
+    `slope_threshold_pct` is intentionally NOT an active filter. It is an
+    experimental threshold recorded for later range/ablation backtests.
+
+    Stage 1/3 use the most recent definitive Stage 4/2 to preserve cycle
+    context. This transition heuristic is an implementation choice and should
+    be validated separately.
     """
     required = {"close", "ma150", "ma150_slope_pct"}
     missing = required.difference(df.columns)
@@ -37,6 +39,7 @@ def add_stage_labels(
     out = df.copy()
     stages: list[str] = []
     reasons: list[str] = []
+    strict_passes: list[bool] = []
     last_definitive: str | None = None
 
     for _, row in out.iterrows():
@@ -57,35 +60,38 @@ def add_stage_labels(
         ):
             stages.append(INSUFFICIENT)
             reasons.append("MA150 또는 MA150 기울기 계산 데이터 부족")
+            strict_passes.append(False)
             continue
 
         close_f = float(close)
         ma150_f = float(ma150)
         slope_f = float(slope)
+        strict_passes.append(
+            (close_f > ma150_f and slope_f >= slope_threshold_pct)
+            or (close_f < ma150_f and slope_f <= -slope_threshold_pct)
+        )
 
-        if close_f > ma150_f and slope_f >= slope_threshold_pct:
+        if close_f > ma150_f and slope_f > 0:
             stage = STAGE_2
-            reason = "종가가 MA150 위이고 MA150 기울기가 상승"
+            reason = "LECTURE_CORE: 종가가 MA150 위이고 MA150 기울기가 상승"
             last_definitive = STAGE_2
-        elif close_f < ma150_f and slope_f <= -slope_threshold_pct:
+        elif close_f < ma150_f and slope_f < 0:
             stage = STAGE_4
-            reason = "종가가 MA150 아래이고 MA150 기울기가 하락"
+            reason = "LECTURE_CORE: 종가가 MA150 아래이고 MA150 기울기가 하락"
             last_definitive = STAGE_4
         elif last_definitive == STAGE_2:
             stage = STAGE_3
-            reason = "최근 확정 Stage 2 이후 MA150 추세가 둔화된 전환/횡보 구간"
+            reason = "IMPLEMENTATION: 최근 확정 Stage 2 이후 전환/횡보 구간"
         elif last_definitive == STAGE_4:
             stage = STAGE_1
-            reason = "최근 확정 Stage 4 이후 MA150 추세가 안정되는 바닥/횡보 구간"
+            reason = "IMPLEMENTATION: 최근 확정 Stage 4 이후 전환/횡보 구간"
         else:
-            # No prior definitive state exists in the loaded history.
-            # Use price location only as a conservative bootstrap label.
             if close_f >= ma150_f:
                 stage = STAGE_3
-                reason = "과거 확정 Stage 없음; MA150 위의 비확정 전환 구간"
+                reason = "IMPLEMENTATION: 과거 확정 Stage 없음; MA150 위 비확정 구간"
             else:
                 stage = STAGE_1
-                reason = "과거 확정 Stage 없음; MA150 아래의 비확정 전환 구간"
+                reason = "IMPLEMENTATION: 과거 확정 Stage 없음; MA150 아래 비확정 구간"
 
         stages.append(stage)
         reasons.append(reason)
@@ -93,6 +99,8 @@ def add_stage_labels(
     out["stage"] = stages
     out["stage_reason"] = reasons
     out["trend_eligible"] = out["stage"].eq(STAGE_2)
+    out["stage_core_pass"] = out["trend_eligible"]
+    out["stage_experimental_slope_pass"] = strict_passes
     return out
 
 
@@ -104,10 +112,11 @@ def latest_stage_snapshot(
     labeled = add_stage_labels(df, slope_threshold_pct=slope_threshold_pct)
     if labeled.empty:
         raise ValueError("Cannot classify an empty OHLCV frame")
-
     row = labeled.iloc[-1]
     return {
         "stage": str(row["stage"]),
         "stage_reason": str(row["stage_reason"]),
         "trend_eligible": bool(row["trend_eligible"]),
+        "stage_core_pass": bool(row["stage_core_pass"]),
+        "stage_experimental_slope_pass": bool(row["stage_experimental_slope_pass"]),
     }

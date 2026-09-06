@@ -12,7 +12,7 @@ def load_config(path: str | Path) -> dict:
     with config_path.open("r", encoding="utf-8") as f:
         cfg = yaml.safe_load(f) or {}
 
-    for section in ("universe", "data", "trend"):
+    for section in ("universe", "data", "trend", "market_regime"):
         if section not in cfg:
             raise ValueError(f"Missing config section: {section}")
     return cfg

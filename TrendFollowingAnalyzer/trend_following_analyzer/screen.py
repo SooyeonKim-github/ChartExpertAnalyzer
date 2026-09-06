@@ -7,13 +7,35 @@ import pandas as pd
 from .data import TrendFollowingDataProvider
 from .indicators import add_moving_average_indicators
 from .models import StageScreenResult
-from .regime import add_stage_labels
+from .regime import classify_market_regime, add_stage_labels
 
 
 def _optional_float(value) -> float | None:
     if value is None or pd.isna(value):
         return None
     return float(value)
+
+
+def _build_market_snapshots(provider: TrendFollowingDataProvider, cfg: dict, resolved: str) -> dict:
+    mcfg = cfg["market_regime"]
+    snapshots = {}
+    for market in ("KOSPI", "KOSDAQ"):
+        try:
+            index_df = provider.get_market_index(market, resolved)
+        except Exception as exc:
+            print(f"[WARN] {market} market regime index load failed: {exc}")
+            index_df = pd.DataFrame(columns=["close"])
+        snapshots[market] = classify_market_regime(
+            index_df,
+            market=market,
+            ma_short=int(mcfg.get("ma_short", 50)),
+            ma_long=int(mcfg.get("ma_long", 150)),
+            slope_lookback=int(mcfg.get("slope_lookback", 20)),
+            experimental_slope_threshold_pct=float(
+                mcfg.get("experimental_slope_threshold_pct", 0.30)
+            ),
+        )
+    return snapshots
 
 
 def screen_date(
@@ -31,6 +53,7 @@ def screen_date(
     )
     resolved = provider.resolve_scan_date(scan_date)
     universe = provider.build_universe(resolved, top_n=top_n)
+    market_snapshots = _build_market_snapshots(provider, cfg, resolved)
 
     tcfg = cfg["trend"]
     results: list[StageScreenResult] = []
@@ -49,16 +72,27 @@ def screen_date(
             )
             enriched = add_stage_labels(
                 enriched,
-                slope_threshold_pct=float(tcfg.get("slope_threshold_pct", 0.30)),
+                slope_threshold_pct=float(
+                    tcfg.get("experimental_slope_threshold_pct", 0.30)
+                ),
             )
             last = enriched.iloc[-1]
+
+            market = str(info.get("market", "")).upper()
+            market_snapshot = market_snapshots.get(market)
+            if market_snapshot is None:
+                continue
+
+            stage_core_pass = bool(last["stage_core_pass"])
+            market_core_pass = bool(market_snapshot.market_eligible)
+            lecture_core_pass = stage_core_pass and market_core_pass
 
             results.append(
                 StageScreenResult(
                     scan_date=resolved,
                     ticker=str(ticker).zfill(6),
                     name=str(info.get("name", ticker)),
-                    market=str(info.get("market", "")),
+                    market=market,
                     trading_value_rank=int(info.get("trading_value_rank", 0)),
                     close=float(last["close"]),
                     ma50=_optional_float(last.get("ma50")),
@@ -68,14 +102,34 @@ def screen_date(
                     ma50_vs_ma150_pct=_optional_float(last.get("ma50_vs_ma150_pct")),
                     stage=str(last["stage"]),
                     trend_eligible=bool(last["trend_eligible"]),
+                    stage_core_pass=stage_core_pass,
+                    stage_experimental_slope_pass=bool(
+                        last["stage_experimental_slope_pass"]
+                    ),
                     stage_reason=str(last["stage_reason"]),
+                    market_regime=market_snapshot.regime,
+                    market_eligible=market_core_pass,
+                    market_index_close=market_snapshot.index_close,
+                    market_index_ma50=market_snapshot.index_ma50,
+                    market_index_ma150=market_snapshot.index_ma150,
+                    market_index_ma150_slope_pct=market_snapshot.index_ma150_slope_pct,
+                    market_index_close_vs_ma150_pct=market_snapshot.index_close_vs_ma150_pct,
+                    market_index_ma50_vs_ma150_pct=market_snapshot.index_ma50_vs_ma150_pct,
+                    market_lecture_ma150_position_pass=market_snapshot.lecture_ma150_position_pass,
+                    market_lecture_ma150_slope_pass=market_snapshot.lecture_ma150_slope_pass,
+                    market_experimental_slope_threshold_pass=market_snapshot.experimental_slope_threshold_pass,
+                    market_experimental_ma50_alignment_pass=market_snapshot.experimental_ma50_alignment_pass,
+                    market_regime_reason=market_snapshot.regime_reason,
+                    lecture_core_pass=lecture_core_pass,
+                    experimental_filters_applied=False,
                 )
             )
         except Exception as exc:
-            print(f"[WARN] {ticker} stage analysis failed: {exc}")
+            print(f"[WARN] {ticker} trend analysis failed: {exc}")
 
     results.sort(
         key=lambda r: (
+            0 if r.lecture_core_pass else 1,
             0 if r.stage == "STAGE_2" else 1,
             r.trading_value_rank,
         )

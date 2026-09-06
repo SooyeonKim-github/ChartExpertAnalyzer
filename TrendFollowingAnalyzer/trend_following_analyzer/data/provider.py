@@ -16,8 +16,8 @@ from MarketData import ExcelUniverseService, get_market_data_service  # noqa: E4
 class TrendFollowingDataProvider:
     """Market-data adapter for TrendFollowingAnalyzer.
 
-    The strategy logic stays inside TrendFollowingAnalyzer while raw OHLCV and
-    universe utilities reuse the repository-wide MarketData service.
+    Strategy logic stays inside TrendFollowingAnalyzer while raw OHLCV,
+    universe, and index retrieval reuse the repository-wide MarketData service.
     """
 
     def __init__(
@@ -31,6 +31,7 @@ class TrendFollowingDataProvider:
         self.market_data = get_market_data_service()
         self.universe_xlsx = self._resolve_universe_xlsx(universe_xlsx)
         self._history_cache: dict[str, pd.DataFrame] = {}
+        self._index_cache: dict[str, pd.DataFrame] = {}
         self._candidate_infos: list = []
         self._candidate_top_n: int | None = None
 
@@ -191,10 +192,27 @@ class TrendFollowingDataProvider:
             target = pd.Timestamp(scan_date).normalize()
             return cached[cached.index.normalize() <= target].copy()
 
-        # Fallback path for direct calls outside build_universe.
         history_days = int(self.cfg["data"].get("history_days", 520))
         end = pd.Timestamp(scan_date).normalize()
         start = end - pd.Timedelta(days=history_days)
         return self._normalize_daily(
             self.market_data.get_ohlcv(code, start, end, allow_etf=False)
         )
+
+    def get_market_index(self, market: str, scan_date: str) -> pd.DataFrame:
+        """Load enough KOSPI/KOSDAQ index history for MA150 regime classification."""
+        market_key = str(market).upper()
+        if market_key in self._index_cache:
+            return self._index_cache[market_key].copy()
+
+        history_days = max(
+            int(self.cfg["data"].get("history_days", 520)),
+            int(self.cfg.get("market_regime", {}).get("history_days", 520)),
+        )
+        end = pd.Timestamp(scan_date).normalize()
+        start = end - pd.Timedelta(days=history_days)
+        raw = self.market_data.get_market_index(market_key, start, end)
+        out = self._normalize_daily(raw)
+        out = out[out.index.normalize() <= end].copy()
+        self._index_cache[market_key] = out
+        return out.copy()
