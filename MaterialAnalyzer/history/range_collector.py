@@ -10,6 +10,7 @@ from MaterialAnalyzer.news.storage import ArticleRepository, Database
 
 from .chunk_planner import plan_chunks
 from .collectors import DartRangeCollector, GovernmentRangeCollector
+from .dart_bulk import HistoricalDartBulkService
 from .historical_market_date import HistoricalMarketDateResolver
 from .historical_normalizer import HistoricalArticleNormalizer
 from .models import HistoricalRangeConfig, RangeChunk
@@ -35,13 +36,20 @@ class HistoricalRangeCollector:
         self.config = config
         self.config.validate()
         self.state = HistoricalRangeRepository(self.db_path)
-        database = Database(self.db_path)
-        self.article_repository = ArticleRepository(database)
+        self.database = Database(self.db_path)
+        self.article_repository = ArticleRepository(self.database)
         resolver = HistoricalMarketDateResolver(config.context_start, config.requested_end)
         self.normalizer = HistoricalArticleNormalizer(resolver)
         self.duplicate_checker = ExactDuplicateChecker(self.article_repository)
         self.validator = ArticleValidator()
         self.classifier = RuleArticleClassifier()
+        with self.database.connect() as conn:
+            rows = conn.execute(
+                "SELECT external_id FROM articles WHERE source_id='DART' AND external_id IS NOT NULL"
+            ).fetchall()
+        self.known_dart_ids = {str(row["external_id"]) for row in rows if row["external_id"]}
+        if self.known_dart_ids:
+            print(f"[FAST] cached existing DART receipt ids={len(self.known_dart_ids):,}")
 
     def _service(self, collector) -> CollectorService:
         return CollectorService(
@@ -58,16 +66,23 @@ class HistoricalRangeCollector:
         mode = historical_mode(endpoint.source_id)
         if mode == RANGE_API:
             collector = DartRangeCollector(endpoint, chunk.start, chunk.end)
-        elif mode == PAGED_LIST:
+            return HistoricalDartBulkService(
+                collector,
+                self.article_repository,
+                self.normalizer,
+                self.validator,
+                self.classifier,
+                known_external_ids=self.known_dart_ids,
+            ).run()
+        if mode == PAGED_LIST:
             collector = GovernmentRangeCollector(
                 endpoint,
                 chunk.start,
                 chunk.end,
                 max_pages=self.config.government_max_pages,
             )
-        else:
-            raise RuntimeError(f"historical collection unsupported: {endpoint.source_id} mode={mode}")
-        return self._service(collector).run()
+            return self._service(collector).run()
+        raise RuntimeError(f"historical collection unsupported: {endpoint.source_id} mode={mode}")
 
     @staticmethod
     def _add(summary: HistoricalCollectionSummary, result) -> None:
@@ -97,9 +112,6 @@ class HistoricalRangeCollector:
             if mode not in {RANGE_API, PAGED_LIST}:
                 continue
 
-            # DART can query bounded date windows efficiently. Government boards are
-            # traversed newest->oldest once for the whole requested context to avoid
-            # repeatedly rescanning page 1 for every seven-day chunk.
             if mode == RANGE_API:
                 chunks = plan_chunks(
                     endpoint.source_id,
