@@ -4,31 +4,41 @@ import contextlib
 import hashlib
 import io
 import os
+import re
+from importlib import metadata
 from pathlib import Path
 
 import pandas as pd
-import requests
 
 from .naver_index import fetch_naver_index_ohlcv
 
 ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_CACHE_DIR = ROOT / "cache" / "MarketData"
-
-_KRX_USER_AGENT = (
-    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
-    "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/151.0.0.0 Safari/537.36"
-)
-_KRX_REFERER = "https://data.krx.co.kr/contents/MDC/MDI/outerLoader/index.cmd"
-_KRX_HTTP_SESSION: requests.Session | None = None
+MIN_PYKRX_VERSION = (1, 2, 8)
 _PYKRX_STOCK = None
+_PYKRX_AUTH = None
+_PYKRX_WEBIO = None
 _INDEX_ALIASES = {
-    "^KS11": "KOSPI",
-    "KOSPI": "KOSPI",
-    "1001": "KOSPI",
-    "^KQ11": "KOSDAQ",
-    "KOSDAQ": "KOSDAQ",
-    "2001": "KOSDAQ",
+    "^KS11": "KOSPI", "KOSPI": "KOSPI", "1001": "KOSPI",
+    "^KQ11": "KOSDAQ", "KOSDAQ": "KOSDAQ", "2001": "KOSDAQ",
 }
+
+
+def _version_tuple(value: str) -> tuple[int, ...]:
+    nums = [int(x) for x in re.findall(r"\d+", str(value))[:3]]
+    return tuple(nums + [0] * (3 - len(nums)))
+
+
+def pykrx_runtime_info() -> dict:
+    try:
+        version = metadata.version("pykrx")
+    except metadata.PackageNotFoundError:
+        version = "NOT_INSTALLED"
+    return {
+        "version": version,
+        "native_session": True,
+        "auth_mode": "ENV_CREDENTIALS" if os.getenv("KRX_ID") and os.getenv("KRX_PW") else "ANONYMOUS",
+    }
 
 
 def normalize_ohlcv(df: pd.DataFrame) -> pd.DataFrame:
@@ -36,35 +46,21 @@ def normalize_ohlcv(df: pd.DataFrame) -> pd.DataFrame:
     if df is None or df.empty:
         return pd.DataFrame(columns=columns)
     rename = {
-        "시가": "open",
-        "고가": "high",
-        "저가": "low",
-        "종가": "close",
-        "거래량": "volume",
-        "거래대금": "trading_value",
-        "Open": "open",
-        "High": "high",
-        "Low": "low",
-        "Close": "close",
-        "Volume": "volume",
-        "Trading_Value": "trading_value",
-        "open": "open",
-        "high": "high",
-        "low": "low",
-        "close": "close",
-        "volume": "volume",
-        "trading_value": "trading_value",
+        "시가": "open", "고가": "high", "저가": "low", "종가": "close",
+        "거래량": "volume", "거래대금": "trading_value",
+        "Open": "open", "High": "high", "Low": "low", "Close": "close",
+        "Volume": "volume", "Trading_Value": "trading_value",
+        "open": "open", "high": "high", "low": "low", "close": "close",
+        "volume": "volume", "trading_value": "trading_value",
     }
     out = df.rename(columns=rename).copy()
-    required = ["open", "high", "low", "close", "volume"]
-    missing = [c for c in required if c not in out.columns]
-    if missing:
-        raise ValueError(f"OHLCV columns missing: {missing}; columns={list(df.columns)}")
+    for col in ("open", "high", "low", "close"):
+        if col not in out.columns:
+            raise ValueError(f"OHLCV columns missing: {col}; columns={list(df.columns)}")
+    if "volume" not in out.columns:
+        out["volume"] = 0.0
     if "trading_value" not in out.columns:
-        out["trading_value"] = (
-            pd.to_numeric(out["close"], errors="coerce")
-            * pd.to_numeric(out["volume"], errors="coerce")
-        )
+        out["trading_value"] = pd.to_numeric(out["close"], errors="coerce") * pd.to_numeric(out["volume"], errors="coerce").fillna(0.0)
     for c in columns:
         out[c] = pd.to_numeric(out[c], errors="coerce")
     out.index = pd.to_datetime(out.index, errors="coerce")
@@ -74,156 +70,77 @@ def normalize_ohlcv(df: pd.DataFrame) -> pd.DataFrame:
 
 
 def to_upper_ohlcv(df: pd.DataFrame) -> pd.DataFrame:
-    return normalize_ohlcv(df).rename(
-        columns={
-            "open": "Open",
-            "high": "High",
-            "low": "Low",
-            "close": "Close",
-            "volume": "Volume",
-            "trading_value": "Trading_Value",
-        }
-    )
+    return normalize_ohlcv(df).rename(columns={"open":"Open","high":"High","low":"Low","close":"Close","volume":"Volume","trading_value":"Trading_Value"})
 
 
 def _normalize_market_snapshot(raw: pd.DataFrame, dt: pd.Timestamp, market: str) -> pd.DataFrame:
     if raw is None or raw.empty:
         raise RuntimeError("empty all-ticker snapshot")
-
-    out = raw.rename(
-        columns={
-            "종가": "close",
-            "거래량": "volume",
-            "거래대금": "trading_value",
-            "등락률": "return_pct",
-            "시가총액": "market_cap",
-        }
-    ).copy()
+    out = raw.rename(columns={"종가":"close","거래량":"volume","거래대금":"trading_value","등락률":"return_pct","시가총액":"market_cap"}).copy()
     out["ticker"] = [MarketDataService.normalize_ticker(x) for x in out.index]
-
     for col in ("close", "volume", "trading_value", "return_pct", "market_cap"):
         if col not in out.columns:
             out[col] = pd.NA
         out[col] = pd.to_numeric(out[col], errors="coerce")
-
     out["date"] = dt
     out["market"] = market
-    out = out[
-        [
-            "date",
-            "ticker",
-            "market",
-            "close",
-            "volume",
-            "trading_value",
-            "return_pct",
-            "market_cap",
-        ]
-    ]
+    out = out[["date","ticker","market","close","volume","trading_value","return_pct","market_cap"]]
     out = out[out["ticker"].str.fullmatch(r"\d{6}", na=False)]
+    out = out[pd.to_numeric(out["close"], errors="coerce").fillna(0).gt(0)]
     if out.empty:
         raise RuntimeError("normalized all-ticker snapshot is empty")
     return out.reset_index(drop=True)
 
 
-def _new_krx_http_session() -> requests.Session:
-    session = requests.Session()
-    session.headers.update(
-        {
-            "User-Agent": _KRX_USER_AGENT,
-            "Referer": _KRX_REFERER,
-            "X-Requested-With": "XMLHttpRequest",
-        }
-    )
-    try:
-        session.get(_KRX_REFERER, timeout=10)
-    except requests.RequestException:
-        pass
-    return session
-
-
-def reset_krx_http_session() -> requests.Session:
-    global _KRX_HTTP_SESSION
-    if _KRX_HTTP_SESSION is not None:
-        try:
-            _KRX_HTTP_SESSION.close()
-        except Exception:
-            pass
-    _KRX_HTTP_SESSION = _new_krx_http_session()
-    return _KRX_HTTP_SESSION
-
-
-def _install_shared_pykrx_transport(webio) -> None:
-    reset_krx_http_session()
-
-    def _session_post_read(self, **params):
-        session = _KRX_HTTP_SESSION or reset_krx_http_session()
-        headers = dict(getattr(self, "headers", {}) or {})
-        headers.setdefault("User-Agent", _KRX_USER_AGENT)
-        headers.setdefault("Referer", _KRX_REFERER)
-        headers.setdefault("X-Requested-With", "XMLHttpRequest")
-        return session.post(self.url, headers=headers, data=params, timeout=30)
-
-    def _session_get_read(self, **params):
-        session = _KRX_HTTP_SESSION or reset_krx_http_session()
-        headers = dict(getattr(self, "headers", {}) or {})
-        headers.setdefault("User-Agent", _KRX_USER_AGENT)
-        headers.setdefault("Referer", _KRX_REFERER)
-        headers.setdefault("X-Requested-With", "XMLHttpRequest")
-        return session.get(self.url, headers=headers, params=params, timeout=30)
-
-    webio.Post.read = _session_post_read
-    webio.Get.read = _session_get_read
-
-
 def load_pykrx_stock():
-    global _PYKRX_STOCK
+    """Load pykrx with its native KRXSession/auth transport (>=1.2.8)."""
+    global _PYKRX_STOCK, _PYKRX_AUTH, _PYKRX_WEBIO
     if _PYKRX_STOCK is not None:
         return _PYKRX_STOCK
-
-    saved_env = {key: os.environ.get(key) for key in ("KRX_ID", "KRX_PW")}
-    for key in saved_env:
-        os.environ.pop(key, None)
+    try:
+        version = metadata.version("pykrx")
+    except metadata.PackageNotFoundError as exc:
+        raise RuntimeError("pykrx가 필요합니다. python -m pip install -U pykrx>=1.2.8") from exc
+    if _version_tuple(version) < MIN_PYKRX_VERSION:
+        raise RuntimeError(f"pykrx {version} is too old. Run: python -m pip install -U \"pykrx>=1.2.8,<2\"")
     try:
         with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()):
             from pykrx import stock
-            from pykrx.website.comm import webio
+            from pykrx.website.comm import auth, webio
     except ImportError as exc:
-        raise RuntimeError("pykrx가 필요합니다. pip install pykrx") from exc
-    finally:
-        for key, value in saved_env.items():
-            if value is not None:
-                os.environ[key] = value
-
-    _install_shared_pykrx_transport(webio)
+        raise RuntimeError("pykrx import failed. Reinstall pykrx>=1.2.8") from exc
     _PYKRX_STOCK = stock
+    _PYKRX_AUTH = auth
+    _PYKRX_WEBIO = webio
     return stock
 
 
-def _yfinance_download(
-    code: str,
-    start: pd.Timestamp,
-    end: pd.Timestamp,
-    market_hint: str | None,
-) -> pd.DataFrame:
+def reset_krx_http_session():
+    """Reset pykrx native auth state; never monkey-patch webio Post/Get methods."""
+    global _PYKRX_AUTH, _PYKRX_WEBIO
+    try:
+        load_pykrx_stock()
+        if _PYKRX_AUTH is not None:
+            _PYKRX_AUTH.set_auth_session(None)
+        if _PYKRX_WEBIO is not None and hasattr(_PYKRX_WEBIO, "set_session"):
+            _PYKRX_WEBIO.set_session(None)
+    except Exception:
+        pass
+    return None
+
+
+def _yfinance_download(code: str, start: pd.Timestamp, end: pd.Timestamp, market_hint: str | None) -> pd.DataFrame:
+    """Adjusted-price fallback so corporate actions are not read as real rallies."""
     try:
         import yfinance as yf
     except ImportError:
         return pd.DataFrame()
-
     market = str(market_hint or "").upper()
     candidates = [f"{code}.KQ", f"{code}.KS"] if market == "KOSDAQ" else [f"{code}.KS", f"{code}.KQ"]
     for symbol in candidates:
         try:
             with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()):
-                raw = yf.download(
-                    symbol,
-                    start=start.strftime("%Y-%m-%d"),
-                    end=(end + pd.Timedelta(days=1)).strftime("%Y-%m-%d"),
-                    progress=False,
-                    auto_adjust=False,
-                    threads=False,
-                )
+                raw = yf.download(symbol, start=start.strftime("%Y-%m-%d"), end=(end + pd.Timedelta(days=1)).strftime("%Y-%m-%d"), progress=False, auto_adjust=True, threads=False)
             if isinstance(raw.columns, pd.MultiIndex):
                 raw.columns = raw.columns.get_level_values(0)
             out = normalize_ohlcv(raw)
@@ -235,6 +152,8 @@ def _yfinance_download(
 
 
 class MarketDataService:
+    CACHE_VERSION = "v2_adjusted"
+
     def __init__(self, cache_dir: str | Path = DEFAULT_CACHE_DIR, use_cache: bool = True) -> None:
         self.cache_dir = Path(cache_dir)
         self.ohlcv_cache = self.cache_dir / "ohlcv"
@@ -261,31 +180,19 @@ class MarketDataService:
         safe = "".join(ch if ch.isalnum() or ch in "_-" else "_" for ch in key.split(":")[0])
         return root / f"{safe}_{digest}.csv"
 
-    def get_ohlcv(
-        self,
-        ticker: str,
-        start,
-        end,
-        *,
-        market_hint: str | None = None,
-        allow_etf: bool = True,
-        fallback_yfinance: bool = True,
-    ) -> pd.DataFrame:
+    def get_ohlcv(self, ticker: str, start, end, *, market_hint: str | None = None, allow_etf: bool = True, fallback_yfinance: bool = True) -> pd.DataFrame:
         raw_code = str(ticker or "").strip().upper()
         if raw_code in _INDEX_ALIASES:
             return self.get_market_index(_INDEX_ALIASES[raw_code], start, end)
-
         code = self.normalize_ticker(raw_code)
         start_ts = self._date(start)
         end_ts = min(self._date(end), pd.Timestamp.today().normalize())
         if end_ts < start_ts:
-            return pd.DataFrame(columns=["open", "high", "low", "close", "volume", "trading_value"])
-
+            return pd.DataFrame(columns=["open","high","low","close","volume","trading_value"])
         sk, ek = start_ts.strftime("%Y%m%d"), end_ts.strftime("%Y%m%d")
-        key = f"{code}:{sk}:{ek}:{str(market_hint or '').upper()}"
+        key = f"{self.CACHE_VERSION}:{code}:{sk}:{ek}:{str(market_hint or '').upper()}"
         if key in self._memory:
             return self._memory[key].copy()
-
         path = self._cache_path(self.ohlcv_cache, key)
         if self.use_cache and path.exists():
             try:
@@ -295,7 +202,6 @@ class MarketDataService:
                     return out.copy()
             except Exception:
                 pass
-
         out = pd.DataFrame()
         try:
             stock = load_pykrx_stock()
@@ -309,12 +215,10 @@ class MarketDataService:
         except Exception:
             reset_krx_http_session()
             out = pd.DataFrame()
-
         if out.empty and fallback_yfinance:
             out = _yfinance_download(code, start_ts, end_ts, market_hint)
         if out.empty:
             raise RuntimeError(f"OHLCV 조회 실패: ticker={code} range={sk}~{ek}")
-
         if self.use_cache:
             out.to_csv(path, encoding="utf-8-sig")
         self._memory[key] = out
@@ -324,14 +228,12 @@ class MarketDataService:
         code = _INDEX_ALIASES.get(str(market or "").strip().upper())
         if not code:
             raise ValueError(f"지원하지 않는 시장지수: {market}")
-
         start_ts = self._date(start)
         end_ts = min(self._date(end), pd.Timestamp.today().normalize())
         sk, ek = start_ts.strftime("%Y%m%d"), end_ts.strftime("%Y%m%d")
-        key = f"INDEX_{code}:{sk}:{ek}"
+        key = f"INDEX_NAVER:{code}:{sk}:{ek}"
         if key in self._memory:
             return self._memory[key].copy()
-
         path = self._cache_path(self.index_cache, key)
         if self.use_cache and path.exists():
             try:
@@ -341,7 +243,6 @@ class MarketDataService:
                     return out.copy()
             except Exception:
                 pass
-
         out = normalize_ohlcv(fetch_naver_index_ohlcv(code, sk, ek))
         if self.use_cache:
             out.to_csv(path, encoding="utf-8-sig")
@@ -349,10 +250,7 @@ class MarketDataService:
         return out.copy()
 
     def resolve_trading_date(self, requested=None, max_lookback_days: int = 30) -> str:
-        requested_ts = min(
-            self._date(requested) if requested is not None else pd.Timestamp.today().normalize(),
-            pd.Timestamp.today().normalize(),
-        )
+        requested_ts = min(self._date(requested) if requested is not None else pd.Timestamp.today().normalize(), pd.Timestamp.today().normalize())
         start = requested_ts - pd.Timedelta(days=max_lookback_days)
         cal = self.get_ohlcv("005930", start, requested_ts, market_hint="KOSPI", allow_etf=False)
         dates = pd.to_datetime(cal.index, errors="coerce")
@@ -374,23 +272,13 @@ class MarketDataService:
         return (float(close.iloc[-1]) / float(close.iloc[-2]) - 1.0) * 100.0
 
     def get_market_snapshot(self, date: str, market: str, retries: int = 2) -> pd.DataFrame:
-        """Return a point-in-time all-ticker snapshot.
-
-        Primary source is pykrx all-ticker OHLCV.  KRX occasionally returns a
-        partial schema that makes pykrx raise a KeyError while checking OHLCV
-        columns.  In that case, use the market-cap endpoint, which still
-        contains close/volume/trading value/market cap, and enrich return_pct
-        through the price-change endpoint when available.
-        """
         market = str(market).upper()
         if market not in {"KOSPI", "KOSDAQ"}:
             raise ValueError(f"snapshot market must be KOSPI/KOSDAQ: {market}")
-
         dt = self._date(date)
         d = dt.strftime("%Y%m%d")
-        key = f"{market}:{d}"
+        key = f"SNAPSHOT_NATIVE:{market}:{d}"
         path = self._cache_path(self.snapshot_cache, key)
-
         if self.use_cache and path.exists():
             try:
                 cached = pd.read_csv(path, encoding="utf-8-sig", dtype={"ticker": str})
@@ -400,15 +288,13 @@ class MarketDataService:
                     return cached
             except Exception:
                 pass
-
         attempts = max(1, int(retries))
         primary_exc: Exception | None = None
-
         for _ in range(attempts):
             try:
                 stock = load_pykrx_stock()
                 with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()):
-                    raw = stock.get_market_ohlcv_by_ticker(d, market=market)
+                    raw = stock.get_market_ohlcv(d, market=market)
                 out = _normalize_market_snapshot(raw, dt, market)
                 if self.use_cache:
                     out.to_csv(path, index=False, encoding="utf-8-sig")
@@ -416,15 +302,13 @@ class MarketDataService:
             except Exception as exc:
                 primary_exc = exc
                 reset_krx_http_session()
-
         fallback_exc: Exception | None = None
         for _ in range(attempts):
             try:
                 stock = load_pykrx_stock()
                 with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()):
-                    raw_cap = stock.get_market_cap_by_ticker(d, market=market)
+                    raw_cap = stock.get_market_cap(d, market=market)
                 out = _normalize_market_snapshot(raw_cap, dt, market)
-
                 try:
                     with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()):
                         raw_change = stock.get_market_price_change_by_ticker(d, d, market=market)
@@ -432,29 +316,17 @@ class MarketDataService:
                         return_map = pd.to_numeric(raw_change["등락률"], errors="coerce")
                         return_map.index = [self.normalize_ticker(x) for x in return_map.index]
                         out["return_pct"] = out["ticker"].map(return_map)
-                except Exception as change_exc:
-                    print(
-                        f"[WARN] KRX snapshot return_pct enrichment unavailable: "
-                        f"{market} {d}: {type(change_exc).__name__}: {change_exc}"
-                    )
-
+                except Exception:
+                    pass
                 if self.use_cache:
                     out.to_csv(path, index=False, encoding="utf-8-sig")
-                print(
-                    f"[WARN] KRX OHLCV snapshot failed; using market-cap snapshot fallback: "
-                    f"{market} {d}: {type(primary_exc).__name__}: {primary_exc}"
-                )
+                print(f"[WARN] KRX OHLCV snapshot unavailable; using market-cap snapshot fallback: {market} {d}")
                 return out
             except Exception as exc:
                 fallback_exc = exc
                 reset_krx_http_session()
-
-        raise RuntimeError(
-            "KRX all-ticker snapshot 실패: "
-            f"{market} {d}; "
-            f"ohlcv={type(primary_exc).__name__}: {primary_exc}; "
-            f"market_cap={type(fallback_exc).__name__}: {fallback_exc}"
-        ) from fallback_exc
+        info = pykrx_runtime_info()
+        raise RuntimeError("KRX all-ticker snapshot 실패: " f"{market} {d}; pykrx={info['version']} auth={info['auth_mode']}; " f"ohlcv={type(primary_exc).__name__}: {primary_exc}; " f"market_cap={type(fallback_exc).__name__}: {fallback_exc}") from fallback_exc
 
 
 _DEFAULT_SERVICE: MarketDataService | None = None

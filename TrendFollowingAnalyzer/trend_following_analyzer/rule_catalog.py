@@ -2,55 +2,14 @@ from __future__ import annotations
 
 from dataclasses import asdict, dataclass
 
-LECTURE_CORE = "LECTURE_CORE"
-EXPERIMENTAL = "EXPERIMENTAL"
-ACTIVE_FILTER = "ACTIVE_FILTER"
-BACKTEST_ONLY = "BACKTEST_ONLY"
-PLANNED = "PLANNED"
-
+LECTURE_CORE="LECTURE_CORE"; EXPERIMENTAL="EXPERIMENTAL"; ACTIVE_FILTER="ACTIVE_FILTER"; BACKTEST_ONLY="BACKTEST_ONLY"; PLANNED="PLANNED"
 
 @dataclass(frozen=True)
 class RuleSpec:
-    key: str
-    origin: str
-    mode: str
-    description: str
+    key:str; origin:str; mode:str; description:str
+    def to_dict(self)->dict: return asdict(self)
 
-    def to_dict(self) -> dict:
-        return asdict(self)
+RULE_CATALOG=(
+RuleSpec("trend.ma150_position",LECTURE_CORE,ACTIVE_FILTER,"종가가 30주선(일봉 MA150) 위/아래인지"),RuleSpec("trend.ma150_slope",LECTURE_CORE,ACTIVE_FILTER,"30주선(일봉 MA150) 기울기 방향"),RuleSpec("trend.slope_threshold_pct",EXPERIMENTAL,BACKTEST_ONLY,"MA150 기울기 최소 절대값 임계치"),RuleSpec("stage.transition_context",EXPERIMENTAL,BACKTEST_ONLY,"최근 확정 Stage로 Stage 1/3 전환 구분"),RuleSpec("market.ma150_position",LECTURE_CORE,ACTIVE_FILTER,"지수의 30주선(일봉 MA150) 상하 위치"),RuleSpec("market.ma150_slope",LECTURE_CORE,ACTIVE_FILTER,"지수 30주선(일봉 MA150) 기울기 방향"),RuleSpec("market.slope_threshold_pct",EXPERIMENTAL,BACKTEST_ONLY,"시장 MA150 기울기 최소 절대값 임계치"),RuleSpec("market.ma50_alignment",EXPERIMENTAL,BACKTEST_ONLY,"지수 MA50 > MA150 정렬"),RuleSpec("market.ma150_distance",EXPERIMENTAL,BACKTEST_ONLY,"지수와 MA150 이격도"),RuleSpec("market.52w_high_breadth",LECTURE_CORE,BACKTEST_ONLY,"52주 신고가 비율이 증가하는지 보는 강의 원칙"),RuleSpec("market.52w_high_close_proxy",EXPERIMENTAL,BACKTEST_ONLY,"252거래일 종가 신고가 proxy"),RuleSpec("market.52w_low_breadth",EXPERIMENTAL,BACKTEST_ONLY,"252거래일 종가 신저가 비율 및 spread"),RuleSpec("market.breadth_velocity",EXPERIMENTAL,BACKTEST_ONLY,"Breadth 5일/20일 변화"),RuleSpec("market.intraday_strength",LECTURE_CORE,BACKTEST_ONLY,"전약후강/전강후약이라는 강의 원칙"),RuleSpec("market.intraday_daily_ohlc_proxy",EXPERIMENTAL,BACKTEST_ONLY,"지수 일봉 OHLC proxy"),RuleSpec("market.intraday_clv_threshold",EXPERIMENTAL,BACKTEST_ONLY,"CLV 0.70/0.30 기준"),RuleSpec("market.intraday_rolling_ratio",EXPERIMENTAL,BACKTEST_ONLY,"Strong/Weak Close의 5일/20일 발생 비율"),RuleSpec("market.intraday_composite_score",EXPERIMENTAL,BACKTEST_ONLY,"설명용 Intraday 복합점수"),RuleSpec("market.news_reaction",LECTURE_CORE,PLANNED,"호재/악재 민감도"),RuleSpec("stock.relative_strength",LECTURE_CORE,BACKTEST_ONLY,"시장이 조정/횡보할 때 시장보다 강하게 버티거나 상승하는 종목을 찾는 RS 원칙"),RuleSpec("stock.relative_strength_price_ratio",EXPERIMENTAL,BACKTEST_ONLY,"종목 수익배수 / 동일 시장 지수 수익배수"),RuleSpec("stock.relative_strength_windows",EXPERIMENTAL,BACKTEST_ONLY,"강의에 없는 20/60 거래일 관측창"),RuleSpec("stock.relative_strength_percentile",EXPERIMENTAL,BACKTEST_ONLY,"동일 시장의 스캔 Top-N 유니버스 내 20/60일 RS percentile 및 단순 평균 composite"),RuleSpec("stock.relative_strength_percentile_threshold",EXPERIMENTAL,BACKTEST_ONLY,"기본 composite percentile 80 이상 여부"),RuleSpec("stock.prior_advance",LECTURE_CORE,BACKTEST_ONLY,"유효한 베이스 이전에 강한 선행 상승이 있어야 한다는 강의 원칙"),RuleSpec("stock.prior_advance_window_proxy",EXPERIMENTAL,BACKTEST_ONLY,"Base Detector 전에는 최근 20거래일을 잠정 Base로 제외하고 이전 120거래일의 최대 시간순 저점→고점 상승을 측정"),RuleSpec("stock.prior_advance_threshold",EXPERIMENTAL,BACKTEST_ONLY,"선행 상승폭 30% 이상 여부; 강의에 없는 실험 임계값"),RuleSpec("stock.prior_advance_ma150_expansion",EXPERIMENTAL,BACKTEST_ONLY,"선행 고점의 MA150 대비 확장 정도"),RuleSpec("stock.price_data_discontinuity_check",EXPERIMENTAL,BACKTEST_ONLY,"수정주가/소스 불연속 가능성을 찾는 종가 일간 35% 초과 jump 품질 경고; 후보 필터가 아님"),)
 
-
-RULE_CATALOG = (
-    RuleSpec("trend.ma150_position", LECTURE_CORE, ACTIVE_FILTER, "종가가 30주선(일봉 MA150) 위/아래인지"),
-    RuleSpec("trend.ma150_slope", LECTURE_CORE, ACTIVE_FILTER, "30주선(일봉 MA150) 기울기 방향"),
-    RuleSpec("trend.slope_threshold_pct", EXPERIMENTAL, BACKTEST_ONLY, "MA150 기울기 최소 절대값 임계치"),
-    RuleSpec("stage.transition_context", EXPERIMENTAL, BACKTEST_ONLY, "최근 확정 Stage로 Stage 1/3 전환 구분"),
-    RuleSpec("market.ma150_position", LECTURE_CORE, ACTIVE_FILTER, "지수의 30주선(일봉 MA150) 상하 위치"),
-    RuleSpec("market.ma150_slope", LECTURE_CORE, ACTIVE_FILTER, "지수 30주선(일봉 MA150) 기울기 방향"),
-    RuleSpec("market.slope_threshold_pct", EXPERIMENTAL, BACKTEST_ONLY, "시장 MA150 기울기 최소 절대값 임계치"),
-    RuleSpec("market.ma50_alignment", EXPERIMENTAL, BACKTEST_ONLY, "지수 MA50 > MA150 정렬"),
-    RuleSpec("market.ma150_distance", EXPERIMENTAL, BACKTEST_ONLY, "지수와 MA150 이격도"),
-    RuleSpec("market.52w_high_breadth", LECTURE_CORE, BACKTEST_ONLY, "52주 신고가 비율이 증가하는지 보는 강의 원칙"),
-    RuleSpec("market.52w_high_close_proxy", EXPERIMENTAL, BACKTEST_ONLY, "252거래일 종가 신고가 proxy"),
-    RuleSpec("market.52w_low_breadth", EXPERIMENTAL, BACKTEST_ONLY, "252거래일 종가 신저가 비율 및 spread"),
-    RuleSpec("market.breadth_velocity", EXPERIMENTAL, BACKTEST_ONLY, "Breadth 5일/20일 변화"),
-    RuleSpec("market.intraday_strength", LECTURE_CORE, BACKTEST_ONLY, "전약후강/전강후약이라는 강의 원칙"),
-    RuleSpec("market.intraday_daily_ohlc_proxy", EXPERIMENTAL, BACKTEST_ONLY, "지수 일봉 OHLC proxy"),
-    RuleSpec("market.intraday_clv_threshold", EXPERIMENTAL, BACKTEST_ONLY, "CLV 0.70/0.30 기준"),
-    RuleSpec("market.intraday_rolling_ratio", EXPERIMENTAL, BACKTEST_ONLY, "Strong/Weak Close의 5일/20일 발생 비율"),
-    RuleSpec("market.intraday_composite_score", EXPERIMENTAL, BACKTEST_ONLY, "설명용 Intraday 복합점수"),
-    RuleSpec("market.news_reaction", LECTURE_CORE, PLANNED, "호재/악재 민감도"),
-    RuleSpec("stock.relative_strength", LECTURE_CORE, BACKTEST_ONLY, "시장이 조정/횡보할 때 시장보다 강하게 버티거나 상승하는 종목을 찾는 RS 원칙"),
-    RuleSpec("stock.relative_strength_price_ratio", EXPERIMENTAL, BACKTEST_ONLY, "종목 수익배수 / 동일 시장 지수 수익배수"),
-    RuleSpec("stock.relative_strength_windows", EXPERIMENTAL, BACKTEST_ONLY, "강의에 없는 20/60 거래일 관측창"),
-    RuleSpec("stock.relative_strength_percentile", EXPERIMENTAL, BACKTEST_ONLY, "동일 시장의 스캔 Top-N 유니버스 내 20/60일 RS percentile 및 단순 평균 composite"),
-    RuleSpec("stock.relative_strength_percentile_threshold", EXPERIMENTAL, BACKTEST_ONLY, "기본 composite percentile 80 이상 여부"),
-    RuleSpec("stock.prior_advance", LECTURE_CORE, BACKTEST_ONLY, "유효한 베이스 이전에 강한 선행 상승이 있어야 한다는 강의 원칙"),
-    RuleSpec("stock.prior_advance_window_proxy", EXPERIMENTAL, BACKTEST_ONLY, "Base Detector 전에는 최근 20거래일을 잠정 Base로 제외하고 이전 120거래일의 최대 시간순 저점→고점 상승을 측정"),
-    RuleSpec("stock.prior_advance_threshold", EXPERIMENTAL, BACKTEST_ONLY, "선행 상승폭 30% 이상 여부; 강의에 없는 실험 임계값"),
-    RuleSpec("stock.prior_advance_ma150_expansion", EXPERIMENTAL, BACKTEST_ONLY, "선행 고점의 MA150 대비 확장 정도"),
-)
-
-
-def rule_catalog_rows() -> list[dict]:
-    return [rule.to_dict() for rule in RULE_CATALOG]
+def rule_catalog_rows()->list[dict]: return [rule.to_dict() for rule in RULE_CATALOG]
