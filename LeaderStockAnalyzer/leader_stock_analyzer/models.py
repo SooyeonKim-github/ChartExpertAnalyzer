@@ -149,6 +149,31 @@ class LeaderResult:
     true_emerging_flag: bool = False
     strong_emerging_flag: bool = False
 
+    # Exhaustion Risk V1. Observational only until range backtests validate it.
+    exhaustion_risk_available: bool = False
+    exhaustion_risk_score: float | None = None
+    exhaustion_risk_label: str = "UNKNOWN"
+    exhaustion_overextension_score: float | None = None
+    exhaustion_deceleration_score: float | None = None
+    exhaustion_distribution_score: float | None = None
+    exhaustion_money_flow_decay_score: float | None = None
+    exhaustion_structure_score: float | None = None
+    exhaustion_flags: str = ""
+    exhaustion_return_5d: float | None = None
+    exhaustion_return_10d: float | None = None
+    price_momentum_deceleration: float | None = None
+    rs_deceleration: float | None = None
+    rank_reversal_3d: float | None = None
+    rank_reversal_5d: float | None = None
+    trading_value_decay_ratio: float | None = None
+    exhaustion_distance_ma10_pct: float | None = None
+    exhaustion_distance_ma20_pct: float | None = None
+    atr_extension: float | None = None
+    exhaustion_ma20_slope_5d_pct: float | None = None
+    exhaustion_drawdown_20d_pct: float | None = None
+    exhaustion_below_ma10: bool = False
+    exhaustion_below_ma20: bool = False
+
     # Leader Lifecycle V2. Lifecycle is observational and does not yet modify
     # Leader Score or confirmation status.
     lifecycle_available: bool = False
