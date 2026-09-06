@@ -106,10 +106,13 @@ lifecycle:
   enabled: true
   use_emerging_engine: true
   allow_strong_emerging_fast_track: false
+  initial_emerging_requires_confirmation: true
   discovery_min_leader_score: 60
   discovery_rank_max: 50
   emerging_min_leader_score: 72
   emerging_rank_max: 20
+  emerging_hold_min_leader_score: 60
+  emerging_hold_rank_max: 50
   emerging_max_top20_days_5d: 2
   leader_min_leader_score: 75
   leader_rank_max: 20
