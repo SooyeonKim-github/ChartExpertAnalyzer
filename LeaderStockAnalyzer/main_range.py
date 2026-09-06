@@ -47,12 +47,12 @@ def main() -> None:
         f"| daily ranking=scan-date trading_value TOP {args.top_n}"
     )
     print(
-        "[INFO] Emerging Leader enabled | rank history=candidate pool | "
-        "score=Rank50 + Money25 + RS15 + Freshness10"
+        "[INFO] Emerging Leader V1.1 enabled | score=Rank50 + Money25 + RS15 + Freshness10 "
+        "| overheat penalty=ON | max_chase=40"
     )
     print(
-        "[INFO] Leader Lifecycle V2.1 enabled | Emerging gate=Rank Velocity | "
-        "BROKEN requires structural price failure"
+        "[INFO] Leader Lifecycle V2.2 enabled | Emerging gate=Rank Velocity x2 confirmation "
+        "| fast-track=OFF | BROKEN requires structural price failure"
     )
 
     max_horizon = max(performance.horizons + performance.excursion_horizons)
@@ -123,17 +123,6 @@ def main() -> None:
         df.to_csv(lifecycle_path, index=False, encoding="utf-8-sig")
 
     emerging_events = emerging_report.events(df)
-    if not emerging_events.empty:
-        transition_mask = emerging_events.get(
-            "lifecycle_transition", pd.Series(False, index=emerging_events.index)
-        ).fillna(False)
-        first_day_mask = pd.to_numeric(
-            emerging_events.get(
-                "lifecycle_days_in_state", pd.Series(0, index=emerging_events.index)
-            ),
-            errors="coerce",
-        ).fillna(0).eq(1)
-        emerging_events = emerging_events[transition_mask | first_day_mask].copy()
     emerging_summary = emerging_report.summary(emerging_events)
     emerging_events.to_csv(emerging_events_path, index=False, encoding="utf-8-sig")
     emerging_summary.to_csv(emerging_summary_path, index=False, encoding="utf-8-sig")
@@ -152,14 +141,30 @@ def main() -> None:
 
     if not df.empty and "emerging_label" in df.columns:
         counts = df["emerging_label"].value_counts()
-        print("\n[EMERGING LEADER]")
-        for label in ("STRONG_EMERGING", "EMERGING", "WATCH", "NOT_EMERGING"):
+        print("\n[EMERGING LEADER V1.1]")
+        for label in (
+            "STRONG_EMERGING",
+            "EMERGING",
+            "WATCH",
+            "NOT_EMERGING",
+            "MOMENTUM_SPIKE",
+        ):
             print(f"  {label:<18} {int(counts.get(label, 0))}")
         print(f"  {'TRUE_EMERGING':<18} {int(df['true_emerging_flag'].fillna(False).sum())}")
+        print(f"  {'MOMENTUM_SPIKE':<18} {int(df['momentum_spike_flag'].fillna(False).sum())}")
         print(f"  {'EVENTS':<18} {len(emerging_events)}")
         if not emerging_summary.empty:
-            for key, value in emerging_summary.iloc[0].items():
-                print(f"  {key}: {value}")
+            print("\n[EMERGING COHORT SUMMARY]")
+            for _, row in emerging_summary.iterrows():
+                cohort = row.get("cohort", "UNKNOWN")
+                count = int(row.get("event_count", 0))
+                leader10 = row.get("leader_within_10d_rate", "-")
+                false5 = row.get("false_emerging_within_5d_rate", "-")
+                avg20 = row.get("avg_D+20", "-")
+                print(
+                    f"  {cohort:<26} count={count:<4} "
+                    f"leader10={leader10} false5={false5} avgD20={avg20}"
+                )
 
     if not df.empty and "lifecycle_state" in df.columns:
         counts = df["lifecycle_state"].value_counts()
