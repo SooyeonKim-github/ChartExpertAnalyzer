@@ -109,13 +109,8 @@ def test_lifecycle_promotion_is_one_step_with_confirmation():
         [replace(strong, scan_date="20260828")],
         {"111111": daily},
     )[0]
-    assert day4.lifecycle_state == "EMERGING"
-
-    day5 = engine.enrich(
-        [replace(strong, scan_date="20260829")],
-        {"111111": daily},
-    )[0]
-    assert day5.lifecycle_state == "LEADER"
+    assert day4.lifecycle_state == "LEADER"
+    assert day4.lifecycle_reason == "confirmed_emerging_to_leader_evidence_2/2"
 
 
 def test_leader_score_collapse_alone_does_not_break_lifecycle():
