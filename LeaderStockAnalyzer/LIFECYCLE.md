@@ -1,7 +1,7 @@
-# Leader Lifecycle V1
+# Leader Lifecycle V2
 
 `LeaderLifecycleEngine` tracks how a stock's leadership evolves across scan dates.
-It is intentionally independent from the existing Leader Score and confirmation rules in V1.
+Lifecycle remains independent from the existing Leader Score and confirmation rules so its predictive value can be validated first.
 
 ## State flow
 
@@ -14,32 +14,68 @@ DISCOVERY
   -> BROKEN
 ```
 
-A recovered `BROKEN` stock re-enters through `EMERGING` instead of jumping directly back to `LEADER`.
+A recovered `BROKEN` stock re-enters through `EMERGING`.
+The first observed date may infer `LEADER` or `PERSISTENT_LEADER` directly when recent historical persistence already proves that state. After initialization, normal upward transitions move one stage at a time.
 
-## State meaning
+## V2 changes
 
-- `DISCOVERY`: early leadership candidate, but leadership evidence is not strong enough yet.
-- `EMERGING`: strong current Leader Score/rank, but recent persistence is still limited.
-- `LEADER`: Leader Score/rank and recent persistence are both established.
-- `PERSISTENT_LEADER`: leadership has remained strong for several recent trading days.
-- `EXHAUSTING`: a previously established leader is showing multiple degradation signals.
-- `BROKEN`: leadership structure has materially broken or an exhausting leader has broken down further.
+Lifecycle V2 was tuned after the first range result showed too many `EMERGING -> BROKEN` transitions caused by `leader_score_collapse` alone.
 
-## V1 evidence
+### 1. Leader Score collapse no longer means BROKEN
 
-Lifecycle V1 reuses existing analyzer evidence instead of adding a new score:
+A low Leader Score is treated as weakening evidence, not structural failure.
 
-- Leader Score
-- market leader rank
-- PersistenceEngine score/level
-- recent TOP20 trading-value days
-- breakout exhaustion flag
-- false-breakout flag
-- chase risk
-- 20-day drawdown
-- MA10/MA20 break context
+- `EMERGING` weakness must persist for `demotion_confirm_days` before returning to `DISCOVERY`.
+- `LEADER` weakness must persist before returning to `EMERGING`.
+- `PERSISTENT_LEADER` persistence decay must persist before returning to `LEADER`.
 
-The dedicated `Exhaustion Risk` feature is planned separately. V1 uses only simple degradation flags so lifecycle can be validated first.
+### 2. BROKEN requires structural price failure
+
+`BROKEN` evidence is now limited to strong price-structure failures:
+
+- 20-day drawdown beyond the configured threshold **and** price below MA20
+- price below MA20 with a large negative daily return
+- false breakout while price is below MA20
+
+An established `LEADER` or `PERSISTENT_LEADER` with structural failure first moves to `EXHAUSTING`. If the structural failure remains while `EXHAUSTING`, it moves to `BROKEN`.
+
+### 3. EXHAUSTING is used before failure
+
+Exhaustion evidence includes:
+
+- breakout exhaustion
+- false breakout
+- high chase risk
+- meaningful 20-day drawdown
+- weak close below MA10
+- Leader Score weakness for an established leader
+- Persistence Score decay for an established leader
+
+At least `exhausting_min_flags` signals are required unless a hard structural break is already detected.
+
+### 4. Hysteresis
+
+One-day noise should not constantly change lifecycle state.
+
+Default confirmation settings:
+
+```text
+promotion_confirm_days = 2
+demotion_confirm_days  = 2
+recovery_confirm_days  = 2
+```
+
+Normal promotion therefore behaves like:
+
+```text
+DISCOVERY --confirmed--> EMERGING --confirmed--> LEADER --confirmed--> PERSISTENT_LEADER
+```
+
+`PERSISTENT_LEADER` also requires sufficient persistence evidence and either enough days as `LEADER` or a HIGH persistence level.
+
+### 5. Memory reset
+
+If a ticker disappears from the observed Leader universe for longer than `memory_reset_calendar_days`, lifecycle memory resets and the next observation is treated as a new initial inference.
 
 ## Output columns
 
@@ -64,17 +100,15 @@ Range analysis also writes:
 results/range_YYYYMMDD_YYYYMMDD/lifecycle_transitions.csv
 ```
 
-This file contains only rows whose lifecycle state changed while the stock was observed in the daily Leader universe.
+## Decision-rule isolation
 
-## Important V1 rule
-
-Lifecycle does **not** modify:
+Lifecycle V2 still does **not** modify:
 
 - Leader Score
 - Timing Score
 - STRONG_CONFIRMED / CONFIRMED / WATCH / REJECT
 
-This is deliberate. First compare forward returns by lifecycle state. Only after the state labels show predictive value should lifecycle be promoted into confirmation gates or position sizing.
+This lets forward returns by lifecycle state be measured before lifecycle becomes part of confirmation gates or position sizing.
 
 ## Test
 
@@ -84,15 +118,21 @@ From `LeaderStockAnalyzer`:
 python -m pytest tests/test_lifecycle.py -q
 ```
 
+The tests cover:
+
+- initial mature-state inference
+- one-stage promotion with confirmation
+- Leader Score collapse not causing BROKEN
+- structural failure routing through EXHAUSTING
+- degradation-based EXHAUSTING detection
+- days-in-state tracking
+
 ## Next validation
 
-Recommended first validation from range results:
+Re-run the same historical range and compare V1 vs V2:
 
-- average/median D+5, D+20, D+60 by lifecycle state
-- MFE/MAE by lifecycle state
-- `EMERGING -> LEADER` transition performance
-- `LEADER -> PERSISTENT_LEADER` transition performance
-- `LEADER/PERSISTENT_LEADER -> EXHAUSTING` post-transition drawdown
-- `EXHAUSTING -> BROKEN` failure rate
-
-These results should drive V2 threshold changes rather than tuning the state thresholds by intuition alone.
+- `EMERGING -> BROKEN` count should fall sharply
+- `EXHAUSTING` should appear before meaningful `BROKEN` events
+- `DISCOVERY -> LEADER/PERSISTENT_LEADER` skips should disappear after initial observation
+- `BROKEN` forward returns should be materially worse than `LEADER/PERSISTENT_LEADER`
+- `EXHAUSTING` should show weaker MFE / worse MAE than healthy leader states
