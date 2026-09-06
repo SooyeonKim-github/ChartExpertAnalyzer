@@ -1,6 +1,6 @@
 # MaterialAnalyzer News Pipeline
 
-`MaterialAnalyzer.news` is the source-agnostic collection, clustering, event-structuring, and novelty layer used by MaterialAnalyzer.
+`MaterialAnalyzer.news` is the source-agnostic collection, clustering, event-structuring, novelty, and material-scoring layer used by MaterialAnalyzer.
 
 ## Current pipeline
 
@@ -11,28 +11,34 @@ NewsCollector V1.5
         ↓
 ArticleNormalizer / Exact dedupe
         ↓
-Incremental Collection
-        ↓
-Source Health / Run History
-        ↓
 ArticleCluster V1.1 (rule-only)
-        ↓
-cluster_report.csv
         ↓
 EventExtractor V1.1 (title-first rule-based)
         ↓
 material_events
         ↓
-event_report.csv
-        ↓
-NoveltyAnalyzer V1 (rule-only family + delta)
+NoveltyAnalyzer V1.1 (rule-only family + delta + litigation guard)
         ↓
 event_families + event_novelty
         ↓
-novelty_report.csv
+MaterialScorer V1 (deterministic 100-point score)
+        ↓
+material_scores
 ```
 
-Semantic similarity, embeddings, and LLM clustering are intentionally disabled in ArticleCluster and NoveltyAnalyzer V1.
+Semantic similarity, embeddings, and LLM clustering are intentionally disabled in ArticleCluster and NoveltyAnalyzer.
+
+## Main execution order
+
+```bat
+MaterialAnalyzer\news\run_news_collector.bat
+MaterialAnalyzer\news\run_article_cluster.bat
+MaterialAnalyzer\news\run_event_extractor.bat
+MaterialAnalyzer\news\run_novelty_analyzer.bat
+MaterialAnalyzer\news\run_material_scorer.bat
+```
+
+Each stage is incremental unless `--rebuild` is explicitly used.
 
 ## NewsCollector
 
@@ -44,33 +50,13 @@ OpenDART requires `OPENDART_API_KEY`.
 
 Repeated collection is incremental:
 - DART/KIND: known items are skipped before fetch.
-- Government sources: latest 3 items are re-fetched to capture edits.
+- Government sources: latest items may be re-fetched to capture edits.
 - `source_states` and `collection_runs` persist endpoint health/history.
-
-Health:
-
-```bat
-python -m MaterialAnalyzer.news.show_health --runs 20
-```
 
 ## ArticleCluster V1.1
 
-Run and rebuild current raw articles with V1.1 rules:
-
 ```bat
 MaterialAnalyzer\news\run_article_cluster.bat
-```
-
-Manual incremental mode:
-
-```bat
-python -m MaterialAnalyzer.news.run_article_cluster
-```
-
-Manual rebuild:
-
-```bat
-python -m MaterialAnalyzer.news.run_article_cluster --rebuild
 ```
 
 Output:
@@ -79,41 +65,12 @@ Output:
 MaterialAnalyzer\data\cluster_report.csv
 ```
 
-### V1.1 disclosure safeguards
-
-- Exact DART/KIND receipt id is the strongest key.
-- DART/KIND ids such as `20260904900749` and `20260904000749` use a bridge key based on date + final sequence.
-- The bridge key still requires company/stock evidence and title similarity.
-- If the same company + normalized title + market date contains multiple DART or KIND filings, generic title matching is blocked.
-- Numeric conflicts are penalized.
-- Same-source different receipt ids are never merged only because the filing title is generic.
-
-Raw `articles` are never deleted or collapsed.
-
-Cluster storage:
-- `article_clusters`
-- `article_cluster_members`
+Safeguards include exact/bridge DART-KIND receipt matching, numeric conflict penalties, repeated-disclosure ambiguity guards, and same-source different-receipt separation. Raw `articles` are never deleted or collapsed.
 
 ## EventExtractor V1.1
 
-EventExtractor converts one cluster into one structured event. It does not merge clusters.
-
-Run:
-
 ```bat
 MaterialAnalyzer\news\run_event_extractor.bat
-```
-
-Manual incremental mode:
-
-```bat
-python -m MaterialAnalyzer.news.run_event_extractor
-```
-
-Manual rebuild:
-
-```bat
-python -m MaterialAnalyzer.news.run_event_extractor --rebuild
 ```
 
 Output:
@@ -128,9 +85,7 @@ Storage:
 material_events
 ```
 
-### V1.1 classification policy
-
-Event type classification is layered to prevent body-text contamination:
+Event type classification is layered:
 
 ```text
 TITLE
@@ -140,68 +95,19 @@ SUMMARY
 BODY high-precision rules only
 ```
 
-Broad words such as `AI`, `지원금`, `배터리`, or `제재` found only somewhere in a government press-release body do not automatically determine the event type.
+Stage rules include `REQUESTED`, `PLANNED`, `CONFIRMED`, `APPROVED`, `STARTED`, `COMPLETED`, and `RELEASED`.
 
-Stage rules use specific phrases before broad words:
-- `승인 신청`, `허가 신청` -> `REQUESTED`
-- plan/target/review -> `PLANNED`
-- contract/order/decision -> `CONFIRMED`
-- approval/license -> `APPROVED`
-- start/operation/launch -> `STARTED`
-- completion -> `COMPLETED`
-- trading-halt/designation release -> `RELEASED`
+`quantified=1` requires a business-meaningful numeric fact such as money, percent, capacity, quantity, duration, or clinical phase. Calendar years, phone numbers, and article ids alone do not qualify.
 
-`REQUESTED` events are tracked but are not promoted as confirmed material candidates.
+Routine/administrative events are retained but excluded from downstream material scoring with `material_candidate=0`.
 
-### Meaningful numeric facts
-
-`quantified=1` requires a business-meaningful numeric fact such as:
-- money
-- percent
-- capacity (`GW`, `MW`, `GWh`, ...)
-- quantity (`척`, `대`, `개`, `명`, ...)
-- duration
-- clinical phase
-
-Calendar years, phone numbers, article ids, and other bare numbers are not enough to set `quantified=1`.
-
-### Material candidate filter
-
-Routine/administrative events are stored as events but excluded from downstream material scoring with `material_candidate=0`, including examples such as:
-- market warning / investment caution
-- short-selling restriction
-- ETF/ETN administrative changes
-- routine securities filings
-- routine ownership filings
-- routine IR notices
-- unknown events
-- application/request stage events
-
-Event extraction is incremental and version-aware. If neither the cluster nor extractor version changes, a repeat run should process zero events.
-
-## NoveltyAnalyzer V1
-
-NoveltyAnalyzer analyzes material events over time and determines whether each event is actually new information or a continuation of an existing event family.
-
-Run:
+## NoveltyAnalyzer V1.1
 
 ```bat
 MaterialAnalyzer\news\run_novelty_analyzer.bat
 ```
 
-Manual incremental mode:
-
-```bat
-python -m MaterialAnalyzer.news.run_novelty_analyzer
-```
-
 Manual rebuild:
-
-```bat
-python -m MaterialAnalyzer.news.run_novelty_analyzer --rebuild
-```
-
-The batch runner forwards arguments, so this also works:
 
 ```bat
 MaterialAnalyzer\news\run_novelty_analyzer.bat --rebuild
@@ -217,60 +123,104 @@ Storage:
 - `event_families`
 - `event_novelty`
 
-### Novelty statuses
+Novelty statuses:
+- `NEW_EVENT`
+- `FOLLOW_UP`
+- `CONFIRMATION`
+- `REHASH`
+- `MARKET_REACTION`
 
-- `NEW_EVENT`: no sufficiently related prior material event.
-- `FOLLOW_UP`: same event family with meaningful new information such as stage, amount, counterpart, or polarity change.
-- `CONFIRMATION`: same event family confirmed by a stronger/new source without a substantive event delta.
-- `REHASH`: same event family repeated without meaningful new information.
-- `MARKET_REACTION`: price/market reaction article rather than a new catalyst.
+Family matching is deterministic and uses ticker/company identity, compatible event type, normalized title/token overlap, event-specific anchors, meaningful numeric facts, and time distance. Auto-family threshold is `68`.
 
-### Event-family matching
+### V1.1 litigation guard
 
-V1 is deterministic and rule-based. It uses:
-- ticker/company identity
-- event type or explicitly compatible type
-- normalized title lexical similarity
-- token overlap
-- event-specific informative title anchors
-- meaningful numeric overlap/change
-- time distance
+Generic legal words alone are not sufficient to join lawsuits. Concrete legal subjects are extracted first.
 
-The auto-family threshold is `68`.
+Examples:
 
-Important safeguards:
-- different named companies/tickers cannot join only because titles are similar;
-- same company + same event type is not enough;
-- generic words such as `계약`, `수주`, `투자`, `승인`, and company names are removed when checking event-specific anchors;
-- same-company unrelated contracts such as `LNG선 공급계약` and `반도체 장비 공급계약` stay in separate families unless stronger evidence links them;
-- company-less government events require stronger lexical evidence.
+```text
+전환사채발행금지 가처분
+vs
+신주발행금지 가처분
+→ different family / NEW_EVENT
+```
 
-### Delta detection
+```text
+전환사채발행금지 가처분 신청
+→ 전환사채발행금지 가처분 항고
+→ same family / FOLLOW_UP
+```
 
-Once a prior family parent is found, NoveltyAnalyzer checks:
-- `stage_changed`
-- `stage_progressed`
-- `number_changed`
-- `company_changed`
-- `polarity_changed`
-- `source_reliability_increased`
-- `confirmation_source_added`
+Tracked litigation deltas:
+- `litigation_procedure_changed`
+- `litigation_procedure_progressed`
 
-These are stored with `new_information_count`, parent event, family id, and novelty reason.
+Other deltas include stage, meaningful number, company/counterparty, polarity, source reliability, and confirmation-source changes.
 
-### Novelty scoring
+V1.1 is version-aware. Existing V1 novelty rows are reprocessed once after upgrade. A second unchanged run should return `processed=0`.
 
-V1 stores a 0-100 `novelty_score` for later MaterialScorer use.
+## MaterialScorer V1
 
-Typical interpretation:
-- `NEW_EVENT`: 100
-- `FOLLOW_UP`: 60-100 depending on delta strength
-- `CONFIRMATION`: 55-75
-- `REHASH`: 15
-- `MARKET_REACTION`: 5
+```bat
+MaterialAnalyzer\news\run_material_scorer.bat
+```
 
-Novelty analysis is incremental and version-aware. Only `material_candidate=1` events are analyzed by default, plus explicitly classified `MARKET_REACTION` articles so market reactions can be suppressed later. A repeat run with no EventExtractor changes should process zero events.
+Manual rebuild:
+
+```bat
+MaterialAnalyzer\news\run_material_scorer.bat --rebuild
+```
+
+Output:
+
+```text
+MaterialAnalyzer\data\material_score_report.csv
+```
+
+Storage:
+
+```text
+material_scores
+```
+
+MaterialScorer only scores `material_candidate=1` events that already have NoveltyAnalyzer results. `MARKET_REACTION` is excluded from material scoring.
+
+### 100-point score
+
+| Component | Max |
+|---|---:|
+| Direct Company / Specificity | 25 |
+| Event Certainty | 20 |
+| Financial Impact | 15 |
+| Quantification | 15 |
+| Novelty | 10 |
+| Source Reliability | 10 |
+| Multi-source Confirmation | 5 |
+| **Total** | **100** |
+
+Directness rules preserve policy events: a listed ticker receives the highest direct score, a named company receives a high score, and a concrete official government/sector event can still receive specificity credit even without a direct company.
+
+Novelty component:
+
+```text
+NEW_EVENT        10
+FOLLOW_UP         8
+CONFIRMATION      5
+REHASH             1
+MARKET_REACTION    0
+```
+
+Final material status:
+
+```text
+85-100  STRONG
+70-84   CONFIRMED
+55-69   WATCH
+0-54    REJECT
+```
+
+Material scoring is incremental and version-aware. If either the source event or novelty result changes, the corresponding event is rescored. A second unchanged run should return `processed=0`.
 
 ## Next stage
 
-The next downstream layer is `MaterialScorer`, which will combine event certainty, financial impact, quantification, novelty, source reliability, and confirmation into a final material score/status.
+The next downstream layer is `TickerLinker`, which will connect company-less policy/sector events and company events to tradable tickers using explicit relation types such as `DIRECT`, `SUPPLIER`, `CUSTOMER`, `SECTOR`, and `THEME`. After that, `MaterialBacktester` can evaluate forward returns by material score/status and event type.
