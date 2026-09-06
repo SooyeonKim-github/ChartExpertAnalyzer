@@ -30,6 +30,7 @@ def _row_value(row, key: str, default=""):
 class LinkInput:
     event_id: str
     event_type: str
+    event_stage: str
     event_title: str
     event_summary: str
     positive_negative: str
@@ -47,6 +48,7 @@ class LinkInput:
         return cls(
             event_id=row["event_id"],
             event_type=_row_value(row, "event_type", "UNKNOWN") or "UNKNOWN",
+            event_stage=_row_value(row, "event_stage", "UNKNOWN") or "UNKNOWN",
             event_title=_row_value(row, "event_title", ""),
             event_summary=_row_value(row, "event_summary", ""),
             positive_negative=_row_value(row, "positive_negative", "NEUTRAL") or "NEUTRAL",
@@ -72,10 +74,32 @@ class TickerRef:
 
 
 @dataclass(frozen=True)
+class ThemeRule:
+    theme: str
+    event_types: Tuple[str, ...]
+    keywords: Tuple[str, ...]
+    strong_keywords: Tuple[str, ...] = field(default_factory=tuple)
+    weak_keywords: Tuple[str, ...] = field(default_factory=tuple)
+    confidence: float = 0.8
+    min_materiality: float = 70.0
+
+
+@dataclass(frozen=True)
 class ThemeMatch:
     theme: str
     confidence: float
     matched_keywords: Tuple[str, ...]
+    rule: ThemeRule | None = None
+
+
+@dataclass(frozen=True)
+class ThemeMaterialityResult:
+    theme: str
+    score: float
+    eligible: bool
+    strong_hits: Tuple[str, ...] = field(default_factory=tuple)
+    weak_hits: Tuple[str, ...] = field(default_factory=tuple)
+    reason: str = ""
 
 
 @dataclass(frozen=True)
@@ -86,6 +110,7 @@ class ThemeTickerRef:
     relation_type: str
     relation_weight: float
     confidence: float
+    mapping_relevance: float
     reason: str
 
 
@@ -108,8 +133,10 @@ class TickerLinkRecord:
     name: str
     relation_type: str
     relation_weight: float
+    mapping_relevance: float
     link_confidence: float
     theme: str
+    theme_materiality_score: float
     link_reason: str
     evidence: str
     material_score: float
@@ -117,6 +144,7 @@ class TickerLinkRecord:
     ticker_material_score: float
     positive_negative: str
     link_version: str
+    reference_signature: str
     event_updated_at: str | None
     score_updated_at: str | None
 
