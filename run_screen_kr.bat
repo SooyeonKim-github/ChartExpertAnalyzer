@@ -134,7 +134,7 @@ echo [DONE] KR screening finished.
 echo ============================================
 echo Universe : %LIQUIDITY_UNIVERSE_XLSX%
 echo History  : %ROOT%results\confirmed_candidates.csv
-echo Today    : %ROOT%results\today_confiremd_candidates.csv
+echo Latest   : %ROOT%results\today_confirmed_candidates.csv
 echo [INFO] KOSPI + KOSDAQ, recent %LOOKBACK%-day avg trading-value TOP %TOP_N%.
 echo ============================================
 pause
