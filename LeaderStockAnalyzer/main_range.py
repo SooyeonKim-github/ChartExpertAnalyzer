@@ -7,6 +7,7 @@ import pandas as pd
 
 from leader_stock_analyzer import load_config, screen_date
 from leader_stock_analyzer.data_provider import PyKrxLeaderDataProvider
+from leader_stock_analyzer.lifecycle import LeaderLifecycleEngine
 from leader_stock_analyzer.performance import ForwardPerformanceEngine, PerformanceAttributionEngine
 
 
@@ -31,6 +32,7 @@ def main() -> None:
     base_dir = Path(__file__).resolve().parent
     cfg = load_config(base_dir / args.config)
     provider = PyKrxLeaderDataProvider(cfg, base_dir)
+    lifecycle = LeaderLifecycleEngine(cfg)
     performance = ForwardPerformanceEngine(cfg)
     attribution = PerformanceAttributionEngine(cfg)
 
@@ -45,6 +47,7 @@ def main() -> None:
         f"[INFO] Leader range ready | trading_days={len(dates)} "
         f"| daily ranking=scan-date trading_value TOP {args.top_n}"
     )
+    print("[INFO] Leader Lifecycle V1 enabled | state is carried across scan dates")
 
     max_horizon = max(performance.horizons + performance.excursion_horizons)
     future_calendar_days = max_horizon * 2 + 30
@@ -61,6 +64,7 @@ def main() -> None:
             base_dir=base_dir,
             progress=False,
             provider=provider,
+            lifecycle_engine=lifecycle,
         )
         for r in results:
             rec = r.to_dict()
@@ -95,6 +99,7 @@ def main() -> None:
     out_dir.mkdir(parents=True, exist_ok=True)
     all_path = out_dir / "range_all_results.csv"
     cand_path = out_dir / "range_candidates.csv"
+    lifecycle_path = out_dir / "lifecycle_transitions.csv"
     df.to_csv(all_path, index=False, encoding="utf-8-sig")
     if not df.empty:
         df[df["status"].isin(["STRONG_CONFIRMED", "CONFIRMED"])].to_csv(
@@ -102,17 +107,34 @@ def main() -> None:
             index=False,
             encoding="utf-8-sig",
         )
+        transitions = df[df["lifecycle_transition"].fillna(False)].copy()
+        transitions.to_csv(lifecycle_path, index=False, encoding="utf-8-sig")
     else:
         df.to_csv(cand_path, index=False, encoding="utf-8-sig")
+        df.to_csv(lifecycle_path, index=False, encoding="utf-8-sig")
 
     perf_dir = out_dir / "performance"
     report_paths = attribution.write_reports(df, perf_dir)
 
     print(f"\n[DONE] {all_path}")
     print(f"[DONE] {cand_path}")
+    print(f"[DONE] {lifecycle_path}")
     print(f"[DONE] performance reports -> {perf_dir}")
     for name, path in report_paths.items():
         print(f"       {name}: {path.name}")
+
+    if not df.empty and "lifecycle_state" in df.columns:
+        counts = df["lifecycle_state"].value_counts()
+        print("\n[LIFECYCLE]")
+        for state in (
+            "DISCOVERY",
+            "EMERGING",
+            "LEADER",
+            "PERSISTENT_LEADER",
+            "EXHAUSTING",
+            "BROKEN",
+        ):
+            print(f"  {state:<18} {int(counts.get(state, 0))}")
 
 
 if __name__ == "__main__":
