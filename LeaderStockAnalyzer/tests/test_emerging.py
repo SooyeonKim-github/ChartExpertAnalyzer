@@ -76,6 +76,24 @@ def _history_fixture():
     return rising, LeadershipHistoryContext.build(frames, scan_date="20260814")
 
 
+def _lifecycle_base(cfg, daily, ticker="111111"):
+    analyzer = LeaderStockAnalyzer(cfg)
+    return analyzer.analyze_one(
+        scan_date="20260820",
+        ticker=ticker,
+        name="A",
+        market="KOSPI",
+        price=float(daily.iloc[-1]["close"]),
+        return_pct=1.0,
+        trading_value=float(daily.iloc[-1]["trading_value"]),
+        trading_value_rank=10,
+        universe_size=100,
+        daily=daily,
+        intraday=pd.DataFrame(),
+        market_return_pct=0.0,
+    )
+
+
 def test_emerging_engine_detects_quality_rank_velocity():
     cfg = deepcopy(DEFAULT_CONFIG)
     rising, history = _history_fixture()
@@ -122,21 +140,7 @@ def test_lifecycle_requires_two_day_emerging_confirmation_by_default():
     assert cfg["lifecycle"]["allow_strong_emerging_fast_track"] is False
 
     daily = _frame(np.linspace(100, 120, 30), np.full(30, 100_000_000_000.0))
-    analyzer = LeaderStockAnalyzer(cfg)
-    base = analyzer.analyze_one(
-        scan_date="20260820",
-        ticker="111111",
-        name="A",
-        market="KOSPI",
-        price=float(daily.iloc[-1]["close"]),
-        return_pct=1.0,
-        trading_value=float(daily.iloc[-1]["trading_value"]),
-        trading_value_rank=10,
-        universe_size=100,
-        daily=daily,
-        intraday=pd.DataFrame(),
-        market_return_pct=0.0,
-    )
+    base = _lifecycle_base(cfg, daily)
     engine = LeaderLifecycleEngine(cfg)
 
     day1 = engine.enrich(
@@ -156,7 +160,7 @@ def test_lifecycle_requires_two_day_emerging_confirmation_by_default():
     candidate = replace(
         base,
         scan_date="20260821",
-        leader_score=80.0,
+        leader_score=74.0,
         market_leader_rank=10,
         emerging_available=True,
         true_emerging_flag=True,
@@ -178,25 +182,153 @@ def test_lifecycle_requires_two_day_emerging_confirmation_by_default():
     assert day3.lifecycle_reason == "confirmed_rank_velocity_emerging"
 
 
+def test_initial_emerging_observation_does_not_bypass_confirmation():
+    cfg = deepcopy(DEFAULT_CONFIG)
+    daily = _frame(np.linspace(100, 120, 30), np.full(30, 100_000_000_000.0))
+    base = _lifecycle_base(cfg, daily)
+    engine = LeaderLifecycleEngine(cfg)
+
+    candidate = replace(
+        base,
+        leader_score=74.0,
+        market_leader_rank=10,
+        emerging_available=True,
+        true_emerging_flag=True,
+        persistence_available=True,
+        leader_persistence_score=20.0,
+        leader_persistence_level="LOW",
+        turnover_top20_days_5d=1,
+    )
+    day1 = engine.enrich([candidate], {"111111": daily})[0]
+    assert day1.lifecycle_state == "DISCOVERY"
+    assert day1.lifecycle_prev_state == "UNKNOWN"
+    assert day1.lifecycle_reason == "initial_emerging_confirmation_pending_1/2"
+
+    day2 = engine.enrich(
+        [replace(candidate, scan_date="20260821")],
+        {"111111": daily},
+    )[0]
+    assert day2.lifecycle_state == "EMERGING"
+    assert day2.lifecycle_reason == "confirmed_rank_velocity_emerging"
+
+
+def test_emerging_hold_allows_rank_velocity_to_cool_then_promote_to_leader():
+    cfg = deepcopy(DEFAULT_CONFIG)
+    daily = _frame(np.linspace(100, 120, 30), np.full(30, 100_000_000_000.0))
+    base = _lifecycle_base(cfg, daily)
+    engine = LeaderLifecycleEngine(cfg)
+
+    discovery = replace(
+        base,
+        leader_score=65.0,
+        market_leader_rank=30,
+        emerging_available=True,
+        true_emerging_flag=False,
+        persistence_available=True,
+        leader_persistence_score=20.0,
+        leader_persistence_level="LOW",
+        turnover_top20_days_5d=0,
+    )
+    assert engine.enrich([discovery], {"111111": daily})[0].lifecycle_state == "DISCOVERY"
+
+    activation = replace(
+        discovery,
+        scan_date="20260821",
+        leader_score=74.0,
+        market_leader_rank=10,
+        true_emerging_flag=True,
+        turnover_top20_days_5d=1,
+    )
+    assert engine.enrich([activation], {"111111": daily})[0].lifecycle_state == "DISCOVERY"
+    day3 = engine.enrich(
+        [replace(activation, scan_date="20260824")],
+        {"111111": daily},
+    )[0]
+    assert day3.lifecycle_state == "EMERGING"
+
+    cooled = replace(
+        activation,
+        scan_date="20260825",
+        leader_score=65.0,
+        market_leader_rank=30,
+        true_emerging_flag=False,
+        strong_emerging_flag=False,
+    )
+    day4 = engine.enrich([cooled], {"111111": daily})[0]
+    assert day4.lifecycle_state == "EMERGING"
+    assert day4.lifecycle_reason == "emerging_hold_conditions_held"
+
+    leader_ready = replace(
+        cooled,
+        scan_date="20260826",
+        leader_score=82.0,
+        market_leader_rank=8,
+        true_emerging_flag=False,
+        leader_persistence_score=55.0,
+        leader_persistence_level="MEDIUM",
+        turnover_top20_days_5d=3,
+    )
+    day5 = engine.enrich([leader_ready], {"111111": daily})[0]
+    assert day5.lifecycle_state == "EMERGING"
+    assert "leader_confirmation_pending_1/2" in day5.lifecycle_reason
+
+    day6 = engine.enrich(
+        [replace(leader_ready, scan_date="20260827")],
+        {"111111": daily},
+    )[0]
+    assert day6.lifecycle_state == "LEADER"
+    assert day6.lifecycle_reason == "confirmed_emerging_to_leader"
+
+
+def test_emerging_hold_failure_requires_two_days_before_demotion():
+    cfg = deepcopy(DEFAULT_CONFIG)
+    daily = _frame(np.linspace(100, 120, 30), np.full(30, 100_000_000_000.0))
+    base = _lifecycle_base(cfg, daily)
+    engine = LeaderLifecycleEngine(cfg)
+
+    activation = replace(
+        base,
+        leader_score=74.0,
+        market_leader_rank=10,
+        emerging_available=True,
+        true_emerging_flag=True,
+        persistence_available=True,
+        leader_persistence_score=20.0,
+        leader_persistence_level="LOW",
+        turnover_top20_days_5d=1,
+    )
+    day1 = engine.enrich([activation], {"111111": daily})[0]
+    assert day1.lifecycle_state == "DISCOVERY"
+    day2 = engine.enrich(
+        [replace(activation, scan_date="20260821")],
+        {"111111": daily},
+    )[0]
+    assert day2.lifecycle_state == "EMERGING"
+
+    failed = replace(
+        activation,
+        scan_date="20260824",
+        leader_score=55.0,
+        market_leader_rank=60,
+        true_emerging_flag=False,
+    )
+    day3 = engine.enrich([failed], {"111111": daily})[0]
+    assert day3.lifecycle_state == "EMERGING"
+    assert "emerging_hold_weakness_pending_1/2" in day3.lifecycle_reason
+
+    day4 = engine.enrich(
+        [replace(failed, scan_date="20260825")],
+        {"111111": daily},
+    )[0]
+    assert day4.lifecycle_state == "DISCOVERY"
+    assert day4.lifecycle_reason == "confirmed_emerging_hold_failure"
+
+
 def test_fast_track_can_be_explicitly_reenabled():
     cfg = deepcopy(DEFAULT_CONFIG)
     cfg["lifecycle"]["allow_strong_emerging_fast_track"] = True
     daily = _frame(np.linspace(100, 120, 30), np.full(30, 100_000_000_000.0))
-    analyzer = LeaderStockAnalyzer(cfg)
-    base = analyzer.analyze_one(
-        scan_date="20260820",
-        ticker="222222",
-        name="B",
-        market="KOSPI",
-        price=float(daily.iloc[-1]["close"]),
-        return_pct=1.0,
-        trading_value=float(daily.iloc[-1]["trading_value"]),
-        trading_value_rank=30,
-        universe_size=100,
-        daily=daily,
-        intraday=pd.DataFrame(),
-        market_return_pct=0.0,
-    )
+    base = _lifecycle_base(cfg, daily, ticker="222222")
     engine = LeaderLifecycleEngine(cfg)
     day1 = engine.enrich(
         [replace(base, leader_score=65.0, market_leader_rank=30, emerging_available=True)],
@@ -209,7 +341,7 @@ def test_fast_track_can_be_explicitly_reenabled():
             replace(
                 base,
                 scan_date="20260821",
-                leader_score=80.0,
+                leader_score=74.0,
                 market_leader_rank=10,
                 emerging_available=True,
                 true_emerging_flag=True,
@@ -248,7 +380,7 @@ def test_emerging_summary_splits_cohorts():
                 "lifecycle_state": "EMERGING",
                 "lifecycle_prev_state": "EMERGING",
                 "lifecycle_days_in_state": 2,
-                "lifecycle_reason": "emerging_conditions_held",
+                "lifecycle_reason": "emerging_hold_conditions_held",
                 "D+5": 1.0,
                 "D+20": 3.0,
             },
