@@ -78,7 +78,7 @@ ticker_link_states
 
 ### KRX ticker master
 
-Before linking, `run_ticker_linker.bat` performs a best-effort refresh of `ticker_master.csv` when it is older than 7 days. The builder uses `pykrx` and KOSPI + KOSDAQ. If KRX or pykrx is unavailable, the existing master is kept and linking continues.
+Before linking, `run_ticker_linker.bat` performs a best-effort refresh of the generated KOSPI/KOSDAQ master when the last successful refresh is older than 7 days. The builder uses `pykrx`. If KRX or pykrx is unavailable, the existing generated master is kept and linking continues.
 
 Manual refresh:
 
@@ -86,7 +86,14 @@ Manual refresh:
 MaterialAnalyzer\news\run_build_ticker_master.bat
 ```
 
-The builder preserves existing aliases/sector/industry fields when it refreshes canonical KRX names and markets.
+Reference data is split intentionally:
+
+```text
+ticker_master.csv       = tracked manual seed / aliases
+ticker_master_krx.csv   = generated KRX full list, gitignored
+```
+
+TickerLinker merges both at runtime and then adds proven one-company/one-ticker pairs from historical EventExtractor rows. This avoids dirtying the tracked seed file while still giving exact resolution against the full listed universe.
 
 ### Relation types
 
@@ -153,18 +160,19 @@ IAEA 출범식 참석
 
 ```text
 MaterialAnalyzer\data\reference\ticker_master.csv
+MaterialAnalyzer\data\reference\ticker_master_krx.csv   # generated / ignored
 MaterialAnalyzer\data\reference\event_theme_rules.csv
 MaterialAnalyzer\data\reference\theme_ticker_map.csv
 MaterialAnalyzer\data\reference\company_relationships.csv
 ```
 
-`ticker_master.csv` is additionally bootstrapped at runtime from historical EventExtractor rows that already contain exactly one company and one stock code. `company_relationships.csv` intentionally starts empty; add SUPPLIER/CUSTOMER only with concrete evidence.
+`company_relationships.csv` intentionally starts empty; add SUPPLIER/CUSTOMER only with concrete evidence.
 
 ### Reference-aware incremental behavior
 
-V1.1 computes a SHA-256-based `reference_signature` from the four reference files plus proven bootstrap company/ticker pairs. `ticker_link_states` stores that signature.
+V1.1 computes a SHA-256-based `reference_signature` from both ticker masters, theme rules, theme mappings, company relationships, and proven bootstrap company/ticker pairs. `ticker_link_states` stores that signature.
 
-Therefore any edit to ticker master, theme rules, theme mappings, or company relationships automatically makes prior events pending for relinking. No manual `--rebuild` is required. With no event/score/reference changes, a repeat run returns `processed=0`.
+Therefore any relevant reference edit or successful KRX-master refresh automatically makes prior events pending for relinking. No manual `--rebuild` is required. With no event/score/reference changes, a repeat run returns `processed=0`.
 
 ### Unresolved reasons
 
