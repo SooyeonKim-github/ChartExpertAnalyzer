@@ -25,7 +25,7 @@ def run(
     extractor = EventExtractor(repository, FeatureExtractor())
 
     print("=" * 76)
-    print(" EventExtractor V1.1 - Title First / Material Filter")
+    print(" EventExtractor V1.2 - Expanded Corporate Material Taxonomy")
     print("=" * 76)
     print(f"DB      : {db_path}")
     print(f"Report  : {output_path}")
@@ -47,7 +47,7 @@ def run(
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Rule-based EventExtractor V1.1")
+    parser = argparse.ArgumentParser(description="Rule-based EventExtractor V1.2")
     parser.add_argument("--db", default=str(DEFAULT_DB))
     parser.add_argument("--output", default=str(DEFAULT_REPORT))
     parser.add_argument("--rebuild", action="store_true")
