@@ -26,20 +26,28 @@ class KJBThresholdAdapter(BaseThresholdAdapter):
         if search:
             return {str(k): list(v) for k, v in search.items()}
         return {
-            "selection_min": [65, 67.5, 70, 72.5, 75],
-            "timing_min": [65, 70, 72, 75, 80],
-            "leader_min": [60, 65, 70, 75, 80],
-            "relative_strength_min": [30, 40, 50, 60],
-            "risk_max_exclusive": [45, 50, 55, 60, 65],
+            "selection_min": [67.5, 70, 72.5],
+            "selection_max": [85, 90, 100],
+            "timing_min": [70, 72, 75],
+            "timing_max": [80, 100],
+            "leader_min": [65, 70],
+            "leader_max": [80, 85, 100],
+            "relative_strength_min": [40, 60],
+            "relative_strength_max": [90, 95, 100],
+            "risk_max_exclusive": [50, 55, 60],
         }
 
     def current_parameters(self) -> dict[str, Any]:
         c = self.analyzer_config.get("confirmation_v1", {}) or {}
         return {
             "selection_min": float(c.get("selection_min", 70.0)),
+            "selection_max": float(c.get("selection_max", 100.0)),
             "timing_min": float(c.get("timing_min", 72.0)),
+            "timing_max": float(c.get("timing_max", 100.0)),
             "leader_min": float(c.get("leader_min", 70.0)),
+            "leader_max": float(c.get("leader_max", 100.0)),
             "relative_strength_min": float(c.get("relative_strength_min", 40.0)),
+            "relative_strength_max": float(c.get("relative_strength_max", 100.0)),
             "risk_max_exclusive": float(c.get("risk_max_exclusive", 60.0)),
         }
 
@@ -59,9 +67,13 @@ class KJBThresholdAdapter(BaseThresholdAdapter):
         reject_high_chase = bool(c.get("reject_high_chase", True))
         mask = (
             (_num(df, "selection_score") >= float(params["selection_min"]))
+            & (_num(df, "selection_score") <= float(params["selection_max"]))
             & (_num(df, "timing_score") >= float(params["timing_min"]))
+            & (_num(df, "timing_score") <= float(params["timing_max"]))
             & (_num(df, "leader_score") >= float(params["leader_min"]))
+            & (_num(df, "leader_score") <= float(params["leader_max"]))
             & (_num(df, "relative_strength_score") >= float(params["relative_strength_min"]))
+            & (_num(df, "relative_strength_score") <= float(params["relative_strength_max"]))
             & (_num(df, "risk_score") < float(params["risk_max_exclusive"]))
         )
         if reject_high_chase:
@@ -70,22 +82,24 @@ class KJBThresholdAdapter(BaseThresholdAdapter):
 
     def validate_parameters(self, params: dict[str, Any]) -> bool:
         return (
-            float(params["selection_min"]) >= 0
-            and float(params["timing_min"]) >= 0
-            and float(params["leader_min"]) >= 0
-            and float(params["relative_strength_min"]) >= 0
+            0 <= float(params["selection_min"]) <= float(params["selection_max"]) <= 100
+            and 0 <= float(params["timing_min"]) <= float(params["timing_max"]) <= 100
+            and 0 <= float(params["leader_min"]) <= float(params["leader_max"]) <= 100
+            and 0 <= float(params["relative_strength_min"]) <= float(params["relative_strength_max"]) <= 100
             and float(params["risk_max_exclusive"]) > 0
         )
 
     def export_config(self, params: dict[str, Any]) -> dict[str, Any]:
-        current = self.analyzer_config.get("confirmation_v1", {}) or {}
-        return {
-            "confirmation_v1": {
-                "selection_min": float(params["selection_min"]),
-                "timing_min": float(params["timing_min"]),
-                "leader_min": float(params["leader_min"]),
-                "relative_strength_min": float(params["relative_strength_min"]),
-                "risk_max_exclusive": float(params["risk_max_exclusive"]),
-                "reject_high_chase": bool(current.get("reject_high_chase", True)),
-            }
-        }
+        current = dict(self.analyzer_config.get("confirmation_v1", {}) or {})
+        current.update({
+            "selection_min": float(params["selection_min"]),
+            "selection_max": float(params["selection_max"]),
+            "timing_min": float(params["timing_min"]),
+            "timing_max": float(params["timing_max"]),
+            "leader_min": float(params["leader_min"]),
+            "leader_max": float(params["leader_max"]),
+            "relative_strength_min": float(params["relative_strength_min"]),
+            "relative_strength_max": float(params["relative_strength_max"]),
+            "risk_max_exclusive": float(params["risk_max_exclusive"]),
+        })
+        return {"confirmation_v1": current}
