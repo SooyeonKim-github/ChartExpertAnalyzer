@@ -21,7 +21,6 @@ class StageScreenResult:
     stage_core_pass: bool
     stage_experimental_slope_pass: bool
     stage_reason: str
-
     market_regime: str
     market_eligible: bool
     market_index_close: float | None
@@ -35,7 +34,6 @@ class StageScreenResult:
     market_experimental_slope_threshold_pass: bool
     market_experimental_ma50_alignment_pass: bool
     market_regime_reason: str
-
     market_breadth_status: str
     market_breadth_measurement: str
     market_breadth_universe_count: int
@@ -55,7 +53,26 @@ class StageScreenResult:
     market_breadth_snapshot_dates_expected: int
     market_breadth_snapshot_date_coverage_ratio: float | None
     market_breadth_filter_applied: bool
-
+    market_intraday_status: str
+    market_intraday_measurement: str
+    market_gap_return_pct: float | None
+    market_open_close_return_pct: float | None
+    market_close_return_pct: float | None
+    market_close_location_value: float | None
+    market_recovery_strength_pct: float | None
+    market_fade_strength_pct: float | None
+    market_intraday_label: str
+    market_experimental_intraday_strength_score: float | None
+    market_weak_open_strong_close_5d_ratio: float | None
+    market_weak_open_strong_close_20d_ratio: float | None
+    market_strong_open_weak_close_5d_ratio: float | None
+    market_strong_open_weak_close_20d_ratio: float | None
+    market_strong_close_5d_ratio: float | None
+    market_strong_close_20d_ratio: float | None
+    market_weak_close_5d_ratio: float | None
+    market_weak_close_20d_ratio: float | None
+    market_intraday_direction: str
+    market_intraday_filter_applied: bool
     lecture_core_pass: bool
     experimental_filters_applied: bool
 

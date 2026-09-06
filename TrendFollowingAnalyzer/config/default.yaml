@@ -44,9 +44,19 @@ market_regime:
     long_window: 20
     min_coverage_ratio: 0.60
 
-  # LECTURE_CORE but not implemented yet.
   intraday_strength:
-    mode: PLANNED
+    # LECTURE_CORE concept: weak-open/strong-close vs strong-open/weak-close.
+    # Current implementation is a DAILY OHLC proxy, so it is BACKTEST_ONLY.
+    mode: BACKTEST_ONLY
+    enabled: true
+
+    # EXPERIMENTAL thresholds; lecture does not specify these numbers.
+    strong_clv_threshold: 0.70
+    weak_clv_threshold: 0.30
+    short_window: 5
+    long_window: 20
+
+  # LECTURE_CORE but not implemented yet.
   news_reaction:
     mode: PLANNED
 
