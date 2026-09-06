@@ -1,0 +1,19 @@
+theme,event_types,keywords,confidence,enabled
+AI,AI|GOV_POLICY,인공지능|생성형 AI|초거대 AI|AI 산업|AI 투자,0.82,1
+AI반도체,AI|SEMICONDUCTOR|GOV_POLICY,AI 반도체|HBM|고대역폭메모리|NPU|AI 칩,0.90,1
+데이터센터,AI_DATACENTER|AI|GOV_POLICY,데이터센터|데이터 센터|AI 데이터센터|GPU 센터,0.90,1
+자율주행,GOV_POLICY|PRODUCT,자율주행|ADAS|로보택시|무인차|자율주행차,0.88,1
+양자기술,GOV_POLICY|RND,양자기술|양자컴퓨터|양자 컴퓨터|양자암호|양자통신,0.90,1
+탄소중립,GOV_POLICY|REGULATION,탄소중립|온실가스|배출권|넷제로|탈탄소,0.86,1
+해상풍력,GOV_POLICY|INVESTMENT|CAPEX,해상풍력|해상 풍력|풍력발전|풍력 발전,0.95,1
+원전,NUCLEAR|GOV_POLICY|INVESTMENT|CAPEX,원전|원자력|SMR|소형모듈원자로|원전 수출,0.95,1
+저출산,GOV_POLICY,저출산|출산율|출산 대책|육아 지원|보육 지원|난임,0.88,1
+우크라이나재건,GOV_POLICY|PARTNERSHIP,우크라이나 재건|우크라이나 복구|전후 복구|전후 재건,0.90,1
+방산,DEFENSE|GOV_POLICY|ORDER_CONTRACT,방산|방위산업|무기 수출|방산 수출|국방 수출,0.92,1
+로봇,GOV_POLICY|PRODUCT|INVESTMENT,로봇 산업|휴머노이드|산업용 로봇|서비스 로봇|로봇 투자,0.88,1
+바이오,BIO|CLINICAL|APPROVAL|GOV_POLICY,바이오|신약|임상 승인|임상시험|의약품,0.84,1
+태양광,GOV_POLICY|INVESTMENT|CAPEX,태양광|태양전지|태양광 발전|태양광 모듈,0.90,1
+수소,GOV_POLICY|INVESTMENT|CAPEX,수소경제|청정수소|그린수소|수소차|수소 발전,0.88,1
+전기차,GOV_POLICY|PRODUCT|REGULATION,전기차|전기자동차|EV 배터리|충전 인프라|전기차 충전,0.86,1
+이차전지,SECONDARY_BATTERY|GOV_POLICY|INVESTMENT,이차전지|2차전지|배터리 삼각벨트|양극재|음극재|전고체,0.90,1
+반도체,SEMICONDUCTOR|GOV_POLICY|INVESTMENT|CAPEX,반도체|파운드리|DRAM|낸드|첨단반도체,0.88,1
