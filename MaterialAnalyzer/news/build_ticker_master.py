@@ -8,7 +8,7 @@ from pathlib import Path
 
 
 ROOT = Path(__file__).resolve().parents[1]
-DEFAULT_OUTPUT = ROOT / "data" / "reference" / "ticker_master.csv"
+DEFAULT_OUTPUT = ROOT / "data" / "reference" / "ticker_master_krx.csv"
 FIELDS = ["ticker", "name", "aliases", "market", "sector", "industry", "enabled"]
 
 
@@ -111,13 +111,13 @@ def build(output: Path = DEFAULT_OUTPUT, *, if_stale_days: int = 0, best_effort:
     except Exception as exc:
         if best_effort:
             print(f"[WARN] ticker master refresh skipped: {type(exc).__name__}: {exc}")
-            print(f"[WARN] using existing ticker master: {output}")
+            print(f"[WARN] using existing generated master if present: {output}")
             return 0
         raise
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Build KOSPI/KOSDAQ ticker_master.csv from KRX via pykrx")
+    parser = argparse.ArgumentParser(description="Build KOSPI/KOSDAQ ticker_master_krx.csv from KRX via pykrx")
     parser.add_argument("--output", default=str(DEFAULT_OUTPUT))
     parser.add_argument("--if-stale-days", type=int, default=0)
     parser.add_argument("--best-effort", action="store_true")
