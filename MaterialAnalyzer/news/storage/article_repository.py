@@ -31,8 +31,6 @@ class ArticleRepository:
             return True
         if url_hash and self.exists_url_hash(candidate.source_id, url_hash):
             return True
-        # Backward-compatible fallback for databases created before external_id became
-        # a first-class column.
         if candidate.external_id and self.exists_article_id(f"{candidate.source_id}_{candidate.external_id}"):
             return True
         return False
@@ -44,6 +42,22 @@ class ArticleRepository:
                 (source_id, external_id),
             ).fetchone()
         return row is not None
+
+    def existing_external_ids(self, source_id: str, external_ids) -> set[str]:
+        values = sorted({str(value) for value in external_ids if value})
+        if not values:
+            return set()
+        found: set[str] = set()
+        with self.database.connect() as conn:
+            for start in range(0, len(values), 800):
+                batch = values[start:start + 800]
+                placeholders = ",".join("?" for _ in batch)
+                rows = conn.execute(
+                    f"SELECT external_id FROM articles WHERE source_id=? AND external_id IN ({placeholders})",
+                    (source_id, *batch),
+                ).fetchall()
+                found.update(str(row["external_id"]) for row in rows if row["external_id"])
+        return found
 
     def exists_url_hash(self, source_id: str, url_hash: str) -> bool:
         with self.database.connect() as conn:
@@ -78,17 +92,20 @@ class ArticleRepository:
                 (value,),
             ).fetchone()
 
-    def upsert(self, article: RawArticle) -> str:
+    @classmethod
+    def _serialized_values(cls, article: RawArticle):
         values = article.as_dict()
         for key in ("published_at", "updated_at", "collected_at", "first_seen_at", "last_seen_at", "processed_at"):
             values[key] = _iso(values[key])
         values["has_full_body"] = int(bool(values["has_full_body"]))
         values["material_candidate"] = int(bool(values["material_candidate"]))
         values["source_metadata_json"] = json.dumps(values.pop("source_metadata", {}), ensure_ascii=False, sort_keys=True)
-        columns = self.COLUMNS
-        placeholders = ",".join("?" for _ in columns)
-        params = [values.get(c) for c in columns]
+        return [values.get(c) for c in cls.COLUMNS]
 
+    @classmethod
+    def _upsert_sql(cls) -> str:
+        columns = cls.COLUMNS
+        placeholders = ",".join("?" for _ in columns)
         ordinary_updates = [
             c for c in columns
             if c not in {"article_id", "external_id", "first_seen_at", "last_seen_at", "duplicate_of"}
@@ -109,12 +126,31 @@ class ArticleRepository:
             "duplicate_of=COALESCE(excluded.duplicate_of, articles.duplicate_of)",
             "updated_db_at=CURRENT_TIMESTAMP",
         ])
+        return (
+            f"INSERT INTO articles ({','.join(columns)}) VALUES ({placeholders}) "
+            f"ON CONFLICT(article_id) DO UPDATE SET {','.join(assignments)}"
+        )
 
+    def upsert(self, article: RawArticle) -> str:
         with self.database.connect() as conn:
             existed = conn.execute("SELECT 1 FROM articles WHERE article_id = ?", (article.article_id,)).fetchone() is not None
-            conn.execute(
-                f"INSERT INTO articles ({','.join(columns)}) VALUES ({placeholders}) "
-                f"ON CONFLICT(article_id) DO UPDATE SET {','.join(assignments)}",
-                params,
-            )
+            conn.execute(self._upsert_sql(), self._serialized_values(article))
         return "UPDATED" if existed else "INSERTED"
+
+    def upsert_many(self, articles: list[RawArticle]) -> tuple[int, int]:
+        if not articles:
+            return 0, 0
+        article_ids = [article.article_id for article in articles]
+        existing: set[str] = set()
+        with self.database.connect() as conn:
+            for start in range(0, len(article_ids), 800):
+                batch = article_ids[start:start + 800]
+                placeholders = ",".join("?" for _ in batch)
+                rows = conn.execute(
+                    f"SELECT article_id FROM articles WHERE article_id IN ({placeholders})",
+                    tuple(batch),
+                ).fetchall()
+                existing.update(str(row["article_id"]) for row in rows)
+            conn.executemany(self._upsert_sql(), [self._serialized_values(article) for article in articles])
+        updated = sum(1 for article in articles if article.article_id in existing)
+        return len(articles) - updated, updated
