@@ -15,15 +15,29 @@ def _parse_range(value: str):
     if "~" not in text:
         raise ValueError("date range must be YYYYMMDD~YYYYMMDD")
     left, right = [part.strip() for part in text.split("~", 1)]
-    start = datetime.strptime(left, "%Y%m%d").date()
-    end = datetime.strptime(right, "%Y%m%d").date()
+    try:
+        start = datetime.strptime(left, "%Y%m%d").date()
+        end = datetime.strptime(right, "%Y%m%d").date()
+    except ValueError as exc:
+        raise ValueError(f"invalid calendar date: {text}") from exc
     if end < start:
         raise ValueError("end date must be >= start date")
     return start, end
 
 
+def _prompt_range():
+    print("Example: 20260101~20260630")
+    while True:
+        value = input("Date range YYYYMMDD~YYYYMMDD: ").strip()
+        try:
+            return _parse_range(value)
+        except ValueError as exc:
+            print(f"[ERROR] {exc}")
+            print("        Please enter a real calendar range, e.g. 20260101~20260630.\n")
+
+
 def main():
-    parser = argparse.ArgumentParser(description="HistoricalMaterialRangeCollector V1.1")
+    parser = argparse.ArgumentParser(description="HistoricalMaterialRangeCollector V1.2")
     parser.add_argument("--date-range", default="")
     parser.add_argument("--warmup-days", type=int, default=180)
     parser.add_argument("--chunk-days", type=int, default=7)
@@ -37,14 +51,17 @@ def main():
     args = parser.parse_args()
 
     print("=" * 80)
-    print("MaterialAnalyzer - HistoricalMaterialRangeCollector V1.1")
-    print("Fast DART Bulk / Point-in-Time / Resume / Prefiltered Derived Rebuild")
+    print("MaterialAnalyzer - HistoricalMaterialRangeCollector V1.2")
+    print("Fast DART Bulk / Point-in-Time / Resume / Material Prefilter / Derived Rebuild")
     print("=" * 80)
-    date_range = args.date_range.strip()
-    if not date_range:
-        print("Example: 20260101~20260630")
-        date_range = input("Date range YYYYMMDD~YYYYMMDD: ").strip()
-    start, end = _parse_range(date_range)
+    if args.date_range.strip():
+        try:
+            start, end = _parse_range(args.date_range)
+        except ValueError as exc:
+            raise SystemExit(f"[ERROR] {exc}") from exc
+    else:
+        start, end = _prompt_range()
+
     config = HistoricalRangeConfig(
         requested_start=start,
         requested_end=end,
@@ -73,6 +90,8 @@ def main():
     print(f"history_csv   : {result.history_csv}")
     print(f"backtest_csv  : {result.backtest_csv}")
     print(f"coverage_csv  : {result.coverage_csv}")
+    if derived:
+        print("Next          : MaterialAnalyzer\\run_material_backtest.bat")
     print("=" * 80)
 
 
