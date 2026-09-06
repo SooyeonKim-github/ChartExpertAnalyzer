@@ -479,12 +479,13 @@ class ExhaustionTransitionAnalyzer:
         rows: list[dict] = []
         for _, group in work.groupby("ticker", sort=False):
             group = group.reset_index(drop=True)
-            prev_high_risk = False
+            prev_event_condition = False
             for pos, row in group.iterrows():
                 high_risk = str(row.get("exhaustion_risk_label", "")) in risk_labels
                 eligible_state = str(row.get("lifecycle_state", "")) in event_states
-                is_event = bool(high_risk and eligible_state and not prev_high_risk)
-                prev_high_risk = high_risk
+                event_condition = bool(high_risk and eligible_state)
+                is_event = bool(event_condition and not prev_event_condition)
+                prev_event_condition = event_condition
                 if not is_event:
                     continue
 
