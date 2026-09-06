@@ -7,6 +7,7 @@ from .history.chunk_planner import plan_chunks
 from .history.collectors.dart_range import DartRangeCollector
 from .history.dart_prefilter import classify_dart_analysis
 from .history.historical_market_date import HistoricalMarketDateResolver
+from .news.events.rules import infer_event_type
 from .news.models import SourceEndpoint
 
 
@@ -63,11 +64,24 @@ def main():
     assert candidates[0].metadata["historical_range"] is True
 
     assert classify_dart_analysis("단일판매ㆍ공급계약체결", "005930") == "PENDING"
+    assert classify_dart_analysis("연결재무제표기준영업(잠정)실적(공정공시)", "005930") == "PENDING"
+    assert classify_dart_analysis("기업가치제고계획(자율공시)", "005930") == "PENDING"
     assert classify_dart_analysis("주주총회소집공고", "005930") == "SKIP_HISTORY_ROUTINE"
+    assert classify_dart_analysis("독립이사의선임ㆍ해임또는중도퇴임에관한신고", "005930") == "SKIP_HISTORY_ROUTINE"
+    assert classify_dart_analysis("최대주주등소유주식변동신고서", "005930") == "SKIP_HISTORY_ROUTINE"
     assert classify_dart_analysis("분기보고서", "005930") == "SKIP_HISTORY_ROUTINE"
     assert classify_dart_analysis("단일판매ㆍ공급계약체결", "") == "SKIP_HISTORY_NONLISTED"
 
-    print("[OK] HistoricalMaterialRangeCollector V1.1 smoke test")
+    assert infer_event_type("연결재무제표기준영업(잠정)실적(공정공시)") == "EARNINGS"
+    assert infer_event_type("주요사항보고서(자기주식처분결정)") == "TREASURY_STOCK_DISPOSAL"
+    assert infer_event_type("기업가치제고계획(자율공시)") == "VALUE_UP"
+    assert infer_event_type("전환청구권행사") == "CONVERTIBLE_EXERCISE"
+    assert infer_event_type("전환가액의조정") == "CONVERTIBLE_ADJUSTMENT"
+    assert infer_event_type("주요사항보고서(감자결정)") == "CAPITAL_REDUCTION"
+    assert infer_event_type("파생상품거래손실발생") == "DERIVATIVE_LOSS"
+    assert infer_event_type("회생절차개시결정") == "RESTRUCTURING"
+
+    print("[OK] HistoricalMaterialRangeCollector V1.2 smoke test")
     print("     chunk planning -> OK")
     print("     DATE-only signal -> next trading day")
     print("     exact intraday timestamp -> same/next trading day")
@@ -75,6 +89,7 @@ def main():
     print("     DART strong catalyst -> analysis eligible")
     print("     DART routine disclosure -> raw kept / derived skipped")
     print("     DART non-listed disclosure -> raw kept / derived skipped")
+    print("     EventExtractor expanded corporate taxonomy -> OK")
     print("     live KIND historical mode -> disabled by capability map")
 
 
