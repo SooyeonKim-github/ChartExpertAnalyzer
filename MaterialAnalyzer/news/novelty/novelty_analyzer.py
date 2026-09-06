@@ -19,7 +19,7 @@ MARKET_REACTION_RE = re.compile(
 
 
 class NoveltyAnalyzer:
-    VERSION = "RULE_NOVELTY_V1"
+    VERSION = "RULE_NOVELTY_V1_1"
 
     def __init__(
         self,
@@ -94,6 +94,8 @@ class NoveltyAnalyzer:
                 number_changed=delta.number_changed,
                 company_changed=delta.company_changed,
                 polarity_changed=delta.polarity_changed,
+                litigation_procedure_changed=delta.litigation_procedure_changed,
+                litigation_procedure_progressed=delta.litigation_procedure_progressed,
                 source_reliability_increased=delta.source_reliability_increased,
                 confirmation_source_added=delta.confirmation_source_added,
                 new_information_count=delta.new_information_count,
