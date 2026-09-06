@@ -2,14 +2,18 @@ from __future__ import annotations
 
 import argparse
 import csv
-from datetime import date, timedelta
+import json
+from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
-import time
 
 
 ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_OUTPUT = ROOT / "data" / "reference" / "ticker_master.csv"
 FIELDS = ["ticker", "name", "aliases", "market", "sector", "industry", "enabled"]
+
+
+def _meta_path(path: Path) -> Path:
+    return path.with_name(path.stem + ".refresh.json")
 
 
 def _read_existing(path: Path) -> dict[str, dict[str, str]]:
@@ -20,10 +24,20 @@ def _read_existing(path: Path) -> dict[str, dict[str, str]]:
 
 
 def _is_fresh(path: Path, stale_days: int) -> bool:
-    if not path.exists() or stale_days <= 0:
+    if stale_days <= 0:
         return False
-    age_days = (time.time() - path.stat().st_mtime) / 86400.0
-    return age_days < stale_days
+    meta = _meta_path(path)
+    if not path.exists() or not meta.exists():
+        return False
+    try:
+        payload = json.loads(meta.read_text(encoding="utf-8"))
+        built_at = datetime.fromisoformat(str(payload.get("built_at", "")))
+        if built_at.tzinfo is None:
+            built_at = built_at.replace(tzinfo=timezone.utc)
+        age = datetime.now(timezone.utc) - built_at.astimezone(timezone.utc)
+        return age.total_seconds() < stale_days * 86400
+    except Exception:
+        return False
 
 
 def _latest_market_snapshot(stock_module):
@@ -40,7 +54,7 @@ def build(output: Path = DEFAULT_OUTPUT, *, if_stale_days: int = 0, best_effort:
     output = Path(output)
     output.parent.mkdir(parents=True, exist_ok=True)
     if _is_fresh(output, if_stale_days):
-        print(f"[SKIP] ticker master is fresh: {output}")
+        print(f"[SKIP] ticker master refresh is fresh: {_meta_path(output)}")
         return 0
 
     try:
@@ -61,7 +75,6 @@ def build(output: Path = DEFAULT_OUTPUT, *, if_stale_days: int = 0, best_effort:
                     continue
                 old = existing.get(ticker, {})
                 aliases = str(old.get("aliases", "")).strip()
-                # Preserve any older canonical name as an alias if KRX name changed.
                 old_name = str(old.get("name", "")).strip()
                 if old_name and old_name != name:
                     alias_values = [x for x in aliases.split("|") if x]
@@ -85,6 +98,14 @@ def build(output: Path = DEFAULT_OUTPUT, *, if_stale_days: int = 0, best_effort:
             writer.writeheader()
             writer.writerows(rows)
         tmp.replace(output)
+
+        _meta_path(output).write_text(json.dumps({
+            "built_at": datetime.now(timezone.utc).isoformat(),
+            "snapshot_date": snapshot_date,
+            "count": len(rows),
+            "markets": ["KOSPI", "KOSDAQ"],
+        }, ensure_ascii=False, indent=2), encoding="utf-8")
+
         print(f"[OK] KRX ticker master {snapshot_date}: {len(rows)} tickers -> {output}")
         return len(rows)
     except Exception as exc:
