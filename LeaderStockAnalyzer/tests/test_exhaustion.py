@@ -71,9 +71,59 @@ def test_exhaustion_risk_keeps_healthy_leader_below_high():
     assert out.exhaustion_risk_score is not None
     assert out.exhaustion_risk_score < cfg["exhaustion_risk"]["high_score"]
     assert out.exhaustion_risk_label in {"LOW", "WATCH"}
+    assert out.exhaustion_overextension_score <= 5
 
 
-def test_exhaustion_risk_detects_overheated_distribution():
+def test_exhaustion_v11_tracks_peak_to_current_rollover_across_scan_dates():
+    cfg = deepcopy(DEFAULT_CONFIG)
+    engine = ExhaustionRiskEngine(cfg)
+
+    full_close = np.array(
+        list(np.linspace(100, 150, 36)) + [158, 164, 167, 166, 163, 159],
+        dtype=float,
+    )
+    full_tv = np.array(
+        list(np.linspace(70, 150, 36)) + [210, 240, 230, 180, 125, 90],
+        dtype=float,
+    ) * 1_000_000_000.0
+    full = _frame(full_close, full_tv)
+
+    outputs = []
+    settings = [
+        (36, 92.0, 11.0, 82.0),
+        (38, 87.0, 8.0, 76.0),
+        (40, 61.0, 1.5, 52.0),
+    ]
+    for end, leader_score, rs3, persistence in settings:
+        daily = full.iloc[: end + 1].copy()
+        history = LeadershipHistoryContext.build({"999999": daily}, scan_date=daily.index[-1])
+        item = replace(
+            _item(cfg, daily),
+            leader_score=leader_score,
+            emerging_rs_3d=rs3,
+            leader_persistence_score=persistence,
+        )
+        outputs.append(
+            engine.enrich(
+                [item],
+                daily_by_ticker={"999999": daily},
+                history=history,
+            )[0]
+        )
+
+    first, _, last = outputs
+    assert first.exhaustion_leader_score_peak_5obs is None
+    assert last.exhaustion_leader_score_peak_5obs == 92.0
+    assert last.exhaustion_leader_score_decay == 31.0
+    assert last.exhaustion_rs_peak_5obs == 11.0
+    assert last.exhaustion_rs_decay_from_peak == 9.5
+    assert last.exhaustion_persistence_decay_from_peak == 30.0
+    assert last.exhaustion_momentum_drop_from_peak is not None
+    assert last.exhaustion_momentum_drop_from_peak > 0
+    assert last.exhaustion_deceleration_score > first.exhaustion_deceleration_score
+
+
+def test_exhaustion_risk_detects_rollover_with_distribution_failure():
     cfg = deepcopy(DEFAULT_CONFIG)
     close = np.array(
         [100, 101, 102, 103, 104, 105, 106, 107, 108, 109,
@@ -88,7 +138,6 @@ def test_exhaustion_risk_detects_overheated_distribution():
     ) * 1_000_000_000.0
     daily = _frame(close, tv)
 
-    # Add other candidates so rank reversal can be measured cross-sectionally.
     frames = {"999999": daily}
     for idx in range(1, 25):
         frames[f"{idx:06d}"] = _frame(
@@ -130,6 +179,7 @@ def test_exhaustion_report_deduplicates_episode_and_tracks_breakdown():
                 "scan_date": "20260820",
                 "lifecycle_state": "LEADER",
                 "exhaustion_risk_label": "LOW",
+                "exhaustion_risk_score": 20.0,
                 "D+20": 4.0,
             },
             {
@@ -137,6 +187,7 @@ def test_exhaustion_report_deduplicates_episode_and_tracks_breakdown():
                 "scan_date": "20260821",
                 "lifecycle_state": "LEADER",
                 "exhaustion_risk_label": "HIGH",
+                "exhaustion_risk_score": 61.0,
                 "D+5": -2.0,
                 "D+20": -8.0,
                 "D+60": -15.0,
@@ -148,18 +199,21 @@ def test_exhaustion_report_deduplicates_episode_and_tracks_breakdown():
                 "scan_date": "20260824",
                 "lifecycle_state": "LEADER",
                 "exhaustion_risk_label": "HIGH",
+                "exhaustion_risk_score": 64.0,
             },
             {
                 "ticker": "111111",
                 "scan_date": "20260825",
                 "lifecycle_state": "EXHAUSTING",
                 "exhaustion_risk_label": "CRITICAL",
+                "exhaustion_risk_score": 80.0,
             },
             {
                 "ticker": "111111",
                 "scan_date": "20260826",
                 "lifecycle_state": "BROKEN",
                 "exhaustion_risk_label": "CRITICAL",
+                "exhaustion_risk_score": 85.0,
             },
         ]
     )
@@ -167,6 +221,7 @@ def test_exhaustion_report_deduplicates_episode_and_tracks_breakdown():
     report = ExhaustionTransitionAnalyzer(cfg)
     events = report.events(df)
     summary = report.summary(events)
+    score_report = report.score_report(df)
 
     assert len(events) == 1
     event = events.iloc[0]
@@ -176,3 +231,4 @@ def test_exhaustion_report_deduplicates_episode_and_tracks_breakdown():
     assert summary.iloc[0]["event_count"] == 1
     assert summary.iloc[0]["avg_D+20"] == -8.0
     assert summary.iloc[0]["avg_MAE_D20"] == -12.0
+    assert set(score_report["label"]) == {"LOW", "HIGH"}
