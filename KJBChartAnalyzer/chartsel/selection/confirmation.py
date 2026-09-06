@@ -12,18 +12,23 @@ def classify_confirmation_values(
     chase_risk: str,
     cfg: dict,
 ) -> str:
-    """KJB CONFIRMED V1을 숫자 필드만으로 판정한다.
+    """KJB D+5 CONFIRMED를 숫자 필드만으로 판정한다.
 
     일일 Screen과 Range Backtest가 이 함수를 공유해 동일한 기준을 사용한다.
-    실제 임계값은 config/default.yaml의 confirmation_v1에서 조정한다.
+    D+5 단기 스윙 특성상 minimum threshold뿐 아니라 과열 방지를 위한
+    maximum threshold도 선택적으로 적용할 수 있다.
     """
     c = cfg.get('confirmation_v1', {}) or {}
 
     confirmed = (
         float(selection_score) >= float(c.get('selection_min', 70.0))
+        and float(selection_score) <= float(c.get('selection_max', 100.0))
         and float(timing_score) >= float(c.get('timing_min', 72.0))
+        and float(timing_score) <= float(c.get('timing_max', 100.0))
         and float(leader_score) >= float(c.get('leader_min', 70.0))
+        and float(leader_score) <= float(c.get('leader_max', 100.0))
         and float(relative_strength_score) >= float(c.get('relative_strength_min', 40.0))
+        and float(relative_strength_score) <= float(c.get('relative_strength_max', 100.0))
         and float(risk_score) < float(c.get('risk_max_exclusive', 60.0))
         and (
             not bool(c.get('reject_high_chase', True))
