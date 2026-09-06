@@ -41,13 +41,28 @@ def _is_fresh(path: Path, stale_days: int) -> bool:
 
 
 def _latest_market_snapshot(stock_module):
-    for offset in range(0, 15):
+    # pykrx can resolve the latest business day internally when date is omitted.
+    # Prefer that path first because explicit future/weekend/calendar dates can
+    # return an empty list depending on the installed pykrx/KRX endpoint behavior.
+    try:
+        kospi = list(stock_module.get_market_ticker_list(market="KOSPI"))
+        kosdaq = list(stock_module.get_market_ticker_list(market="KOSDAQ"))
+        if kospi or kosdaq:
+            return "LATEST", (("KOSPI", kospi), ("KOSDAQ", kosdaq))
+    except Exception:
+        pass
+
+    # Fallback: explicitly walk backward over recent calendar days.
+    for offset in range(0, 31):
         target = (date.today() - timedelta(days=offset)).strftime("%Y%m%d")
-        kospi = list(stock_module.get_market_ticker_list(target, market="KOSPI"))
-        kosdaq = list(stock_module.get_market_ticker_list(target, market="KOSDAQ"))
+        try:
+            kospi = list(stock_module.get_market_ticker_list(target, market="KOSPI"))
+            kosdaq = list(stock_module.get_market_ticker_list(target, market="KOSDAQ"))
+        except Exception:
+            continue
         if kospi or kosdaq:
             return target, (("KOSPI", kospi), ("KOSDAQ", kosdaq))
-    raise RuntimeError("KRX ticker list was empty for the latest 15 calendar days")
+    raise RuntimeError("KRX ticker list was empty from both latest-business-day and 31-day fallback queries")
 
 
 def build(output: Path = DEFAULT_OUTPUT, *, if_stale_days: int = 0, best_effort: bool = False) -> int:
@@ -90,6 +105,9 @@ def build(output: Path = DEFAULT_OUTPUT, *, if_stale_days: int = 0, best_effort:
                     "industry": str(old.get("industry", "")).strip(),
                     "enabled": "1",
                 })
+
+        if not rows:
+            raise RuntimeError("KRX returned ticker ids but no ticker names could be resolved")
 
         rows.sort(key=lambda row: (row["market"], row["ticker"]))
         tmp = output.with_suffix(output.suffix + ".tmp")
