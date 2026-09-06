@@ -93,6 +93,8 @@ class DeltaResult:
     number_changed: bool = False
     company_changed: bool = False
     polarity_changed: bool = False
+    litigation_procedure_changed: bool = False
+    litigation_procedure_progressed: bool = False
     source_reliability_increased: bool = False
     confirmation_source_added: bool = False
     new_information_count: int = 0
@@ -123,6 +125,8 @@ class NoveltyRecord:
     number_changed: bool
     company_changed: bool
     polarity_changed: bool
+    litigation_procedure_changed: bool
+    litigation_procedure_progressed: bool
     source_reliability_increased: bool
     confirmation_source_added: bool
     new_information_count: int
