@@ -45,7 +45,7 @@ def _unique_join(values) -> str:
 
 
 class EventExtractor:
-    VERSION = "RULE_EVENT_V1_1"
+    VERSION = "RULE_EVENT_V1_2"
 
     def __init__(self, event_repository, feature_extractor=None):
         self.repository = event_repository
@@ -61,6 +61,7 @@ class EventExtractor:
             limit=limit,
             extraction_version=self.VERSION,
         )
+        total = len(clusters)
 
         for cluster in clusters:
             result.processed += 1
@@ -71,6 +72,11 @@ class EventExtractor:
                 result.inserted += 1
             else:
                 result.updated += 1
+            if result.processed % 5000 == 0 or result.processed == total:
+                print(
+                    f"  [event progress] processed={result.processed:,}/{total:,} "
+                    f"inserted={result.inserted:,} updated={result.updated:,}"
+                )
 
         result.total_events = self.repository.event_count()
         return result
