@@ -24,7 +24,7 @@ def run(
     analyzer = NoveltyAnalyzer(repository)
 
     print("=" * 76)
-    print(" NoveltyAnalyzer V1 - Rule Based Event Family / Delta")
+    print(" NoveltyAnalyzer V1.1 - Rule Based Event Family / Delta + Litigation Guard")
     print("=" * 76)
     print(f"DB      : {db_path}")
     print(f"Report  : {output_path}")
@@ -50,7 +50,7 @@ def run(
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Rule-based NoveltyAnalyzer V1")
+    parser = argparse.ArgumentParser(description="Rule-based NoveltyAnalyzer V1.1")
     parser.add_argument("--db", default=str(DEFAULT_DB))
     parser.add_argument("--output", default=str(DEFAULT_REPORT))
     parser.add_argument("--rebuild", action="store_true")
