@@ -148,10 +148,8 @@ class MaterialBacktester:
             return record
 
         signal_date = signal_date.normalize()
-        location = prices.index.get_loc(signal_date)
-        if not isinstance(location, int):
-            # Duplicates are removed above, but keep the guard deterministic.
-            location = int(location[0])
+        # Index duplicates were removed in _fetch_prices, so get_loc is scalar.
+        location = int(prices.index.get_loc(signal_date))
         entry_close = float(prices.iloc[location]["close"])
         if entry_close <= 0:
             record["price_status"] = "INVALID_ENTRY_PRICE"
@@ -177,13 +175,15 @@ class MaterialBacktester:
         return record
 
     def _summary_row(self, group: pd.DataFrame, dimension: str, value: str) -> dict:
+        material_score = pd.to_numeric(group["material_score"], errors="coerce")
+        ticker_score = pd.to_numeric(group["ticker_material_score"], errors="coerce")
         row = {
             "dimension": dimension,
             "value": value,
             "count": int(len(group)),
             "valid_entry_count": int((group["price_status"] == "OK").sum()),
-            "avg_material_score": round(pd.to_numeric(group["material_score"], errors="coerce").mean(), 4),
-            "avg_ticker_material_score": round(pd.to_numeric(group["ticker_material_score"], errors="coerce").mean(), 4),
+            "avg_material_score": round(float(material_score.mean()), 4) if material_score.notna().any() else pd.NA,
+            "avg_ticker_material_score": round(float(ticker_score.mean()), 4) if ticker_score.notna().any() else pd.NA,
         }
         for horizon in self.horizons:
             raw = pd.to_numeric(group[f"D+{horizon}"], errors="coerce").dropna()
