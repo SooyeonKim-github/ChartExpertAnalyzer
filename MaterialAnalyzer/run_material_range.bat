@@ -3,8 +3,8 @@ setlocal
 cd /d "%~dp0\.."
 
 echo ==============================================================================
-echo MaterialAnalyzer - HistoricalMaterialRangeCollector V1.1
-echo Fast DART Bulk / Point-in-Time / Resume / Prefiltered Derived Rebuild
+echo MaterialAnalyzer - HistoricalMaterialRangeCollector V1.2
+echo Fast DART Bulk / Point-in-Time / Resume / Material Prefilter / Derived Rebuild
 echo ==============================================================================
 echo.
 echo [1/2] Smoke test
@@ -34,6 +34,9 @@ if not "%RC%"=="0" (
   echo Modes:
   echo   --collect-only  : resume/collect raw history only
   echo   --derive-only   : reuse raw history and rebuild derived layers only
+  echo.
+  echo Next:
+  echo   MaterialAnalyzer\run_material_backtest.bat
 )
 
 echo.
