@@ -119,7 +119,33 @@ class LeaderResult:
     strong_return_days_5d: int = 0
     leader_type: str = "NORMAL"
 
-    # Leader Lifecycle V1. Lifecycle is observational and does not yet modify
+    # Emerging Leader / Rank Velocity. Independent from the original Leader Score.
+    emerging_available: bool = False
+    emerging_leader_score: float | None = None
+    emerging_label: str = "UNKNOWN"
+    emerging_rank_today: float | None = None
+    emerging_rank_1d_ago: float | None = None
+    emerging_rank_3d_ago: float | None = None
+    emerging_rank_5d_ago: float | None = None
+    rank_velocity_1d: float | None = None
+    rank_velocity_3d: float | None = None
+    rank_velocity_5d: float | None = None
+    rank_percentile_velocity_5d: float | None = None
+    rank_acceleration: float | None = None
+    trading_value_ratio_5d: float | None = None
+    trading_value_ratio_20d: float | None = None
+    trading_value_acceleration: float | None = None
+    emerging_rs_3d: float | None = None
+    emerging_rs_5d: float | None = None
+    emerging_rs_acceleration: float | None = None
+    emerging_rank_score: float | None = None
+    emerging_money_flow_score: float | None = None
+    emerging_rs_score: float | None = None
+    emerging_freshness_score: float | None = None
+    true_emerging_flag: bool = False
+    strong_emerging_flag: bool = False
+
+    # Leader Lifecycle V2. Lifecycle is observational and does not yet modify
     # Leader Score or confirmation status.
     lifecycle_available: bool = False
     lifecycle_state: str = "UNKNOWN"
