@@ -1,5 +1,5 @@
 theme,event_types,keywords,strong_keywords,weak_keywords,confidence,min_materiality,enabled
-AI,AI|GOV_POLICY,인공지능|생성형 AI|초거대 AI|AI 산업|AI 투자,GPU|HBM|AI 반도체|NPU|AI 데이터센터|데이터센터|컴퓨팅 인프라|AI 인프라|설비투자|대규모 투자|국가 GPU|AI 서버,회의|간담회|포럼|교육|아카데미|경진대회|공모전|인재양성|행사|세미나|아이디어 모집|성과공유|데이터 개방,0.82,70,1
+AI,AI|GOV_POLICY,AI|인공지능|생성형 AI|초거대 AI|AI 산업|AI 투자,GPU|HBM|AI 반도체|NPU|AI 데이터센터|데이터센터|컴퓨팅 인프라|AI 인프라|설비투자|대규모 투자|국가 GPU|AI 서버,회의|간담회|포럼|교육|아카데미|경진대회|공모전|인재양성|행사|세미나|아이디어 모집|성과공유|데이터 개방,0.82,70,1
 AI반도체,AI|SEMICONDUCTOR|GOV_POLICY,AI 반도체|HBM|고대역폭메모리|NPU|AI 칩,HBM|고대역폭메모리|NPU|AI 칩|GPU|반도체 투자|반도체 공장|설비투자,포럼|세미나|교육|회의|간담회,0.90,70,1
 데이터센터,AI_DATACENTER|AI|GOV_POLICY,데이터센터|데이터 센터|AI 데이터센터|GPU 센터,AI 데이터센터|GPU 센터|데이터센터 건설|데이터센터 투자|전력 인프라|컴퓨팅센터,회의|간담회|포럼|교육|행사,0.90,70,1
 자율주행,GOV_POLICY|PRODUCT,자율주행|ADAS|로보택시|무인차|자율주행차,상용화|양산|수주|공급계약|투자|생산|실증사업,포럼|회의|세미나|교육|행사,0.88,70,1
