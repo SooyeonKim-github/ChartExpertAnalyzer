@@ -7,6 +7,7 @@ import pandas as pd
 from .analyzer import LeaderStockAnalyzer
 from .data_provider import PyKrxLeaderDataProvider
 from .emerging import EmergingLeaderEngine
+from .exhaustion import ExhaustionRiskEngine
 from .leadership_history import LeadershipHistoryContext
 from .lifecycle import LeaderLifecycleEngine
 from .models import LeaderResult
@@ -112,6 +113,13 @@ def screen_date(
             enriched,
             history=history,
             market_period_returns=market_period_returns,
+        )
+        # Exhaustion Risk V1 is observational. It is calculated before
+        # lifecycle assignment but does not feed back into lifecycle yet.
+        enriched = ExhaustionRiskEngine(cfg).enrich(
+            enriched,
+            daily_by_ticker=daily_by_ticker,
+            history=history,
         )
 
     finalized = analyzer.finalize(enriched)
