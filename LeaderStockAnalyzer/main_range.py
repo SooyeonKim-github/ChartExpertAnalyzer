@@ -19,19 +19,8 @@ def _parse_range(value: str) -> tuple[str, str]:
     return start, end
 
 
-def _trading_dates(start: str, end: str) -> list[str]:
-    try:
-        from pykrx import stock
-    except ImportError as exc:
-        raise RuntimeError("pykrx is not installed") from exc
-    df = stock.get_index_ohlcv_by_date(start, end, "1001")
-    if df is None or df.empty:
-        raise RuntimeError("Could not load KOSPI trading dates")
-    return [pd.Timestamp(x).strftime("%Y%m%d") for x in df.index]
-
-
 def main() -> None:
-    p = argparse.ArgumentParser(description="LeaderStockAnalyzer point-in-time range scan")
+    p = argparse.ArgumentParser(description="LeaderStockAnalyzer range scan")
     p.add_argument("--date-range", required=True, type=_parse_range)
     p.add_argument("--top-n", type=int, default=100)
     p.add_argument("--config", default="config/default.yaml")
@@ -44,8 +33,18 @@ def main() -> None:
     provider = PyKrxLeaderDataProvider(cfg, base_dir)
     performance = ForwardPerformanceEngine(cfg)
     attribution = PerformanceAttributionEngine(cfg)
-    dates = _trading_dates(start, end)
+
+    # KJB/Swing range analyzers load per-ticker OHLCV once and reuse it.
+    # Leader follows the same pattern, then recalculates scan-date trading-value
+    # ranks inside that candidate pool for every trading day.
+    provider.prepare_range(start, end, args.top_n)
+    dates = provider.get_trading_dates(start, end)
     rows: list[dict] = []
+
+    print(
+        f"[INFO] Leader range ready | trading_days={len(dates)} "
+        f"| daily ranking=scan-date trading_value TOP {args.top_n}"
+    )
 
     max_horizon = max(performance.horizons + performance.excursion_horizons)
     future_calendar_days = max_horizon * 2 + 30
@@ -55,7 +54,14 @@ def main() -> None:
 
     for i, d in enumerate(dates, start=1):
         print(f"\n[{i}/{len(dates)}] {d}")
-        _, results = screen_date(cfg, scan_date=d, top_n=args.top_n, base_dir=base_dir, progress=False)
+        _, results = screen_date(
+            cfg,
+            scan_date=d,
+            top_n=args.top_n,
+            base_dir=base_dir,
+            progress=False,
+            provider=provider,
+        )
         for r in results:
             rec = r.to_dict()
             ticker = str(r.ticker).zfill(6)
@@ -75,7 +81,13 @@ def main() -> None:
                 )
             except Exception as exc:
                 print(f"[WARN] forward performance {d} {ticker} {r.name}: {exc}")
-                rec.update(performance.evaluate(pd.DataFrame(), d, breakout_reference=r.breakout_reference))
+                rec.update(
+                    performance.evaluate(
+                        pd.DataFrame(),
+                        d,
+                        breakout_reference=r.breakout_reference,
+                    )
+                )
             rows.append(rec)
 
     df = pd.DataFrame(rows)
@@ -85,7 +97,11 @@ def main() -> None:
     cand_path = out_dir / "range_candidates.csv"
     df.to_csv(all_path, index=False, encoding="utf-8-sig")
     if not df.empty:
-        df[df["status"].isin(["STRONG_CONFIRMED", "CONFIRMED"])].to_csv(cand_path, index=False, encoding="utf-8-sig")
+        df[df["status"].isin(["STRONG_CONFIRMED", "CONFIRMED"])].to_csv(
+            cand_path,
+            index=False,
+            encoding="utf-8-sig",
+        )
     else:
         df.to_csv(cand_path, index=False, encoding="utf-8-sig")
 
