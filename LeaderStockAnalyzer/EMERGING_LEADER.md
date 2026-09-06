@@ -13,7 +13,7 @@ Freshness                   10
 Raw Score                  100
 ```
 
-V1.1 then subtracts an Overheat Penalty:
+V1.1 subtracts an Overheat Penalty:
 
 ```text
 Emerging Leader Score = Raw Score - Overheat Penalty
@@ -29,7 +29,7 @@ Default labels:
         MOMENTUM_SPIKE  when overheat conditions are triggered
 ```
 
-## V1.1 tuning
+## Overheat tuning
 
 The first Rank Velocity backtest showed that extreme acceleration often represented a late short-term spike rather than a high-quality early leader. V1.1 therefore applies:
 
@@ -91,20 +91,49 @@ Important V1.1 fields:
 - `true_emerging_flag`
 - `strong_emerging_flag`
 
-## Lifecycle integration
+## Lifecycle V2.3 integration
 
-When Emerging Leader data is available, `DISCOVERY -> EMERGING` requires `true_emerging_flag` plus Lifecycle hysteresis confirmation.
+`true_emerging_flag` is an **activation signal**, not a permanent hold requirement.
 
-Default V2.2 behavior:
+Default activation:
 
 ```text
-promotion_confirm_days = 2
-allow_strong_emerging_fast_track = false
+DISCOVERY
+  + Leader Score >= 72
+  + Market Leader Rank <= 20
+  + true_emerging_flag
+  + 2-observation confirmation
+  -> EMERGING
 ```
 
-So even `STRONG_EMERGING` normally needs repeated confirmation. Fast-track can still be explicitly re-enabled for experiments, but it is not the default.
+Once a stock is `EMERGING`, Rank Velocity may cool. V2.3 uses a separate hold condition:
 
-Once a stock is already `EMERGING`, Rank Velocity is allowed to cool. Promotion to `LEADER` is controlled by established Leader Score / rank / persistence evidence.
+```text
+Leader Score >= 60
+AND
+Market Leader Rank <= 50
+```
+
+Therefore a sequence such as:
+
+```text
+70 -> 40 -> 18 -> 8   Rank Velocity activation
+8  -> 7  -> 9         velocity cools, but leadership remains strong
+```
+
+stays `EMERGING` and can still mature into `LEADER`.
+
+A first observation that is only Emerging also requires confirmation by default:
+
+```text
+initial_emerging_requires_confirmation = true
+```
+
+Fast-track remains disabled by default:
+
+```text
+allow_strong_emerging_fast_track = false
+```
 
 ## Range validation reports
 
@@ -115,14 +144,7 @@ emerging_events.csv
 emerging_summary.csv
 ```
 
-`emerging_events.csv` contains only the first row of each qualifying EMERGING episode and adds `event_type`:
-
-```text
-INITIAL_INFERENCE
-RANK_VELOCITY_CONFIRMED
-FAST_TRACK
-OTHER
-```
+`emerging_events.csv` contains only the first row of each qualifying EMERGING episode and adds `event_type`.
 
 `emerging_summary.csv` contains an `ALL` row plus one row per event cohort and reports:
 
@@ -133,4 +155,4 @@ OTHER
 - BROKEN rate
 - D+5 / D+20 / D+60 average, median and win rate
 
-The primary KPI for V1.1 is `RANK_VELOCITY_CONFIRMED`: improve its LEADER conversion rate while reducing its false-emerging rate.
+The primary V2.3 KPI is `RANK_VELOCITY_CONFIRMED`: improve LEADER conversion while keeping `MOMENTUM_SPIKE` excluded and false-Emerging lower than the pre-overheat version.
