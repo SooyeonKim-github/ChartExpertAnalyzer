@@ -10,14 +10,18 @@ REPO_ROOT = Path(__file__).resolve().parents[3]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
-from MarketData import ExcelUniverseService, get_market_data_service  # noqa: E402
+from MarketData import (  # noqa: E402
+    ExcelUniverseService,
+    build_market_close_history,
+    get_market_data_service,
+)
 
 
 class TrendFollowingDataProvider:
     """Market-data adapter for TrendFollowingAnalyzer.
 
     Strategy logic stays inside TrendFollowingAnalyzer while raw OHLCV,
-    universe, index, and point-in-time market snapshots reuse the repository-wide
+    universe, index, and market-history construction reuse the repository-wide
     MarketData service.
     """
 
@@ -175,10 +179,7 @@ class TrendFollowingDataProvider:
 
         df["close"] = pd.to_numeric(df["close"], errors="coerce")
         df["trading_value"] = pd.to_numeric(df["trading_value"], errors="coerce")
-        df = df[
-            (df["close"] >= float(ucfg.get("min_price", 0)))
-            & (df["trading_value"].fillna(0) > 0)
-        ].copy()
+        df = df[(df["close"] >= float(ucfg.get("min_price", 0))) & (df["trading_value"].fillna(0) > 0)].copy()
 
         if ucfg.get("exclude_spac", True):
             df = df[~df["name"].str.contains("스팩", na=False)].copy()
@@ -197,9 +198,7 @@ class TrendFollowingDataProvider:
         history_days = int(self.cfg["data"].get("history_days", 520))
         end = pd.Timestamp(scan_date).normalize()
         start = end - pd.Timedelta(days=history_days)
-        return self._normalize_daily(
-            self.market_data.get_ohlcv(code, start, end, allow_etf=False)
-        )
+        return self._normalize_daily(self.market_data.get_ohlcv(code, start, end, allow_etf=False))
 
     def get_market_index(self, market: str, scan_date: str) -> pd.DataFrame:
         """Load enough KOSPI/KOSDAQ index history for MA150 regime classification."""
@@ -220,11 +219,12 @@ class TrendFollowingDataProvider:
         return out.copy()
 
     def get_market_breadth_source(self, market: str, scan_date: str) -> tuple[pd.DataFrame, dict]:
-        """Build point-in-time all-market close history for 52-week breadth.
+        """Build market close history for 52-week breadth through MarketData.
 
-        The source uses KOSPI/KOSDAQ all-ticker snapshots for each trading date,
-        not the screen's Top-N candidate universe. MarketData caches each daily
-        snapshot, so the first run is the expensive one and later runs can reuse it.
+        Primary mode is point-in-time KRX all-ticker snapshots. If those repeatedly
+        fail, the shared MarketData layer switches to per-ticker historical OHLCV
+        using the current Excel universe. The fallback source is marked in metadata
+        and remains BACKTEST_ONLY.
         """
         market_key = str(market).upper()
         cache_key = f"{market_key}:{scan_date}"
@@ -234,7 +234,13 @@ class TrendFollowingDataProvider:
 
         bcfg = self.cfg.get("market_regime", {}).get("breadth_52w", {})
         if not bool(bcfg.get("enabled", True)):
-            meta = {"expected_dates": 0, "loaded_dates": 0, "failed_dates": 0}
+            meta = {
+                "expected_dates": 0,
+                "loaded_dates": 0,
+                "failed_dates": 0,
+                "source_mode": "DISABLED",
+                "membership_mode": "NONE",
+            }
             return pd.DataFrame(columns=["date", "ticker", "close"]), meta
 
         lookback_sessions = int(bcfg.get("lookback_sessions", 252))
@@ -244,49 +250,41 @@ class TrendFollowingDataProvider:
         dates = pd.DatetimeIndex(pd.to_datetime(index_df.index, errors="coerce")).dropna()
         end = pd.Timestamp(scan_date).normalize()
         dates = dates[dates.normalize() <= end]
-        dates = pd.DatetimeIndex(sorted(set(pd.Timestamp(x).normalize() for x in dates)))
+        dates = pd.DatetimeIndex(sorted({pd.Timestamp(x).normalize() for x in dates}))
         if len(dates) > required_sessions:
             dates = dates[-required_sessions:]
 
-        rows: list[pd.DataFrame] = []
-        loaded_dates = 0
-        failed_dates = 0
-        total = len(dates)
-        print(
-            f"[INFO] {market_key} 52W breadth source | dates={total} "
-            f"| full-market point-in-time snapshots"
-        )
-        for idx, dt in enumerate(dates, start=1):
-            try:
-                snap = self.market_data.get_market_snapshot(dt.strftime("%Y%m%d"), market_key)
-                if snap is None or snap.empty or not {"ticker", "close"}.issubset(snap.columns):
-                    raise RuntimeError("snapshot missing ticker/close")
-                day = snap[["ticker", "close"]].copy()
-                day["ticker"] = day["ticker"].astype(str).str.zfill(6)
-                day["close"] = pd.to_numeric(day["close"], errors="coerce")
-                day = day.dropna(subset=["close"])
-                day = day[day["close"] > 0]
-                day["date"] = dt
-                rows.append(day[["date", "ticker", "close"]])
-                loaded_dates += 1
-            except Exception as exc:
-                failed_dates += 1
-                print(f"[WARN] {market_key} breadth snapshot failed {dt:%Y-%m-%d}: {exc}")
-            if idx == total or idx % 50 == 0:
-                print(
-                    f"[INFO] {market_key} breadth snapshots {idx}/{total} "
-                    f"| loaded={loaded_dates} | failed={failed_dates}"
-                )
+        if len(dates) == 0:
+            meta = {
+                "expected_dates": 0,
+                "loaded_dates": 0,
+                "failed_dates": 0,
+                "source_mode": "NO_CALENDAR",
+                "membership_mode": "NONE",
+            }
+            return pd.DataFrame(columns=["date", "ticker", "close"]), meta
 
-        source = (
-            pd.concat(rows, ignore_index=True)
-            if rows
-            else pd.DataFrame(columns=["date", "ticker", "close"])
+        source, meta = build_market_close_history(
+            dates[0],
+            dates[-1],
+            market_key,
+            info_excel=self.universe_xlsx,
+            service=self.market_data,
+            snapshot_fail_fast=int(bcfg.get("snapshot_fail_fast", 2)),
+            allow_current_universe_fallback=bool(bcfg.get("allow_current_universe_fallback", True)),
         )
-        meta = {
-            "expected_dates": int(total),
-            "loaded_dates": int(loaded_dates),
-            "failed_dates": int(failed_dates),
-        }
+
+        selected_dates = {pd.Timestamp(x).normalize() for x in dates}
+        source_dates = pd.to_datetime(source["date"], errors="coerce").dt.normalize()
+        source = source[source_dates.isin(selected_dates)].copy()
+
+        source_mode = str(meta.get("source_mode", "UNKNOWN"))
+        membership_mode = str(meta.get("membership_mode", "UNKNOWN"))
+        print(
+            f"[INFO] {market_key} 52W breadth source ready "
+            f"| mode={source_mode} | membership={membership_mode} "
+            f"| dates={meta.get('loaded_dates', 0)}/{meta.get('expected_dates', 0)}"
+        )
+
         self._breadth_source_cache[cache_key] = (source.copy(), dict(meta))
         return source, meta
