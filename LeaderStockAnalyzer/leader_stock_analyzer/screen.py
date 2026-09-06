@@ -6,6 +6,8 @@ import pandas as pd
 
 from .analyzer import LeaderStockAnalyzer
 from .data_provider import PyKrxLeaderDataProvider
+from .emerging import EmergingLeaderEngine
+from .leadership_history import LeadershipHistoryContext
 from .lifecycle import LeaderLifecycleEngine
 from .models import LeaderResult
 from .persistence import PersistenceEngine
@@ -79,11 +81,22 @@ def screen_date(
         sector_map = provider.get_sector_map(resolved)
         market_period_returns = {
             market: {
+                3: provider.get_market_period_return(market, resolved, 3),
                 5: provider.get_market_period_return(market, resolved, 5),
                 20: provider.get_market_period_return(market, resolved, 20),
             }
             for market in ("KOSPI", "KOSDAQ")
         }
+
+        # During range scans use the full preloaded candidate pool (normally
+        # TOP100 * candidate_multiplier=3), not only today's final TOP100.
+        # A standalone screen falls back to today's analyzed universe.
+        history_frames = getattr(provider, "_range_price_cache", None) or daily_by_ticker
+        history = LeadershipHistoryContext.build(
+            history_frames,
+            scan_date=resolved,
+        )
+
         enriched = SectorContextEngine(cfg).enrich(
             enriched,
             daily_by_ticker=daily_by_ticker,
@@ -93,6 +106,12 @@ def screen_date(
         enriched = PersistenceEngine(cfg).enrich(
             enriched,
             daily_by_ticker=daily_by_ticker,
+            history=history,
+        )
+        enriched = EmergingLeaderEngine(cfg).enrich(
+            enriched,
+            history=history,
+            market_period_returns=market_period_returns,
         )
 
     finalized = analyzer.finalize(enriched)
