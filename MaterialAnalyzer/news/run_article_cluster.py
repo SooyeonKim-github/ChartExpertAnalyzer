@@ -18,6 +18,7 @@ def run(
     *,
     rebuild: bool = False,
     limit: int | None = None,
+    progress_every: int | None = None,
 ):
     database = Database(db_path)
     extractor = FeatureExtractor()
@@ -33,7 +34,7 @@ def run(
     print(f"Mode    : {'REBUILD' if rebuild else 'INCREMENTAL'}")
     print("-" * 76)
 
-    result = clusterer.run(rebuild=rebuild, limit=limit)
+    result = clusterer.run(rebuild=rebuild, limit=limit, progress_every=progress_every)
     report = repository.export_report(output_path)
 
     singleton = result.total_clusters - result.multi_member_clusters
@@ -55,8 +56,15 @@ def main():
     parser.add_argument("--output", default=str(DEFAULT_REPORT))
     parser.add_argument("--rebuild", action="store_true")
     parser.add_argument("--limit", type=int, default=None)
+    parser.add_argument("--progress-every", type=int, default=0)
     args = parser.parse_args()
-    run(Path(args.db), Path(args.output), rebuild=args.rebuild, limit=args.limit)
+    run(
+        Path(args.db),
+        Path(args.output),
+        rebuild=args.rebuild,
+        limit=args.limit,
+        progress_every=args.progress_every or None,
+    )
 
 
 if __name__ == "__main__":
