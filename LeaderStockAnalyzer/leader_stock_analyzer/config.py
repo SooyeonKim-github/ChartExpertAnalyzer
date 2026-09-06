@@ -131,6 +131,8 @@ DEFAULT_CONFIG: dict[str, Any] = {
         "leader_min_leader_score": 75.0,
         "leader_rank_max": 20,
         "leader_min_top20_days_5d": 2,
+        "leader_evidence_required": 2,
+        "leader_evidence_window_observations": 10,
         "persistent_min_leader_score": 75.0,
         "persistent_min_persistence_score": 70.0,
         "persistent_min_top20_days_5d": 4,
