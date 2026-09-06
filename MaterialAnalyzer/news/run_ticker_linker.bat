@@ -3,8 +3,8 @@ setlocal
 cd /d "%~dp0\..\.."
 
 echo ============================================================================
-echo MaterialAnalyzer - TickerLinker V1.1
-echo Direct / Exact Company / Evidence / Material Theme Linking
+echo MaterialAnalyzer - TickerLinker V1.2
+echo Robust TickerMaster / Exact Company / Material Theme Linking
 echo ============================================================================
 echo.
 echo [0/3] Refresh KOSPI/KOSDAQ ticker master if stale
