@@ -8,20 +8,26 @@ data:
   history_days: 520
 
 rule_policy:
+  # Experimental/Backtest-only rules are recorded but never remove candidates.
   experimental_filters_enabled: false
 
 trend:
+  # LECTURE_CORE
   ma_short: 50
   ma_long: 150
   slope_lookback: 20
+  # EXPERIMENTAL + BACKTEST_ONLY
   experimental_slope_threshold_pct: 0.30
 
 market_regime:
   history_days: 520
+  # LECTURE_CORE
   ma_short: 50
   ma_long: 150
   slope_lookback: 20
+  # EXPERIMENTAL + BACKTEST_ONLY
   experimental_slope_threshold_pct: 0.30
+
   breadth_52w:
     mode: BACKTEST_ONLY
     enabled: true
@@ -30,6 +36,7 @@ market_regime:
     short_window: 5
     long_window: 20
     min_coverage_ratio: 0.60
+
   intraday_strength:
     mode: BACKTEST_ONLY
     enabled: true
@@ -37,10 +44,13 @@ market_regime:
     weak_clv_threshold: 0.30
     short_window: 5
     long_window: 20
+
+  # Intentionally deferred.
   news_reaction:
     mode: PLANNED
 
 relative_strength:
+  # LECTURE_CORE concept, numeric choices are EXPERIMENTAL.
   mode: BACKTEST_ONLY
   enabled: true
   short_window: 20
