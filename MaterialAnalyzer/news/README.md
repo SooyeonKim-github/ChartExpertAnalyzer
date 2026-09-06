@@ -1,32 +1,28 @@
 # MaterialAnalyzer News Pipeline
 
-`MaterialAnalyzer.news` is the source-agnostic collection, clustering, event-structuring, novelty, and material-scoring layer used by MaterialAnalyzer.
+`MaterialAnalyzer.news` is the deterministic source-agnostic material pipeline used by MaterialAnalyzer.
 
 ## Current pipeline
 
 ```text
-7 live official sources
-        ↓
 NewsCollector V1.5
         ↓
 ArticleNormalizer / Exact dedupe
         ↓
-ArticleCluster V1.1 (rule-only)
+ArticleCluster V1.1
         ↓
-EventExtractor V1.1 (title-first rule-based)
+EventExtractor V1.1
         ↓
-material_events
+NoveltyAnalyzer V1.1
         ↓
-NoveltyAnalyzer V1.1 (rule-only family + delta + litigation guard)
+MaterialScorer V1.1
         ↓
-event_families + event_novelty
+TickerLinker V1
         ↓
-MaterialScorer V1 (deterministic 100-point score)
-        ↓
-material_scores
+MaterialBacktester  ← next
 ```
 
-Semantic similarity, embeddings, and LLM clustering are intentionally disabled in ArticleCluster and NoveltyAnalyzer.
+Semantic similarity, embeddings, fuzzy company matching, and LLM inference are intentionally disabled in the current deterministic stages unless explicitly added later.
 
 ## Main execution order
 
@@ -36,36 +32,10 @@ MaterialAnalyzer\news\run_article_cluster.bat
 MaterialAnalyzer\news\run_event_extractor.bat
 MaterialAnalyzer\news\run_novelty_analyzer.bat
 MaterialAnalyzer\news\run_material_scorer.bat
+MaterialAnalyzer\news\run_ticker_linker.bat
 ```
 
 Each stage is incremental unless `--rebuild` is explicitly used.
-
-## NewsCollector
-
-```bat
-MaterialAnalyzer\news\run_news_collector.bat
-```
-
-OpenDART requires `OPENDART_API_KEY`.
-
-Repeated collection is incremental:
-- DART/KIND: known items are skipped before fetch.
-- Government sources: latest items may be re-fetched to capture edits.
-- `source_states` and `collection_runs` persist endpoint health/history.
-
-## ArticleCluster V1.1
-
-```bat
-MaterialAnalyzer\news\run_article_cluster.bat
-```
-
-Output:
-
-```text
-MaterialAnalyzer\data\cluster_report.csv
-```
-
-Safeguards include exact/bridge DART-KIND receipt matching, numeric conflict penalties, repeated-disclosure ambiguity guards, and same-source different-receipt separation. Raw `articles` are never deleted or collapsed.
 
 ## EventExtractor V1.1
 
@@ -79,38 +49,12 @@ Output:
 MaterialAnalyzer\data\event_report.csv
 ```
 
-Storage:
-
-```text
-material_events
-```
-
-Event type classification is layered:
-
-```text
-TITLE
-  ↓ if UNKNOWN
-SUMMARY
-  ↓ if UNKNOWN
-BODY high-precision rules only
-```
-
-Stage rules include `REQUESTED`, `PLANNED`, `CONFIRMED`, `APPROVED`, `STARTED`, `COMPLETED`, and `RELEASED`.
-
-`quantified=1` requires a business-meaningful numeric fact such as money, percent, capacity, quantity, duration, or clinical phase. Calendar years, phone numbers, and article ids alone do not qualify.
-
-Routine/administrative events are retained but excluded from downstream material scoring with `material_candidate=0`.
+Event type classification is `TITLE -> SUMMARY -> BODY high-precision fallback`. `quantified=1` requires a meaningful business number rather than phone/date/article-id noise. Routine administrative events remain stored but can be excluded with `material_candidate=0`.
 
 ## NoveltyAnalyzer V1.1
 
 ```bat
 MaterialAnalyzer\news\run_novelty_analyzer.bat
-```
-
-Manual rebuild:
-
-```bat
-MaterialAnalyzer\news\run_novelty_analyzer.bat --rebuild
 ```
 
 Output:
@@ -119,56 +63,19 @@ Output:
 MaterialAnalyzer\data\novelty_report.csv
 ```
 
-Storage:
-- `event_families`
-- `event_novelty`
-
-Novelty statuses:
+Statuses:
 - `NEW_EVENT`
 - `FOLLOW_UP`
 - `CONFIRMATION`
 - `REHASH`
 - `MARKET_REACTION`
 
-Family matching is deterministic and uses ticker/company identity, compatible event type, normalized title/token overlap, event-specific anchors, meaningful numeric facts, and time distance. Auto-family threshold is `68`.
+V1.1 includes a litigation guard. Different legal subjects such as `전환사채발행금지` and `신주발행금지` do not become one family merely because both are injunction cases. The same subject progressing from filing to appeal can become `FOLLOW_UP`.
 
-### V1.1 litigation guard
-
-Generic legal words alone are not sufficient to join lawsuits. Concrete legal subjects are extracted first.
-
-Examples:
-
-```text
-전환사채발행금지 가처분
-vs
-신주발행금지 가처분
-→ different family / NEW_EVENT
-```
-
-```text
-전환사채발행금지 가처분 신청
-→ 전환사채발행금지 가처분 항고
-→ same family / FOLLOW_UP
-```
-
-Tracked litigation deltas:
-- `litigation_procedure_changed`
-- `litigation_procedure_progressed`
-
-Other deltas include stage, meaningful number, company/counterparty, polarity, source reliability, and confirmation-source changes.
-
-V1.1 is version-aware. Existing V1 novelty rows are reprocessed once after upgrade. A second unchanged run should return `processed=0`.
-
-## MaterialScorer V1
+## MaterialScorer V1.1
 
 ```bat
 MaterialAnalyzer\news\run_material_scorer.bat
-```
-
-Manual rebuild:
-
-```bat
-MaterialAnalyzer\news\run_material_scorer.bat --rebuild
 ```
 
 Output:
@@ -176,14 +83,6 @@ Output:
 ```text
 MaterialAnalyzer\data\material_score_report.csv
 ```
-
-Storage:
-
-```text
-material_scores
-```
-
-MaterialScorer only scores `material_candidate=1` events that already have NoveltyAnalyzer results. `MARKET_REACTION` is excluded from material scoring.
 
 ### 100-point score
 
@@ -198,19 +97,7 @@ MaterialScorer only scores `material_candidate=1` events that already have Novel
 | Multi-source Confirmation | 5 |
 | **Total** | **100** |
 
-Directness rules preserve policy events: a listed ticker receives the highest direct score, a named company receives a high score, and a concrete official government/sector event can still receive specificity credit even without a direct company.
-
-Novelty component:
-
-```text
-NEW_EVENT        10
-FOLLOW_UP         8
-CONFIRMATION      5
-REHASH             1
-MARKET_REACTION    0
-```
-
-Final material status:
+Status:
 
 ```text
 85-100  STRONG
@@ -219,8 +106,114 @@ Final material status:
 0-54    REJECT
 ```
 
-Material scoring is incremental and version-aware. If either the source event or novelty result changes, the corresponding event is rescored. A second unchanged run should return `processed=0`.
+### V1.1 routine-governance guard
+
+Direct DART/KIND disclosure and certainty should not make ordinary governance housekeeping look like a strong catalyst. Titles such as these receive a capped financial-impact component:
+
+```text
+주주명부 기준일/폐쇄
+일반 임시·정기 주주총회 소집
+일반 임시·정기 주주총회 결과
+```
+
+The event is still retained; only its standalone financial-impact score is reduced. Representative/director changes or genuinely material corporate actions are not automatically treated as routine.
+
+V1.1 uses scoring version `RULE_MATERIAL_SCORE_V1_1`, so existing V1 scores are automatically recalculated once.
+
+## TickerLinker V1
+
+```bat
+MaterialAnalyzer\news\run_ticker_linker.bat
+```
+
+Manual rebuild:
+
+```bat
+MaterialAnalyzer\news\run_ticker_linker.bat --rebuild
+```
+
+Outputs:
+
+```text
+MaterialAnalyzer\data\ticker_link_report.csv
+MaterialAnalyzer\data\ticker_link_unresolved.csv
+```
+
+Storage:
+
+```text
+material_ticker_links
+ticker_link_states
+```
+
+### Relation types
+
+```text
+DIRECT    1.00
+SUPPLIER  0.80
+CUSTOMER  0.70
+SECTOR    0.50
+THEME     0.35
+```
+
+`material_score` is preserved as event importance. Ticker relevance is stored separately:
+
+```text
+ticker_material_score = material_score × relation_weight
+```
+
+`positive_negative` is also preserved, so a high score can represent either an important positive catalyst or an important negative catalyst.
+
+### Linking order and safeguards
+
+1. EventExtractor stock code -> `DIRECT`, confidence 100.
+2. Exact normalized company/alias match -> `DIRECT`, confidence 98.
+3. Evidence-backed `company_relationships.csv` -> `SUPPLIER` / `CUSTOMER` only when evidence is present.
+4. If there is no direct listed-company link, deterministic theme rules can create `SECTOR` / `THEME` links.
+5. `REJECT` events do not fan out into theme stocks.
+6. A company-specific direct catalyst does not fan out to broad theme peers.
+7. No fuzzy company matching in V1; ambiguous/unmatched names remain unresolved.
+8. Indirect expansion is capped to prevent the linker from becoming a generic related-stock generator.
+
+### Editable reference data
+
+```text
+MaterialAnalyzer\data\reference\ticker_master.csv
+MaterialAnalyzer\data\reference\event_theme_rules.csv
+MaterialAnalyzer\data\reference\theme_ticker_map.csv
+MaterialAnalyzer\data\reference\company_relationships.csv
+```
+
+`ticker_master.csv` is also bootstrapped at runtime from historical EventExtractor rows that already contain exactly one company and one stock code. This lets proven direct mappings accumulate without fuzzy matching.
+
+`company_relationships.csv` intentionally starts empty. Add `SUPPLIER` / `CUSTOMER` rows only when a concrete source/evidence is available.
+
+### Incremental behavior
+
+`ticker_link_states` records the event version, MaterialScorer timestamp, link version, and linked count. If neither the event nor material score changes, a repeat run should return:
+
+```text
+processed = 0
+```
+
+Unresolved events are still recorded in state and exported separately, so they do not get pointlessly reprocessed on every run.
 
 ## Next stage
 
-The next downstream layer is `TickerLinker`, which will connect company-less policy/sector events and company events to tradable tickers using explicit relation types such as `DIRECT`, `SUPPLIER`, `CUSTOMER`, `SECTOR`, and `THEME`. After that, `MaterialBacktester` can evaluate forward returns by material score/status and event type.
+The next development step is `MaterialBacktester`.
+
+Recommended backtest unit:
+
+```text
+event_id + ticker + relation_type + ticker_material_score + positive_negative
+```
+
+For each link, calculate forward returns such as D+1 / D+5 / D+10 / D+20 / D+40 / D+60, then compare performance by:
+- material status/score band
+- positive vs negative
+- event type
+- novelty status
+- relation type (`DIRECT` vs `SECTOR` vs `THEME`)
+- ticker-material-score band
+
+The key purpose is to calibrate whether the current 100-point material score and relation weights actually separate high-value catalysts from noise before wiring the output into the final `collected_materials.csv`.
