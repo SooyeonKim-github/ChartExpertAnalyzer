@@ -11,6 +11,17 @@ from .persistence import PersistenceEngine
 from .sector_context import SectorContextEngine
 
 
+def _resolve_return_pct(row: pd.Series, daily: pd.DataFrame) -> float:
+    value = pd.to_numeric(pd.Series([row.get("return_pct")]), errors="coerce").iloc[0]
+    if pd.notna(value):
+        return float(value)
+
+    close = pd.to_numeric(daily.get("close"), errors="coerce").dropna()
+    if len(close) >= 2 and float(close.iloc[-2]) > 0:
+        return (float(close.iloc[-1]) / float(close.iloc[-2]) - 1.0) * 100.0
+    return 0.0
+
+
 def screen_date(
     cfg: dict,
     *,
@@ -23,7 +34,9 @@ def screen_date(
     resolved = provider.resolve_scan_date(scan_date)
     universe = provider.build_universe(resolved, top_n=top_n)
     analyzer = LeaderStockAnalyzer(cfg)
-    market_returns = {m: provider.get_market_return(m, resolved) for m in ["KOSPI", "KOSDAQ"]}
+    market_returns = {
+        m: provider.get_market_return(m, resolved) for m in ["KOSPI", "KOSDAQ"]
+    }
 
     raw_results: list[LeaderResult] = []
     daily_by_ticker: dict[str, pd.DataFrame] = {}
@@ -36,13 +49,14 @@ def screen_date(
                 continue
             daily_by_ticker[str(ticker).zfill(6)] = daily
             intraday = provider.get_intraday(ticker, resolved)
+            return_pct = _resolve_return_pct(row, daily)
             result = analyzer.analyze_one(
                 scan_date=resolved,
                 ticker=ticker,
                 name=str(row["name"]),
                 market=str(row["market"]),
                 price=float(row["price"]),
-                return_pct=float(row["return_pct"]),
+                return_pct=return_pct,
                 trading_value=float(row["trading_value"]),
                 trading_value_rank=int(row["trading_value_rank"]),
                 universe_size=total,
