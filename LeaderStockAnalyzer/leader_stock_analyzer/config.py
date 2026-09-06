@@ -95,8 +95,18 @@ DEFAULT_CONFIG: dict[str, Any] = {
         "emerging_min_leader_score": 85.0,
         "emerging_max_top20_days_5d": 2,
     },
+    "emerging_leader": {
+        "enabled": True,
+        "strong_score": 85.0,
+        "emerging_score": 70.0,
+        "watch_score": 55.0,
+        "max_chase_risk": 70.0,
+        "strong_rank_max": 15,
+        "strong_rank_velocity_5d": 30.0,
+    },
     "lifecycle": {
         "enabled": True,
+        "use_emerging_engine": True,
         "discovery_min_leader_score": 60.0,
         "discovery_rank_max": 50,
         "emerging_min_leader_score": 72.0,
