@@ -17,7 +17,13 @@ from MarketData.service import load_pykrx_stock  # noqa: E402
 
 
 class PyKrxLeaderDataProvider:
-    """LeaderStock compatibility provider backed by the shared MarketData layer."""
+    """LeaderStock adapter over the shared MarketData layer.
+
+    Leader range analysis intentionally follows the same market-data pattern as
+    KJB/Swing: build a stable Excel candidate pool, load each ticker's OHLCV,
+    then rank the candidates by the *scan-date* trading value.  It does not use
+    pykrx's fragile all-ticker snapshot endpoints.
+    """
 
     def __init__(self, cfg: dict, base_dir: str | Path):
         self.cfg = cfg
@@ -33,6 +39,11 @@ class PyKrxLeaderDataProvider:
                 str(REPO_ROOT / "KJBChartAnalyzer" / "KOSPI_Info.xlsx"),
             )
         )
+        self._candidate_infos: list = []
+        self._candidate_top_n: int | None = None
+        self._range_price_cache: dict[str, pd.DataFrame] = {}
+        self._range_cache_start: pd.Timestamp | None = None
+        self._range_cache_end: pd.Timestamp | None = None
 
     @staticmethod
     def _normalize_daily(df: pd.DataFrame) -> pd.DataFrame:
@@ -60,106 +71,181 @@ class PyKrxLeaderDataProvider:
                 out[c] = 0.0
             out[c] = pd.to_numeric(out[c], errors="coerce")
         out.index = pd.to_datetime(out.index, errors="coerce")
-        return out[columns].sort_index().dropna(subset=["close"])
+        out = out[~out.index.isna()]
+        out = out[~out.index.duplicated(keep="last")].sort_index()
+        return out[columns].dropna(subset=["close"])
 
-    def resolve_scan_date(self, requested: str | None = None) -> str:
-        return self.market_data.resolve_trading_date(requested)
+    def _candidate_pool_size(self, top_n: int) -> int:
+        multiplier = max(1, int(self.cfg.get("universe", {}).get("candidate_multiplier", 3)))
+        return max(int(top_n), int(top_n) * multiplier)
 
-    def _excel_frame(self) -> pd.DataFrame:
+    def _load_candidate_infos(self, top_n: int) -> list:
+        n = int(top_n)
+        if self._candidate_infos and self._candidate_top_n == n:
+            return self._candidate_infos
         service = ExcelUniverseService(self.info_excel)
-        infos = service.get_universe(
-            top_n=0,
+        self._candidate_infos = service.get_universe(
+            top_n=self._candidate_pool_size(n),
+            sort_by="trading_value",
             include_etf=False,
             markets=("KOSPI", "KOSDAQ"),
         )
-        meta = pd.DataFrame(
-            [
-                {
-                    "ticker": i.ticker,
-                    "name": i.name,
-                    "market": i.market,
-                    "excel_market_cap": i.market_cap,
-                    "excel_trading_value": i.trading_value,
-                }
-                for i in infos
-            ]
+        self._candidate_top_n = n
+        return self._candidate_infos
+
+    def prepare_range(self, start_date: str, end_date: str, top_n: int | None = None) -> None:
+        """Preload candidate OHLCV once for range scans.
+
+        This mirrors KJB/Swing range execution and prevents one network request
+        per ticker per scan date.  The loaded history also supplies Leader
+        signals, so subsequent screen_date calls reuse the same frames.
+        """
+        ucfg = self.cfg["universe"]
+        n = int(top_n or ucfg["top_n"])
+        candidates = self._load_candidate_infos(n)
+        history_days = int(self.cfg["data"].get("history_days", 420))
+        fetch_start = pd.Timestamp(start_date).normalize() - pd.Timedelta(days=history_days + 30)
+        fetch_end = pd.Timestamp(end_date).normalize()
+
+        self._range_price_cache = {}
+        self._range_cache_start = fetch_start
+        self._range_cache_end = fetch_end
+
+        print(
+            f"[INFO] Leader market-data preload | candidate_pool={len(candidates)} "
+            f"| target_top_n={n} | {fetch_start:%Y-%m-%d}~{fetch_end:%Y-%m-%d}"
         )
-        return meta.drop_duplicates("ticker", keep="first")
+        failed = 0
+        for idx, info in enumerate(candidates, start=1):
+            try:
+                bars = self.market_data.get_ohlcv(
+                    info.ticker,
+                    fetch_start,
+                    fetch_end,
+                    market_hint=info.market,
+                    allow_etf=False,
+                )
+                bars = self._normalize_daily(bars)
+                if bars.empty:
+                    raise RuntimeError("empty OHLCV")
+                self._range_price_cache[str(info.ticker).zfill(6)] = bars
+            except Exception:
+                failed += 1
+            if idx == len(candidates) or idx % 25 == 0:
+                print(
+                    f"[INFO] Leader preload {idx}/{len(candidates)} "
+                    f"| loaded={len(self._range_price_cache)} | failed={failed}"
+                )
+
+        if not self._range_price_cache:
+            raise RuntimeError("Leader range market-data preload returned no OHLCV")
+
+    def get_trading_dates(self, start_date: str, end_date: str) -> list[str]:
+        start = pd.Timestamp(start_date).normalize()
+        end = pd.Timestamp(end_date).normalize()
+        try:
+            index_df = self.market_data.get_market_index("KOSPI", start, end)
+            dates = pd.to_datetime(index_df.index, errors="coerce")
+            dates = dates[(dates.notna()) & (dates.normalize() >= start) & (dates.normalize() <= end)]
+            if len(dates):
+                return sorted({pd.Timestamp(x).strftime("%Y%m%d") for x in dates})
+        except Exception:
+            pass
+
+        try:
+            samsung = self.market_data.get_ohlcv(
+                "005930", start, end, market_hint="KOSPI", allow_etf=False
+            )
+            dates = pd.to_datetime(samsung.index, errors="coerce")
+            dates = dates[(dates.notna()) & (dates.normalize() >= start) & (dates.normalize() <= end)]
+            if len(dates):
+                return sorted({pd.Timestamp(x).strftime("%Y%m%d") for x in dates})
+        except Exception:
+            pass
+
+        cached_dates: set[str] = set()
+        for bars in self._range_price_cache.values():
+            idx = pd.to_datetime(bars.index, errors="coerce")
+            for dt in idx:
+                if pd.isna(dt):
+                    continue
+                ts = pd.Timestamp(dt).normalize()
+                if start <= ts <= end:
+                    cached_dates.add(ts.strftime("%Y%m%d"))
+        if cached_dates:
+            return sorted(cached_dates)
+        raise RuntimeError(f"Could not resolve trading dates: {start_date}~{end_date}")
+
+    def resolve_scan_date(self, requested: str | None = None) -> str:
+        if requested is not None and self._range_cache_start is not None and self._range_cache_end is not None:
+            target = pd.Timestamp(requested).normalize()
+            if self._range_cache_start <= target <= self._range_cache_end:
+                return target.strftime("%Y%m%d")
+        return self.market_data.resolve_trading_date(requested)
+
+    def _bars_for_candidate(self, info, scan_date: str) -> pd.DataFrame:
+        ticker = str(info.ticker).zfill(6)
+        cached = self._range_price_cache.get(ticker)
+        if cached is not None and not cached.empty:
+            return cached
+        start = pd.Timestamp(scan_date).normalize() - pd.Timedelta(days=30)
+        bars = self.market_data.get_ohlcv(
+            ticker,
+            start,
+            scan_date,
+            market_hint=info.market,
+            allow_etf=False,
+        )
+        return self._normalize_daily(bars)
 
     def build_universe(self, scan_date: str, top_n: int | None = None) -> pd.DataFrame:
-        meta = self._excel_frame()
-        try:
-            snap = pd.concat(
-                [
-                    self.market_data.get_market_snapshot(scan_date, "KOSPI"),
-                    self.market_data.get_market_snapshot(scan_date, "KOSDAQ"),
-                ],
-                ignore_index=True,
-            )
-            df = snap.rename(columns={"close": "price"}).copy()
-            df = df.merge(meta, on=["ticker", "market"], how="left")
-            df["name"] = df["name"].fillna(df["ticker"])
+        ucfg = self.cfg["universe"]
+        n = int(top_n or ucfg["top_n"])
+        candidates = self._load_candidate_infos(n)
+        target = pd.Timestamp(scan_date).normalize()
+        rows: list[dict] = []
 
-            if "market_cap" not in df.columns:
-                df["market_cap"] = df.get("excel_market_cap", pd.NA)
-            elif "excel_market_cap" in df.columns:
-                df["market_cap"] = pd.to_numeric(df["market_cap"], errors="coerce").fillna(
-                    pd.to_numeric(df["excel_market_cap"], errors="coerce")
-                )
-        except Exception as exc:
-            print(
-                "[WARN] Leader point-in-time snapshot unavailable; "
-                f"using last-resort Excel candidate fallback: {exc}"
-            )
-            print(
-                "[WARN] Last-resort fallback candidate pool is based on the shared Excel universe; "
-                "historical trading_value is recalculated from scan-date OHLCV."
-            )
-            ucfg = self.cfg["universe"]
-            n = int(top_n or ucfg["top_n"])
-            candidates = ExcelUniverseService(self.info_excel).get_universe(
-                top_n=max(n * 2, n),
-                sort_by="trading_value",
-                include_etf=False,
-                markets=("KOSPI", "KOSDAQ"),
-            )
-            rows: list[dict] = []
-            start = (pd.Timestamp(scan_date) - pd.Timedelta(days=15)).strftime("%Y%m%d")
-            for info in candidates:
-                try:
-                    bars = self.market_data.get_ohlcv(
-                        info.ticker,
-                        start,
-                        scan_date,
-                        market_hint=info.market,
-                        allow_etf=False,
-                    )
-                    close = pd.to_numeric(bars["close"], errors="coerce").dropna()
-                    if close.empty:
-                        continue
-                    ret = (
-                        (float(close.iloc[-1]) / float(close.iloc[-2]) - 1.0) * 100.0
-                        if len(close) >= 2 and float(close.iloc[-2]) > 0
-                        else 0.0
-                    )
-                    last = bars.iloc[-1]
-                    rows.append(
-                        {
-                            "ticker": info.ticker,
-                            "market": info.market,
-                            "name": info.name,
-                            "price": float(last["close"]),
-                            "volume": float(last.get("volume", 0.0) or 0.0),
-                            "trading_value": float(last.get("trading_value", 0.0) or 0.0),
-                            "return_pct": ret,
-                            "market_cap": pd.NA,
-                        }
-                    )
-                except Exception:
+        for info in candidates:
+            try:
+                bars = self._bars_for_candidate(info, scan_date)
+                hist = bars[pd.to_datetime(bars.index).normalize() <= target]
+                if hist.empty:
                     continue
-            df = pd.DataFrame(rows)
-            if df.empty:
-                raise RuntimeError("Leader fallback universe is empty")
+                last_date = pd.Timestamp(hist.index[-1]).normalize()
+                if last_date != target:
+                    continue
+                close = pd.to_numeric(hist["close"], errors="coerce").dropna()
+                if close.empty:
+                    continue
+                last = hist.iloc[-1]
+                price = float(last["close"])
+                volume = float(last.get("volume", 0.0) or 0.0)
+                trading_value = float(last.get("trading_value", 0.0) or 0.0)
+                if trading_value <= 0 and price > 0 and volume > 0:
+                    trading_value = price * volume
+                ret = (
+                    (float(close.iloc[-1]) / float(close.iloc[-2]) - 1.0) * 100.0
+                    if len(close) >= 2 and float(close.iloc[-2]) > 0
+                    else 0.0
+                )
+                rows.append(
+                    {
+                        "ticker": str(info.ticker).zfill(6),
+                        "market": str(info.market).upper(),
+                        "name": info.name,
+                        "price": price,
+                        "volume": volume,
+                        "trading_value": trading_value,
+                        "return_pct": ret,
+                        "market_cap": info.market_cap,
+                    }
+                )
+            except Exception:
+                continue
+
+        df = pd.DataFrame(rows)
+        if df.empty:
+            raise RuntimeError(f"Leader universe is empty for {scan_date}")
 
         for c in ["price", "volume", "trading_value", "return_pct", "market_cap"]:
             if c not in df.columns:
@@ -169,8 +255,6 @@ class PyKrxLeaderDataProvider:
         df["ticker"] = df["ticker"].astype(str).str.zfill(6)
         df["name"] = df["name"].fillna(df["ticker"]).astype(str)
         df["market"] = df["market"].fillna("").astype(str).str.upper()
-
-        ucfg = self.cfg["universe"]
         df = df[
             (df["price"] >= float(ucfg["min_price"]))
             & (df["trading_value"].fillna(0) > 0)
@@ -187,15 +271,27 @@ class PyKrxLeaderDataProvider:
             ["trading_value", "return_pct"],
             ascending=[False, False],
             na_position="last",
-        )
-        n = int(top_n or ucfg["top_n"])
-        df = df.head(n).copy()
+        ).head(n).copy()
         df["trading_value_rank"] = range(1, len(df) + 1)
         return df.set_index("ticker")
 
     def get_daily(self, ticker: str, scan_date: str, future_days: int = 0) -> pd.DataFrame:
-        end_ts = pd.Timestamp(scan_date) + pd.Timedelta(days=max(0, future_days))
-        start_ts = pd.Timestamp(scan_date) - pd.Timedelta(days=int(self.cfg["data"]["history_days"]))
+        end_ts = pd.Timestamp(scan_date).normalize() + pd.Timedelta(days=max(0, future_days))
+        start_ts = pd.Timestamp(scan_date).normalize() - pd.Timedelta(
+            days=int(self.cfg["data"]["history_days"])
+        )
+        code = str(ticker).zfill(6)
+        cached = self._range_price_cache.get(code)
+        if (
+            cached is not None
+            and self._range_cache_start is not None
+            and self._range_cache_end is not None
+            and start_ts >= self._range_cache_start
+            and end_ts <= self._range_cache_end
+        ):
+            out = cached[(cached.index >= start_ts) & (cached.index <= end_ts)].copy()
+            if not out.empty:
+                return out
         return self._normalize_daily(
             self.market_data.get_ohlcv(ticker, start_ts, end_ts, allow_etf=False)
         )
@@ -246,9 +342,7 @@ class PyKrxLeaderDataProvider:
                     code = str(ticker).zfill(6)
                     sector = str(row.get("업종명", "")).strip()
                     if code.isdigit() and len(code) == 6 and sector:
-                        rows.append(
-                            {"ticker": code, "market": market, "sector": sector}
-                        )
+                        rows.append({"ticker": code, "market": market, "sector": sector})
         except Exception:
             rows = []
 
