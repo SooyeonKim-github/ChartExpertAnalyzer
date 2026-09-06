@@ -8,19 +8,15 @@ from .dart_prefilter import classify_dart_analysis
 
 
 class HistoricalDartBulkService:
-    """Fast path for immutable OpenDART list metadata.
+    """Fast path for immutable OpenDART list metadata."""
 
-    DART historical fetch() does not download a detail body; it wraps immutable list
-    metadata. We therefore batch external-id existence checks and commit all new rows
-    in one SQLite transaction instead of doing multiple DB round-trips per disclosure.
-    """
-
-    def __init__(self, collector, repository, normalizer, validator, classifier):
+    def __init__(self, collector, repository, normalizer, validator, classifier, *, known_external_ids=None):
         self.collector = collector
         self.repository = repository
         self.normalizer = normalizer
         self.validator = validator
         self.classifier = classifier
+        self.known_external_ids = known_external_ids
 
     def run(self) -> CollectionResult:
         endpoint = self.collector.endpoint
@@ -38,7 +34,6 @@ class HistoricalDartBulkService:
             result.health_status = "DEGRADED"
             return result
 
-        # Deduplicate within the API response before touching SQLite.
         candidates = []
         seen = set()
         for candidate in discovered:
@@ -51,10 +46,13 @@ class HistoricalDartBulkService:
         if candidates:
             result.checkpoint_value = candidates[-1].external_id or candidates[-1].url
 
-        known = self.repository.existing_external_ids(
-            endpoint.source_id,
-            [candidate.external_id for candidate in candidates if candidate.external_id],
-        )
+        if self.known_external_ids is None:
+            known = self.repository.existing_external_ids(
+                endpoint.source_id,
+                [candidate.external_id for candidate in candidates if candidate.external_id],
+            )
+        else:
+            known = self.known_external_ids
         result.skipped = sum(1 for candidate in candidates if candidate.external_id in known)
 
         articles = []
@@ -87,6 +85,10 @@ class HistoricalDartBulkService:
         inserted, updated = self.repository.upsert_many(articles)
         result.inserted = inserted
         result.updated = updated
+        if self.known_external_ids is not None:
+            self.known_external_ids.update(
+                article.external_id for article in articles if article.external_id
+            )
         result.finished_at = datetime.now(timezone.utc)
         result.health_status = "HEALTHY" if result.failed == 0 else "DEGRADED"
         return result
