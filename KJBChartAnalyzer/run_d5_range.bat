@@ -51,6 +51,7 @@ echo [INFO] Date range : %DATE_RANGE%
 echo [INFO] Top N      : %TOP_N%
 echo [INFO] Sort by    : %SORT_BY%
 echo [INFO] D5 score   : Raw Selection - OverextensionPenalty
+echo [INFO] Live rules : unchanged; D5 is evaluated in shadow mode
 
 echo.
 echo [1/2] Running KJB range backtest...
@@ -78,8 +79,10 @@ set "RESULT_DIR=results\range_%START_DATE%_%END_DATE%"
 set "RANGE_FILE=%RESULT_DIR%\chart_range_events.csv"
 
 echo.
-echo [2/2] Building D+5 diagnostics...
-"%PYTHON_EXE%" %PYTHON_PREFIX% run_d5_diagnostics.py --range-file "%RANGE_FILE%"
+echo [2/2] Building experimental D+5 diagnostics...
+"%PYTHON_EXE%" %PYTHON_PREFIX% run_d5_diagnostics.py ^
+    --range-file "%RANGE_FILE%" ^
+    --config "config\d5_diagnostics.yaml"
 if errorlevel 1 (
     echo [ERROR] D+5 diagnostics failed.
     if /I not "%NO_PAUSE%"=="1" pause
