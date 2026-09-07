@@ -21,6 +21,9 @@ class BacktestRunResult:
     results_csv: Path
     summary_csv: Path
     errors_csv: Path
+    ticker_day_results_csv: Path
+    ticker_day_summary_csv: Path
+    error_summary_csv: Path
 
 
 def _material_score_band(value) -> str:
@@ -60,15 +63,24 @@ def _direction_multiplier(value: str) -> float | None:
     return None
 
 
-class MaterialBacktester:
-    """Point-in-time close-to-close forward return backtester for material events.
+def _join_unique(series) -> str:
+    seen = []
+    for value in series.fillna("").astype(str):
+        value = value.strip()
+        if value and value not in seen:
+            seen.append(value)
+    return "|".join(seen)
 
-    Entry is the close of `market_date`. D+N means N trading bars after that entry close.
-    A row with no exact price on market_date is left in the result but excluded from
-    return statistics; the engine never silently shifts an entry to a later trading day.
+
+class MaterialBacktester:
+    """Point-in-time close-to-close forward return backtester.
+
+    Entry is the close of ``market_date``. D+N means N trading bars after that close.
+    The engine never silently shifts an entry. V1.1 additionally emits ticker-day
+    de-duplicated results and detailed no-price classifications.
     """
 
-    VERSION = "MATERIAL_BACKTEST_V1"
+    VERSION = "MATERIAL_BACKTEST_V1_1"
 
     def __init__(self, provider=None, horizons: Iterable[int] = DEFAULT_HORIZONS):
         self.provider = provider or get_market_data_service()
@@ -99,16 +111,13 @@ class MaterialBacktester:
         frame["market_date"] = frame["market_date"].astype(str).str.replace(r"\.0$", "", regex=True)
         frame = frame[frame["ticker"].str.fullmatch(r"\d{6}", na=False)].copy()
         frame = frame[frame["market_date"].str.fullmatch(r"\d{8}", na=False)].copy()
-        frame = frame.sort_values(["ticker", "market_date", "event_id"], kind="stable").reset_index(drop=True)
-        return frame
+        return frame.sort_values(["ticker", "market_date", "event_id"], kind="stable").reset_index(drop=True)
 
     def _fetch_prices(self, ticker: str, group: pd.DataFrame) -> pd.DataFrame:
         start = pd.to_datetime(group["market_date"], format="%Y%m%d", errors="coerce").min()
         end = pd.to_datetime(group["market_date"], format="%Y%m%d", errors="coerce").max()
         if pd.isna(start) or pd.isna(end):
             raise RuntimeError("invalid market_date range")
-        # 60 trading bars are usually < 120 calendar days. The extra buffer also covers
-        # long holiday periods without changing signal-time semantics.
         end = end + pd.Timedelta(days=max(120, max(self.horizons) * 2))
         prices = self.provider.get_ohlcv(ticker, start, end)
         if prices is None or prices.empty:
@@ -120,6 +129,21 @@ class MaterialBacktester:
         out["close"] = pd.to_numeric(out["close"], errors="coerce")
         return out.dropna(subset=["close"])
 
+    @staticmethod
+    def _missing_price_status(signal_date: pd.Timestamp, prices: pd.DataFrame) -> tuple[str, str]:
+        if prices.empty:
+            return "OHLCV_FAILED", "empty price frame"
+        first, last = prices.index.min(), prices.index.max()
+        if signal_date < first:
+            return "PRE_LISTING_OR_DATA_START", f"first_price_date={first:%Y%m%d}"
+        if signal_date > last:
+            return "DELISTED_OR_DATA_END", f"last_price_date={last:%Y%m%d}"
+        prev_dates = prices.index[prices.index < signal_date]
+        next_dates = prices.index[prices.index > signal_date]
+        prev_text = prev_dates.max().strftime("%Y%m%d") if len(prev_dates) else ""
+        next_text = next_dates.min().strftime("%Y%m%d") if len(next_dates) else ""
+        return "SUSPENDED_OR_NO_TRADING", f"no quote on market trading date; prev={prev_text}; next={next_text}"
+
     def _row_result(self, row: pd.Series, prices: pd.DataFrame | None, price_error: str = "") -> dict:
         record = row.to_dict()
         record["backtest_version"] = self.VERSION
@@ -129,7 +153,6 @@ class MaterialBacktester:
         record["entry_close"] = pd.NA
         record["material_score_band"] = _material_score_band(row.get("material_score"))
         record["ticker_material_score_band"] = _ticker_score_band(row.get("ticker_material_score"))
-
         for horizon in self.horizons:
             record[f"forward_date_D+{horizon}"] = ""
             record[f"D+{horizon}"] = pd.NA
@@ -143,12 +166,16 @@ class MaterialBacktester:
             return record
 
         signal_date = pd.to_datetime(str(row["market_date"]), format="%Y%m%d", errors="coerce")
-        if pd.isna(signal_date) or signal_date.normalize() not in prices.index:
-            record["price_status"] = "NO_PRICE_ON_SIGNAL_DATE"
+        if pd.isna(signal_date):
+            record["price_status"] = "INVALID_SIGNAL_DATE"
+            return record
+        signal_date = signal_date.normalize()
+        if signal_date not in prices.index:
+            status, detail = self._missing_price_status(signal_date, prices)
+            record["price_status"] = status
+            record["price_error"] = detail
             return record
 
-        signal_date = signal_date.normalize()
-        # Index duplicates were removed in _fetch_prices, so get_loc is scalar.
         location = int(prices.index.get_loc(signal_date))
         entry_close = float(prices.iloc[location]["close"])
         if entry_close <= 0:
@@ -158,7 +185,6 @@ class MaterialBacktester:
         record["entry_date"] = signal_date.strftime("%Y%m%d")
         record["entry_close"] = round(entry_close, 6)
         direction = _direction_multiplier(row.get("positive_negative", ""))
-
         for horizon in self.horizons:
             target = location + horizon
             if target >= len(prices):
@@ -178,9 +204,7 @@ class MaterialBacktester:
         material_score = pd.to_numeric(group["material_score"], errors="coerce")
         ticker_score = pd.to_numeric(group["ticker_material_score"], errors="coerce")
         row = {
-            "dimension": dimension,
-            "value": value,
-            "count": int(len(group)),
+            "dimension": dimension, "value": value, "count": int(len(group)),
             "valid_entry_count": int((group["price_status"] == "OK").sum()),
             "avg_material_score": round(float(material_score.mean()), 4) if material_score.notna().any() else pd.NA,
             "avg_ticker_material_score": round(float(ticker_score.mean()), 4) if ticker_score.notna().any() else pd.NA,
@@ -196,35 +220,59 @@ class MaterialBacktester:
             row[f"avg_abs_D+{horizon}"] = round(float(abs_ret.mean()), 4) if len(abs_ret) else pd.NA
             row[f"directional_count_D+{horizon}"] = int(len(directional))
             row[f"avg_directional_D+{horizon}"] = round(float(directional.mean()), 4) if len(directional) else pd.NA
-            row[f"directional_hit_rate_D+{horizon}"] = (
-                round(float((directional > 0).mean() * 100.0), 2) if len(directional) else pd.NA
-            )
+            row[f"directional_hit_rate_D+{horizon}"] = round(float((directional > 0).mean() * 100.0), 2) if len(directional) else pd.NA
         return row
 
     def _build_summary(self, results: pd.DataFrame) -> pd.DataFrame:
+        if results.empty:
+            return pd.DataFrame()
         records = [self._summary_row(results, "OVERALL", "ALL")]
         dimensions = [
-            "material_status",
-            "material_score_band",
-            "ticker_material_score_band",
-            "positive_negative",
-            "event_type",
-            "event_stage",
-            "novelty_status",
-            "relation_type",
-            "source_id",
+            "material_status", "material_score_band", "ticker_material_score_band",
+            "positive_negative", "event_type", "event_stage", "novelty_status",
+            "relation_type", "source_id",
         ]
         if "theme" in results.columns:
             dimensions.append("theme")
-
         for dimension in dimensions:
             if dimension not in results.columns:
                 continue
             values = results[dimension].fillna("").astype(str)
             for value in sorted(v for v in values.unique() if v):
-                group = results.loc[values == value]
-                records.append(self._summary_row(group, dimension, value))
+                records.append(self._summary_row(results.loc[values == value], dimension, value))
         return pd.DataFrame(records)
+
+    def _build_ticker_day(self, results: pd.DataFrame) -> pd.DataFrame:
+        if results.empty:
+            return pd.DataFrame()
+        records = []
+        for (_, _), group in results.groupby(["ticker", "market_date"], sort=True):
+            ranked = group.copy()
+            ranked["_ticker_score"] = pd.to_numeric(ranked["ticker_material_score"], errors="coerce").fillna(-1)
+            ranked["_material_score"] = pd.to_numeric(ranked["material_score"], errors="coerce").fillna(-1)
+            ranked = ranked.sort_values(["_ticker_score", "_material_score", "event_id"], ascending=[False, False, True], kind="stable")
+            dominant = ranked.iloc[0].drop(labels=["_ticker_score", "_material_score"]).to_dict()
+            dominant["event_count"] = int(len(group))
+            dominant["event_ids"] = _join_unique(group["event_id"])
+            dominant["event_types_all"] = _join_unique(group["event_type"])
+            dominant["novelty_status_all"] = _join_unique(group["novelty_status"]) if "novelty_status" in group else ""
+            dominant["relation_types_all"] = _join_unique(group["relation_type"])
+            dominant["positive_negative_all"] = _join_unique(group["positive_negative"])
+            if "theme" in group:
+                dominant["themes_all"] = _join_unique(group["theme"])
+            polarities = [x for x in group["positive_negative"].fillna("").astype(str).unique() if x]
+            if len(polarities) > 1:
+                dominant["positive_negative"] = "MIXED"
+                for horizon in self.horizons:
+                    dominant[f"directional_D+{horizon}"] = pd.NA
+            records.append(dominant)
+        return pd.DataFrame(records).sort_values(["market_date", "ticker"], kind="stable").reset_index(drop=True)
+
+    @staticmethod
+    def _build_error_summary(errors: pd.DataFrame) -> pd.DataFrame:
+        if errors.empty:
+            return pd.DataFrame(columns=["price_status", "count", "ticker_count"])
+        return errors.groupby("price_status", dropna=False).agg(count=("ticker", "size"), ticker_count=("ticker", "nunique")).reset_index().sort_values(["count", "price_status"], ascending=[False, True])
 
     def run(self, input_path: str | Path, output_dir: str | Path, *, limit: int | None = None) -> BacktestRunResult:
         source = self._load(input_path)
@@ -232,9 +280,8 @@ class MaterialBacktester:
             source = source.head(max(0, int(limit))).copy()
         output = Path(output_dir)
         output.mkdir(parents=True, exist_ok=True)
-
         print("=" * 80)
-        print("MaterialBacktester V1 - Point-in-Time Close-to-Close Forward Returns")
+        print("MaterialBacktester V1.1 - Event + Ticker-Day Forward Returns")
         print("=" * 80)
         print(f"input         : {input_path}")
         print(f"rows          : {len(source):,}")
@@ -255,37 +302,44 @@ class MaterialBacktester:
             for _, row in group.iterrows():
                 records.append(self._row_result(row, prices, price_error))
             if ticker_index % 50 == 0 or ticker_index == ticker_total:
-                print(
-                    f"  [backtest progress] tickers={ticker_index:,}/{ticker_total:,} "
-                    f"rows={len(records):,}/{len(source):,}"
-                )
+                print(f"  [backtest progress] tickers={ticker_index:,}/{ticker_total:,} rows={len(records):,}/{len(source):,}")
 
         results = pd.DataFrame(records)
-        summary = self._build_summary(results) if not results.empty else pd.DataFrame()
+        summary = self._build_summary(results)
         errors = results.loc[results["price_status"] != "OK"].copy() if not results.empty else pd.DataFrame()
+        ticker_day = self._build_ticker_day(results)
+        ticker_day_summary = self._build_summary(ticker_day)
+        error_summary = self._build_error_summary(errors)
 
         results_csv = output / "material_backtest_results.csv"
         summary_csv = output / "material_backtest_summary.csv"
         errors_csv = output / "material_backtest_errors.csv"
+        ticker_day_results_csv = output / "material_backtest_ticker_day_results.csv"
+        ticker_day_summary_csv = output / "material_backtest_ticker_day_summary.csv"
+        error_summary_csv = output / "material_backtest_error_summary.csv"
         results.to_csv(results_csv, index=False, encoding="utf-8-sig")
         summary.to_csv(summary_csv, index=False, encoding="utf-8-sig")
         errors.to_csv(errors_csv, index=False, encoding="utf-8-sig")
+        ticker_day.to_csv(ticker_day_results_csv, index=False, encoding="utf-8-sig")
+        ticker_day_summary.to_csv(ticker_day_summary_csv, index=False, encoding="utf-8-sig")
+        error_summary.to_csv(error_summary_csv, index=False, encoding="utf-8-sig")
 
         valid = int((results["price_status"] == "OK").sum()) if not results.empty else 0
         failed = int((results["price_status"] != "OK").sum()) if not results.empty else 0
         print("-" * 80)
-        print(f"valid_entry_rows  = {valid:,}")
-        print(f"failed_price_rows = {failed:,}")
-        print(f"results            = {results_csv}")
-        print(f"summary            = {summary_csv}")
-        print(f"errors             = {errors_csv}")
+        print(f"valid_entry_rows      = {valid:,}")
+        print(f"failed_price_rows     = {failed:,}")
+        print(f"ticker_day_rows       = {len(ticker_day):,}")
+        print(f"results               = {results_csv}")
+        print(f"summary               = {summary_csv}")
+        print(f"ticker_day_results    = {ticker_day_results_csv}")
+        print(f"ticker_day_summary    = {ticker_day_summary_csv}")
+        print(f"errors                = {errors_csv}")
+        print(f"error_summary         = {error_summary_csv}")
         print("=" * 80)
         return BacktestRunResult(
-            input_rows=len(source),
-            result_rows=len(results),
-            valid_entry_rows=valid,
-            failed_price_rows=failed,
-            results_csv=results_csv,
-            summary_csv=summary_csv,
-            errors_csv=errors_csv,
+            input_rows=len(source), result_rows=len(results), valid_entry_rows=valid,
+            failed_price_rows=failed, results_csv=results_csv, summary_csv=summary_csv,
+            errors_csv=errors_csv, ticker_day_results_csv=ticker_day_results_csv,
+            ticker_day_summary_csv=ticker_day_summary_csv, error_summary_csv=error_summary_csv,
         )
