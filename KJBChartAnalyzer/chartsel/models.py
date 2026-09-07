@@ -20,6 +20,10 @@ class AnalysisResult:
     grade: str
     action: str
     market_regime: str
+    d5_score: float = 50.0
+    d5_grade: str = 'C'
+    overextension_penalty: float = 0.0
+    overextension_components: Dict[str, float] = field(default_factory=dict)
     confluence_score: float = 50.0
     relative_strength_score: float = 50.0
     relative_strength_grade: str = 'C'

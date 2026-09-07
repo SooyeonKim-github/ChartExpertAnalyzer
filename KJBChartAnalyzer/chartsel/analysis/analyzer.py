@@ -15,6 +15,7 @@ from .market_regime import classify_market_regime
 from .scoring import build_signals, normalized_total
 from .decision import build_decision
 from .relative_strength import relative_strength_context, leader_score
+from .overextension import evaluate_overextension
 from ..risk.risk_manager import initial_stop, trailing_stop, contextual_entry_plan
 
 
@@ -26,6 +27,7 @@ def _to_weekly(df: pd.DataFrame) -> pd.DataFrame:
         'Close': df['Close'].resample('W-FRI').last(),
         'Volume': df['Volume'].resample('W-FRI').sum(),
     }).dropna()
+
 
 class ChartAnalyzer:
     def __init__(self, cfg: dict):
@@ -83,6 +85,14 @@ class ChartAnalyzer:
         grade = decision['selection_grade']
         action = decision['entry_status']
 
+        overextension = evaluate_overextension(
+            selection_score=score,
+            leader_score=lead_score,
+            relative_strength_score=rs['score'],
+            chase_risk=decision['chase_risk'],
+            cfg=self.cfg.get('overextension', {}),
+        )
+
         # 강의의 피라미딩은 상승 추세장에서만 권장한다.
         if self.cfg['selection']['require_market_uptrend_for_pyramiding'] and regime != 'uptrend' and action in ('분할진입 우수','좋은 종목 · 관심 진입'):
             action = '조건부 관심 · 시장 추세 확인 필요'
@@ -108,6 +118,11 @@ class ChartAnalyzer:
             notes.append('지수 대비 상대강도가 높습니다. 하락 방어력·초과수익·회복 우위를 함께 확인했습니다.')
         elif rs['available'] and rs['score'] < 40:
             notes.append('종목 자체 차트와 별개로 지수 대비 상대강도는 약합니다.')
+        if overextension['penalty'] > 0:
+            notes.append(
+                f"D+5 과열 페널티 {overextension['penalty']:.1f}점 적용: "
+                f"Selection {score:.1f} → D5 {overextension['d5_score']:.1f}"
+            )
         entry_plan = contextual_entry_plan(ctx, decision, self.cfg['risk'], regime)
         return AnalysisResult(
             ticker=ticker,
@@ -117,6 +132,10 @@ class ChartAnalyzer:
             grade=grade,
             action=action,
             market_regime=regime,
+            d5_score=overextension['d5_score'],
+            d5_grade=overextension['d5_grade'],
+            overextension_penalty=overextension['penalty'],
+            overextension_components=overextension['components'],
             confluence_score=confluence_score,
             relative_strength_score=rs['score'],
             relative_strength_grade=rs['grade'],

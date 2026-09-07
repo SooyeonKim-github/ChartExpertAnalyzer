@@ -42,12 +42,40 @@ selection:
   max_candidates: 30
   reject_if_below_long_ma: false
   require_market_uptrend_for_pyramiding: true
+  # D+5 점수는 먼저 Range에서 검증하고, 검증 후 true로 전환한다.
+  rank_by_d5_score: false
+
+# KJB D+5 overextension penalty.
+# Raw Selection Score is preserved. d5_score is always calculated for
+# diagnostics/optimizer, while live Screen/Status remain unchanged until the
+# walk-forward validation confirms that the penalty thresholds are useful.
+overextension:
+  enabled: true
+  max_total_penalty: 20
+  selection:
+    threshold: 85
+    step: 5
+    penalty_per_step: 1.5
+    cap: 4.5
+  leader:
+    threshold: 85
+    step: 5
+    penalty_per_step: 2.0
+    cap: 6.0
+  relative_strength:
+    threshold: 90
+    step: 5
+    penalty_per_step: 2.0
+    cap: 6.0
+  chase_risk:
+    medium_penalty: 0.0
+    high_penalty: 4.0
 
 # KJB CONFIRMED V1 - D+5 short swing target.
-# Max thresholds default to 100 so existing screen behavior is preserved.
-# The D+5 walk-forward optimizer may recommend lower upper bounds to
-# reclassify overextended names as WATCH instead of CONFIRMED.
+# false = 현재 실전 Status 보존. run_d5_diagnostics.py는 별도로 d5_status를
+# 산출하고 optimizer 검증 후 true 전환한다.
 confirmation_v1:
+  use_d5_score: false
   selection_min: 70
   selection_max: 100
   timing_min: 72

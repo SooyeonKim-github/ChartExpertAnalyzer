@@ -1,0 +1,41 @@
+# KJB D+5 experimental/optimizer config.
+# This file intentionally contains only sections used by the D+5 diagnostics
+# and threshold optimizer. Live Screen continues to use config/default.yaml.
+
+overextension:
+  enabled: true
+  max_total_penalty: 20
+  selection:
+    threshold: 85
+    step: 5
+    penalty_per_step: 1.5
+    cap: 4.5
+  leader:
+    threshold: 85
+    step: 5
+    penalty_per_step: 2.0
+    cap: 6.0
+  relative_strength:
+    threshold: 90
+    step: 5
+    penalty_per_step: 2.0
+    cap: 6.0
+  chase_risk:
+    medium_penalty: 0.0
+    high_penalty: 4.0
+
+confirmation_v1:
+  use_d5_score: true
+  selection_min: 70
+  selection_max: 100
+  timing_min: 72
+  timing_max: 100
+  leader_min: 70
+  leader_max: 100
+  relative_strength_min: 40
+  relative_strength_max: 100
+  risk_max_exclusive: 60
+  reject_high_chase: true
+  watch_selection_min: 62
+  watch_technical_min: 62
+  watch_risk_max_exclusive: 65
