@@ -12,7 +12,7 @@ if not exist .venv\Scripts\python.exe (
 if errorlevel 1 goto :error
 
 echo.
-echo [KJB Threshold Optimizer]
+echo [KJB D+5 Threshold Optimizer]
 set /p RANGE_FILE=Range CSV path ^(Enter=latest^): 
 if "%RANGE_FILE%"=="" (
     .venv\Scripts\python.exe run_threshold_optimizer.py
@@ -25,6 +25,6 @@ exit /b 0
 
 :error
 echo.
-echo [ERROR] KJB threshold optimization failed.
+echo [ERROR] KJB D+5 threshold optimization failed.
 pause
 exit /b 1
