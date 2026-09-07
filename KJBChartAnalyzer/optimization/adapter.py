@@ -11,6 +11,7 @@ if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
 from ThresholdOptimization import BaseThresholdAdapter  # noqa: E402
+from chartsel.analysis.overextension import evaluate_overextension  # noqa: E402
 
 
 def _num(df: pd.DataFrame, column: str) -> pd.Series:
@@ -62,12 +63,34 @@ class KJBThresholdAdapter(BaseThresholdAdapter):
             "chase_risk",
         }
 
+    def _selection_series(self, df: pd.DataFrame) -> pd.Series:
+        c = self.analyzer_config.get("confirmation_v1", {}) or {}
+        if not bool(c.get("use_d5_score", True)):
+            return _num(df, "selection_score")
+        if "d5_score" in df.columns:
+            return _num(df, "d5_score")
+
+        over_cfg = self.analyzer_config.get("overextension", {}) or {}
+        values = []
+        for row in df.itertuples(index=False):
+            data = row._asdict()
+            over = evaluate_overextension(
+                selection_score=data.get("selection_score"),
+                leader_score=data.get("leader_score"),
+                relative_strength_score=data.get("relative_strength_score"),
+                chase_risk=data.get("chase_risk", ""),
+                cfg=over_cfg,
+            )
+            values.append(over["d5_score"])
+        return pd.Series(values, index=df.index, dtype=float)
+
     def select_mask(self, df: pd.DataFrame, params: dict[str, Any]) -> pd.Series:
         c = self.analyzer_config.get("confirmation_v1", {}) or {}
         reject_high_chase = bool(c.get("reject_high_chase", True))
+        selection = self._selection_series(df)
         mask = (
-            (_num(df, "selection_score") >= float(params["selection_min"]))
-            & (_num(df, "selection_score") <= float(params["selection_max"]))
+            (selection >= float(params["selection_min"]))
+            & (selection <= float(params["selection_max"]))
             & (_num(df, "timing_score") >= float(params["timing_min"]))
             & (_num(df, "timing_score") <= float(params["timing_max"]))
             & (_num(df, "leader_score") >= float(params["leader_min"]))
