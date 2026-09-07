@@ -10,7 +10,7 @@ import pandas as pd
 import yaml
 
 from .base import BaseThresholdAdapter
-from .objective import add_fold_objective, performance_metrics
+from .objective import add_fold_objective, leadership_metrics, performance_metrics
 from .walk_forward import PurgedWalkForwardSplitter
 
 
@@ -90,13 +90,23 @@ class ThresholdOptimizer:
         self.adapter = adapter
         self.config = optimizer_config or {}
         ocfg = self.config.get("optimizer", self.config)
+
+        self.objective_profile = str(
+            ocfg.get("objective_profile", "return_performance")
+        ).strip().lower()
         self.target_column = str(ocfg.get("target_column", "D+20"))
         self.mae_column = str(ocfg.get("mae_column", "MAE_D20"))
         self.excursion_column = str(ocfg.get("excursion_column", "excursion_ratio_D20"))
+        self.leadership_validity_column = str(
+            ocfg.get("leadership_validity_column", "leadership_valid_10d")
+        )
+
         self.min_samples = int(ocfg.get("min_samples", 30))
         self.min_unique_dates = int(ocfg.get("min_unique_dates", 15))
         self.min_train_samples = int(ocfg.get("min_train_samples", self.min_samples))
-        self.min_train_unique_dates = int(ocfg.get("min_train_unique_dates", self.min_unique_dates))
+        self.min_train_unique_dates = int(
+            ocfg.get("min_train_unique_dates", self.min_unique_dates)
+        )
         self.min_valid_folds = int(ocfg.get("min_valid_folds", 2))
         self.train_top_k = int(ocfg.get("train_top_k", 50))
         self.top_n = int(ocfg.get("top_n", 50))
@@ -105,29 +115,87 @@ class ThresholdOptimizer:
         self.distance_penalty = float(ocfg.get("distance_penalty", 0.10))
         self.coverage_penalty = float(ocfg.get("coverage_penalty", 0.50))
 
-        # Confidence policy. Strict application eligibility is intentionally
-        # separated from whether a provisional diagnostic recommendation can be
-        # produced when the history is still too short.
-        self.allow_provisional_fallback = bool(ocfg.get("allow_provisional_fallback", True))
-        self.acceptable_min_fold_coverage = float(ocfg.get("acceptable_min_fold_coverage", 0.50))
-        self.robust_min_valid_folds = int(ocfg.get("robust_min_valid_folds", 3))
-        self.robust_min_fold_coverage = float(ocfg.get("robust_min_fold_coverage", 0.75))
-        self.robust_min_plateau_neighbors = int(ocfg.get("robust_min_plateau_neighbors", 2))
-        self.robust_max_plateau_drop = float(ocfg.get("robust_max_plateau_drop", 0.75))
-
-        self.objective_weights = dict(
-            ocfg.get(
-                "objective_weights",
-                {
-                    "median_return": 0.30,
-                    "win_rate": 0.20,
-                    "p25_return": 0.15,
-                    "mae_quality": 0.15,
-                    "excursion_ratio": 0.10,
-                    "sample_size": 0.10,
-                },
-            )
+        self.allow_provisional_fallback = bool(
+            ocfg.get("allow_provisional_fallback", True)
         )
+        self.acceptable_min_fold_coverage = float(
+            ocfg.get("acceptable_min_fold_coverage", 0.50)
+        )
+        self.robust_min_valid_folds = int(ocfg.get("robust_min_valid_folds", 3))
+        self.robust_min_fold_coverage = float(
+            ocfg.get("robust_min_fold_coverage", 0.75)
+        )
+        self.robust_min_plateau_neighbors = int(
+            ocfg.get("robust_min_plateau_neighbors", 2)
+        )
+        self.robust_max_plateau_drop = float(
+            ocfg.get("robust_max_plateau_drop", 0.75)
+        )
+
+        if self.objective_profile == "leadership_quality":
+            default_weights = {
+                "leader_retention": 0.30,
+                "market_rank_retention": 0.20,
+                "persistence_conversion": 0.15,
+                "turnover_retention": 0.15,
+                "sector_leadership": 0.10,
+                "false_leader_quality": 0.10,
+            }
+            self.objective_metric_map = {
+                "leader_retention": "leader_retention_5d",
+                "market_rank_retention": "market_top20_retention_5d",
+                "persistence_conversion": "persistence_conversion_10d_rate",
+                "turnover_retention": "turnover_top20_retention_5d",
+                "sector_leadership": "sector_leader_retention_5d",
+                "false_leader_quality": "false_leader_quality_5d",
+            }
+            self.aggregate_metric_names = [
+                "count",
+                "unique_dates",
+                "leader_retention_5d",
+                "market_top20_retention_5d",
+                "turnover_top20_retention_5d",
+                "persistence_conversion_10d_rate",
+                "sector_leader_retention_5d",
+                "sector_context_future_coverage_5d",
+                "false_leader_5d_rate",
+                "false_leader_quality_5d",
+                "avg_leadership_quality_score",
+                "diag_avg_D5",
+                "diag_avg_D20",
+                "diag_median_D20",
+                "diag_win_rate_D20",
+            ]
+        else:
+            default_weights = {
+                "median_return": 0.30,
+                "win_rate": 0.20,
+                "p25_return": 0.15,
+                "mae_quality": 0.15,
+                "excursion_ratio": 0.10,
+                "sample_size": 0.10,
+            }
+            self.objective_metric_map = {
+                "median_return": "median_return",
+                "win_rate": "win_rate",
+                "p25_return": "p25_return",
+                "mae_quality": "mae_quality",
+                "excursion_ratio": "avg_excursion_ratio",
+                "sample_size": "sample_size_score",
+            }
+            self.aggregate_metric_names = [
+                "count",
+                "unique_dates",
+                "avg_return",
+                "median_return",
+                "win_rate",
+                "p25_return",
+                "p75_return",
+                "avg_mae",
+                "avg_excursion_ratio",
+            ]
+
+        self.objective_weights = dict(ocfg.get("objective_weights", default_weights))
         self.splitter = PurgedWalkForwardSplitter(
             min_train_trading_days=int(ocfg.get("min_train_trading_days", 60)),
             validation_trading_days=int(ocfg.get("validation_trading_days", 40)),
@@ -138,13 +206,36 @@ class ThresholdOptimizer:
 
     def _prepare(self, df: pd.DataFrame) -> pd.DataFrame:
         self.adapter.validate_dataframe(df)
-        if self.target_column not in df.columns:
-            raise ValueError(f"optimizer target column missing: {self.target_column}")
         out = df.copy()
         out[self.adapter.date_column] = _parse_date_series(out[self.adapter.date_column])
         out = out[out[self.adapter.date_column].notna()].copy()
-        out[self.target_column] = pd.to_numeric(out[self.target_column], errors="coerce")
+
+        if self.objective_profile == "leadership_quality":
+            if self.leadership_validity_column not in out.columns:
+                raise ValueError(
+                    f"leadership optimizer validity column missing: {self.leadership_validity_column}"
+                )
+        else:
+            if self.target_column not in out.columns:
+                raise ValueError(f"optimizer target column missing: {self.target_column}")
+            out[self.target_column] = pd.to_numeric(out[self.target_column], errors="coerce")
+
         return out.sort_values(self.adapter.date_column).reset_index(drop=True)
+
+    def _metrics(self, selected: pd.DataFrame) -> dict[str, float | int | None]:
+        if self.objective_profile == "leadership_quality":
+            return leadership_metrics(
+                selected,
+                validity_column=self.leadership_validity_column,
+                date_column=self.adapter.date_column,
+            )
+        return performance_metrics(
+            selected,
+            target_column=self.target_column,
+            mae_column=self.mae_column,
+            excursion_column=self.excursion_column,
+            date_column=self.adapter.date_column,
+        )
 
     def _grid(self, space: dict[str, list[Any]]) -> list[dict[str, Any]]:
         names = list(space)
@@ -155,7 +246,9 @@ class ThresholdOptimizer:
             if self.adapter.validate_parameters(params):
                 rows.append(params)
         if not rows:
-            raise ValueError(f"{self.adapter.analyzer_name}/{self.adapter.phase}: empty valid search grid")
+            raise ValueError(
+                f"{self.adapter.analyzer_name}/{self.adapter.phase}: empty valid search grid"
+            )
         return rows
 
     def _fold_table(self, folds) -> pd.DataFrame:
@@ -191,22 +284,22 @@ class ThresholdOptimizer:
                 frame.index, fill_value=False
             ).fillna(False).astype(bool)
             selected = frame[mask].copy()
-            metrics = performance_metrics(
-                selected,
-                target_column=self.target_column,
-                mae_column=self.mae_column,
-                excursion_column=self.excursion_column,
-                date_column=self.adapter.date_column,
-            )
+            metrics = self._metrics(selected)
             sample_valid = (
                 int(metrics["count"] or 0) >= min_samples
                 and int(metrics["unique_dates"] or 0) >= min_unique_dates
             )
             rows.append({**params, **metrics, "sample_valid": sample_valid})
-        return add_fold_objective(pd.DataFrame(rows), self.objective_weights)
+        return add_fold_objective(
+            pd.DataFrame(rows),
+            self.objective_weights,
+            metric_map=self.objective_metric_map,
+        )
 
     @staticmethod
-    def _prefix_non_params(frame: pd.DataFrame, param_cols: list[str], prefix: str) -> pd.DataFrame:
+    def _prefix_non_params(
+        frame: pd.DataFrame, param_cols: list[str], prefix: str
+    ) -> pd.DataFrame:
         rename = {c: f"{prefix}{c}" for c in frame.columns if c not in param_cols}
         return frame.rename(columns=rename)
 
@@ -245,7 +338,9 @@ class ThresholdOptimizer:
         }
 
         train_eval = self._prefix_non_params(train_eval, param_cols, "train_")
-        validation_eval = self._prefix_non_params(validation_eval, param_cols, "validation_")
+        validation_eval = self._prefix_non_params(
+            validation_eval, param_cols, "validation_"
+        )
         merged = train_eval.merge(validation_eval, on=param_cols, how="outer")
         merged["train_selected"] = merged.apply(
             lambda row: tuple(row[c] for c in param_cols) in selected_keys,
@@ -283,9 +378,6 @@ class ThresholdOptimizer:
             coverage = valid_folds / total_folds if total_folds else 0.0
             mean_obj = float(objectives.mean()) if not objectives.empty else np.nan
             std_obj = float(objectives.std(ddof=0)) if not objectives.empty else np.nan
-
-            # Compute a score even for one-fold candidates so they can still be
-            # surfaced as PROVISIONAL diagnostics. Eligibility is decided later.
             robust = (
                 mean_obj
                 - self.std_penalty * std_obj
@@ -303,22 +395,14 @@ class ThresholdOptimizer:
                 "robust_score": robust,
                 "current_distance": self.adapter.parameter_distance(params, space),
             }
-            for metric in (
-                "count",
-                "unique_dates",
-                "avg_return",
-                "median_return",
-                "win_rate",
-                "p25_return",
-                "p75_return",
-                "avg_mae",
-                "avg_excursion_ratio",
-            ):
+            for metric in self.aggregate_metric_names:
                 column = f"validation_{metric}"
                 vals = pd.to_numeric(
                     valid.get(column, pd.Series(dtype=float)), errors="coerce"
                 ).dropna()
-                row[f"mean_{metric}"] = float(vals.mean()) if not vals.empty else np.nan
+                row[f"mean_{metric}"] = (
+                    float(vals.mean()) if not vals.empty else np.nan
+                )
             rows.append(row)
 
         out = self._add_plateau(pd.DataFrame(rows), space)
@@ -353,7 +437,9 @@ class ThresholdOptimizer:
             return "ACCEPTABLE"
         return "PROVISIONAL"
 
-    def _add_plateau(self, trials: pd.DataFrame, space: dict[str, list[Any]]) -> pd.DataFrame:
+    def _add_plateau(
+        self, trials: pd.DataFrame, space: dict[str, list[Any]]
+    ) -> pd.DataFrame:
         out = trials.copy()
         if out.empty:
             return out
@@ -437,16 +523,11 @@ class ThresholdOptimizer:
             mask = self.adapter.select_mask(eval_frame, params).reindex(
                 eval_frame.index, fill_value=False
             ).fillna(False).astype(bool)
-            metrics = performance_metrics(
-                eval_frame[mask],
-                target_column=self.target_column,
-                mae_column=self.mae_column,
-                excursion_column=self.excursion_column,
-                date_column=self.adapter.date_column,
-            )
+            metrics = self._metrics(eval_frame[mask])
             rows.append(
                 {
                     "config": label,
+                    "objective_profile": self.objective_profile,
                     "recommendation_quality": quality,
                     "eligible_for_application": bool(eligible),
                     **params,
@@ -491,8 +572,7 @@ class ThresholdOptimizer:
         used_provisional_fallback = False
         if strict.empty:
             provisional = trials[
-                trials["final_score"].notna()
-                & (trials["valid_folds"] >= 1)
+                trials["final_score"].notna() & (trials["valid_folds"] >= 1)
             ].copy()
             if not self.allow_provisional_fallback or provisional.empty:
                 raise ValueError(
@@ -540,12 +620,17 @@ class ThresholdOptimizer:
         diagnostics = {
             "analyzer": self.adapter.analyzer_name,
             "phase": self.adapter.phase,
+            "objective_profile": self.objective_profile,
             "total_walk_forward_folds": len(folds),
             "required_valid_folds": self.min_valid_folds,
             "best_valid_folds": int(best.get("valid_folds", 0) or 0),
             "best_fold_coverage": float(best.get("fold_coverage", 0.0) or 0.0),
-            "best_std_validation_objective": _native(best.get("std_validation_objective")),
-            "best_plateau_neighbor_count": int(best.get("plateau_neighbor_count", 0) or 0),
+            "best_std_validation_objective": _native(
+                best.get("std_validation_objective")
+            ),
+            "best_plateau_neighbor_count": int(
+                best.get("plateau_neighbor_count", 0) or 0
+            ),
             "best_plateau_drop": _native(best.get("plateau_drop")),
             "used_provisional_fallback": used_provisional_fallback,
             "min_validation_fraction": self.splitter.min_validation_fraction,
