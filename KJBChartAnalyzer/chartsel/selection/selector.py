@@ -24,10 +24,23 @@ class StockSelector:
         self.last_analysis: dict[str, tuple[pd.DataFrame, object]] = {}
 
     def _row_from_result(self, r, meta=None) -> dict:
+        c = getattr(r, 'overextension_components', {}) or {}
         row = {
             'ticker': r.ticker, 'asof': r.asof, 'close': r.close,
             'Status': classify_confirmation_v1(r, self.cfg),
-            'score': r.total_score, 'grade': r.grade,
+            # KJB의 실전 최종 score는 D+5 목적 점수로 사용한다.
+            # 기존 Selection Score는 raw_selection_score로 별도 보존한다.
+            'score': getattr(r, 'd5_score', r.total_score),
+            'grade': getattr(r, 'd5_grade', r.grade),
+            'raw_selection_score': r.total_score,
+            'raw_selection_grade': r.grade,
+            'd5_score': getattr(r, 'd5_score', r.total_score),
+            'd5_grade': getattr(r, 'd5_grade', r.grade),
+            'overextension_penalty': getattr(r, 'overextension_penalty', 0.0),
+            'overext_selection': c.get('selection', 0.0),
+            'overext_leader': c.get('leader', 0.0),
+            'overext_relative_strength': c.get('relative_strength', 0.0),
+            'overext_chase': c.get('chase', 0.0),
             'technical_score': r.technical_score, 'technical_grade': r.technical_grade,
             'timing_score': r.timing_score, 'timing_grade': r.timing_grade,
             'risk_score': r.risk_score, 'risk_level': r.risk_level,
@@ -57,7 +70,7 @@ class StockSelector:
         if table.empty:
             return table
         table = table.sort_values(
-            ['leader_score', 'score', 'timing_score', 'technical_score', 'risk_score'],
+            ['d5_score', 'timing_score', 'leader_score', 'technical_score', 'risk_score'],
             ascending=[False, False, False, False, True],
         )
         if limit is None:
@@ -114,8 +127,9 @@ class StockSelector:
                 rows.append(row)
                 self.last_analysis[str(ticker)] = (df, r)
                 logger.info(
-                    '[%d/%d] %s %s 분석 완료 | Selection %.1f | %s',
-                    idx, len(universe), ticker, info.name, r.total_score, row['Status']
+                    '[%d/%d] %s %s 분석 완료 | D5 %.1f / Raw %.1f | %s',
+                    idx, len(universe), ticker, info.name,
+                    getattr(r, 'd5_score', r.total_score), r.total_score, row['Status']
                 )
             except Exception as exc:
                 errors.append((ticker, str(exc)))
