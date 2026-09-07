@@ -1,43 +1,84 @@
-# MaterialThresholdOptimizer V1
+# MaterialQualityOptimizer V1
 
-MaterialBacktester 결과를 사용해 **후보 점수 보정값과 STRONG/CONFIRMED/WATCH threshold를 탐색**합니다.
+`MaterialAnalyzer`의 목적은 **수익률이 높은 종목을 찾는 것**이 아니라 **시장에서 주목할 만한 재료를 놓치지 않고, 반복/행정성 노이즈를 줄이는 것**입니다.
 
-중요 원칙:
+따라서 기존 forward-return 기반 `MaterialThresholdOptimizer`는 폐기하고, derived pipeline의 품질을 직접 감사하는 `MaterialQualityOptimizer`로 개편합니다.
 
-- MaterialScorer 설정을 자동으로 덮어쓰지 않습니다.
-- 결과는 `baseline vs optimized_candidate` 검증용입니다.
-- 같은 종목/같은 날 여러 공시는 inverse ticker-day weight로 과대반영을 줄입니다.
-- Event Type, Novelty, Relation, Polarity, Quantification 효과는 train 구간에서만 학습합니다.
-- 표본이 작은 그룹은 shrinkage + min-sample guard를 적용합니다.
-- 기본 분할은 날짜 기준 앞 80% train / 뒤 20% validation입니다.
-- 장기 검증에서는 `--train-end 20251231 --validation-start 20260101` 같은 명시적 분할을 권장합니다.
+## 핵심 원칙
+
+- D+5/D+20 수익률은 optimizer objective에 사용하지 않습니다.
+- POSITIVE/NEGATIVE는 방향성이고 material importance와 분리합니다.
+- 핵심 Event Type 누락률, UNKNOWN 비율, routine 과대승격, ticker direct-link coverage, unresolved rate, source coverage를 평가합니다.
+- threshold 후보는 taxonomy quality 관점의 참고값일 뿐 자동 적용하지 않습니다.
+- `apply_automatically=false`를 유지합니다.
+- MaterialBacktester는 별도의 **사후 시장반응 진단기**로 남습니다.
+
+## Material Score V2 배점
+
+```text
+Event Importance       30
+Certainty              20
+Directness             15
+Scale / Quantification 15
+Novelty                10
+Source Reliability      5
+Multi-source Confirm    5
+                       ---
+                       100
+```
+
+Material Score가 높다는 것은 "오를 가능성이 높다"가 아니라 "시장 참가자가 확인할 가치가 큰 재료"라는 뜻입니다.
+
+## Quality Guardrails
+
+기본적으로 다음을 확인합니다.
+
+```text
+UNKNOWN rate                  <= 20%
+Core event below WATCH rate   <= 10%
+High event below CONFIRMED    <= 25%
+Direct ticker link coverage   >= 95%
+Unresolved event rate         <= 5%
+Routine promoted rate         <= 2%
+Source coverage OK rate       >= 90%
+```
+
+Guardrail은 자동 production 설정이 아니라 품질 경고 기준입니다.
 
 ## 실행
+
+먼저 최신 derived 결과가 필요합니다.
+
+```bat
+MaterialAnalyzer\run_material_range.bat --date-range 20260101~20260630 --derive-only
+```
+
+그 다음:
 
 ```bat
 MaterialAnalyzer\run_material_optimizer.bat
 ```
 
-명시적 검증 구간:
-
-```bat
-MaterialAnalyzer\run_material_optimizer.bat --train-end 20251231 --validation-start 20260101 --min-sample 100
-```
-
-입력:
+입력은 아래 historical derived report입니다.
 
 ```text
-MaterialAnalyzer\data\history\backtest\material_backtest_results.csv
+MaterialAnalyzer\data\history\event_report.csv
+MaterialAnalyzer\data\history\material_score_report.csv
+MaterialAnalyzer\data\history\ticker_link_report.csv
+MaterialAnalyzer\data\history\ticker_link_unresolved.csv
+MaterialAnalyzer\data\history\historical_source_coverage.csv
 ```
 
-출력:
+`material_backtest_results.csv`는 읽지 않습니다.
+
+## 출력
 
 ```text
-MaterialAnalyzer\data\history\optimizer\material_optimizer_scored.csv
-MaterialAnalyzer\data\history\optimizer\material_optimizer_weights.csv
-MaterialAnalyzer\data\history\optimizer\material_optimizer_candidates.csv
-MaterialAnalyzer\data\history\optimizer\material_optimizer_validation.csv
-MaterialAnalyzer\data\history\optimizer\material_optimizer_recommendation.json
+MaterialAnalyzer\data\history\quality_optimizer\material_quality_metrics.csv
+MaterialAnalyzer\data\history\quality_optimizer\material_quality_event_types.csv
+MaterialAnalyzer\data\history\quality_optimizer\material_quality_threshold_candidates.csv
+MaterialAnalyzer\data\history\quality_optimizer\material_quality_threshold_comparison.csv
+MaterialAnalyzer\data\history\quality_optimizer\material_quality_recommendation.json
 ```
 
-`material_optimizer_recommendation.json`의 `apply_automatically`는 항상 `false`입니다. 후보가 validation에서 좋아도 충분한 장기 out-of-sample 검증 전에는 MaterialScorer에 반영하지 않습니다.
+`material_quality_recommendation.json`에는 `uses_forward_returns=false`, `apply_automatically=false`가 기록됩니다.
