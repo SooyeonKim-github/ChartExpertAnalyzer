@@ -39,6 +39,9 @@ def _parse_date_series(series: pd.Series) -> pd.Series:
 class OptimizationResult:
     recommended_params: dict[str, Any]
     recommended_config: dict[str, Any]
+    recommendation_quality: str
+    eligible_for_application: bool
+    recommendation_diagnostics: dict[str, Any]
     all_trials: pd.DataFrame
     fold_results: pd.DataFrame
     folds: pd.DataFrame
@@ -57,6 +60,7 @@ class OptimizationResult:
             "stability_report": root / "stability_report.csv",
             "current_vs_optimized": root / "current_vs_optimized.csv",
             "recommended_thresholds": root / "recommended_thresholds.yaml",
+            "recommendation_summary": root / "recommendation_summary.yaml",
         }
         self.all_trials.to_csv(files["all_trials"], index=False, encoding="utf-8-sig")
         self.fold_results.to_csv(files["fold_results"], index=False, encoding="utf-8-sig")
@@ -66,6 +70,16 @@ class OptimizationResult:
         self.current_vs_optimized.to_csv(files["current_vs_optimized"], index=False, encoding="utf-8-sig")
         files["recommended_thresholds"].write_text(
             yaml.safe_dump(_native(self.recommended_config), allow_unicode=True, sort_keys=False),
+            encoding="utf-8",
+        )
+        summary = {
+            "recommendation_quality": self.recommendation_quality,
+            "eligible_for_application": bool(self.eligible_for_application),
+            "recommended_params": _native(self.recommended_params),
+            "diagnostics": _native(self.recommendation_diagnostics),
+        }
+        files["recommendation_summary"].write_text(
+            yaml.safe_dump(summary, allow_unicode=True, sort_keys=False),
             encoding="utf-8",
         )
         return files
@@ -83,13 +97,24 @@ class ThresholdOptimizer:
         self.min_unique_dates = int(ocfg.get("min_unique_dates", 15))
         self.min_train_samples = int(ocfg.get("min_train_samples", self.min_samples))
         self.min_train_unique_dates = int(ocfg.get("min_train_unique_dates", self.min_unique_dates))
-        self.min_valid_folds = int(ocfg.get("min_valid_folds", 1))
+        self.min_valid_folds = int(ocfg.get("min_valid_folds", 2))
         self.train_top_k = int(ocfg.get("train_top_k", 50))
         self.top_n = int(ocfg.get("top_n", 50))
         self.std_penalty = float(ocfg.get("robustness_std_penalty", 0.50))
         self.plateau_penalty = float(ocfg.get("plateau_penalty", 0.20))
         self.distance_penalty = float(ocfg.get("distance_penalty", 0.10))
         self.coverage_penalty = float(ocfg.get("coverage_penalty", 0.50))
+
+        # Confidence policy. Strict application eligibility is intentionally
+        # separated from whether a provisional diagnostic recommendation can be
+        # produced when the history is still too short.
+        self.allow_provisional_fallback = bool(ocfg.get("allow_provisional_fallback", True))
+        self.acceptable_min_fold_coverage = float(ocfg.get("acceptable_min_fold_coverage", 0.50))
+        self.robust_min_valid_folds = int(ocfg.get("robust_min_valid_folds", 3))
+        self.robust_min_fold_coverage = float(ocfg.get("robust_min_fold_coverage", 0.75))
+        self.robust_min_plateau_neighbors = int(ocfg.get("robust_min_plateau_neighbors", 2))
+        self.robust_max_plateau_drop = float(ocfg.get("robust_max_plateau_drop", 0.75))
+
         self.objective_weights = dict(
             ocfg.get(
                 "objective_weights",
@@ -108,6 +133,7 @@ class ThresholdOptimizer:
             validation_trading_days=int(ocfg.get("validation_trading_days", 40)),
             step_trading_days=int(ocfg.get("step_trading_days", 40)),
             purge_trading_days=int(ocfg.get("purge_trading_days", 20)),
+            min_validation_fraction=float(ocfg.get("min_validation_fraction", 0.75)),
         )
 
     def _prepare(self, df: pd.DataFrame) -> pd.DataFrame:
@@ -144,6 +170,8 @@ class ThresholdOptimizer:
                     "validation_end": fold.validation_end.date(),
                     "train_trading_days": len(fold.train_dates),
                     "validation_trading_days": len(fold.validation_dates),
+                    "planned_validation_days": fold.planned_validation_days,
+                    "validation_fraction": round(fold.validation_fraction, 4),
                 }
                 for fold in folds
             ]
@@ -159,7 +187,9 @@ class ThresholdOptimizer:
     ) -> pd.DataFrame:
         rows: list[dict[str, Any]] = []
         for params in grid:
-            mask = self.adapter.select_mask(frame, params).reindex(frame.index, fill_value=False).fillna(False).astype(bool)
+            mask = self.adapter.select_mask(frame, params).reindex(
+                frame.index, fill_value=False
+            ).fillna(False).astype(bool)
             selected = frame[mask].copy()
             metrics = performance_metrics(
                 selected,
@@ -180,9 +210,17 @@ class ThresholdOptimizer:
         rename = {c: f"{prefix}{c}" for c in frame.columns if c not in param_cols}
         return frame.rename(columns=rename)
 
-    def _evaluate_fold(self, frame: pd.DataFrame, fold, grid: list[dict[str, Any]], param_cols: list[str]) -> pd.DataFrame:
+    def _evaluate_fold(
+        self,
+        frame: pd.DataFrame,
+        fold,
+        grid: list[dict[str, Any]],
+        param_cols: list[str],
+    ) -> pd.DataFrame:
         train = frame[frame[self.adapter.date_column].isin(set(fold.train_dates))].copy()
-        validation = frame[frame[self.adapter.date_column].isin(set(fold.validation_dates))].copy()
+        validation = frame[
+            frame[self.adapter.date_column].isin(set(fold.validation_dates))
+        ].copy()
 
         train_eval = self._evaluate_grid(
             train,
@@ -218,9 +256,15 @@ class ThresholdOptimizer:
         merged["train_end"] = fold.train_end
         merged["validation_start"] = fold.validation_start
         merged["validation_end"] = fold.validation_end
+        merged["validation_fraction"] = fold.validation_fraction
         return merged
 
-    def _aggregate(self, fold_results: pd.DataFrame, space: dict[str, list[Any]], total_folds: int) -> pd.DataFrame:
+    def _aggregate(
+        self,
+        fold_results: pd.DataFrame,
+        space: dict[str, list[Any]],
+        total_folds: int,
+    ) -> pd.DataFrame:
         param_cols = list(space)
         rows: list[dict[str, Any]] = []
         for keys, grp in fold_results.groupby(param_cols, dropna=False, sort=False):
@@ -232,14 +276,21 @@ class ThresholdOptimizer:
                 & grp["validation_sample_valid"].fillna(False).astype(bool)
                 & grp["validation_objective_score"].notna()
             ].copy()
-            objectives = pd.to_numeric(valid["validation_objective_score"], errors="coerce").dropna()
+            objectives = pd.to_numeric(
+                valid["validation_objective_score"], errors="coerce"
+            ).dropna()
             valid_folds = int(len(objectives))
             coverage = valid_folds / total_folds if total_folds else 0.0
             mean_obj = float(objectives.mean()) if not objectives.empty else np.nan
             std_obj = float(objectives.std(ddof=0)) if not objectives.empty else np.nan
+
+            # Compute a score even for one-fold candidates so they can still be
+            # surfaced as PROVISIONAL diagnostics. Eligibility is decided later.
             robust = (
-                mean_obj - self.std_penalty * std_obj - self.coverage_penalty * (1.0 - coverage)
-                if valid_folds >= self.min_valid_folds and np.isfinite(mean_obj)
+                mean_obj
+                - self.std_penalty * std_obj
+                - self.coverage_penalty * (1.0 - coverage)
+                if valid_folds >= 1 and np.isfinite(mean_obj)
                 else np.nan
             )
             row: dict[str, Any] = {
@@ -253,17 +304,59 @@ class ThresholdOptimizer:
                 "current_distance": self.adapter.parameter_distance(params, space),
             }
             for metric in (
-                "count", "unique_dates", "avg_return", "median_return", "win_rate",
-                "p25_return", "p75_return", "avg_mae", "avg_excursion_ratio",
+                "count",
+                "unique_dates",
+                "avg_return",
+                "median_return",
+                "win_rate",
+                "p25_return",
+                "p75_return",
+                "avg_mae",
+                "avg_excursion_ratio",
             ):
                 column = f"validation_{metric}"
-                vals = pd.to_numeric(valid.get(column, pd.Series(dtype=float)), errors="coerce").dropna()
+                vals = pd.to_numeric(
+                    valid.get(column, pd.Series(dtype=float)), errors="coerce"
+                ).dropna()
                 row[f"mean_{metric}"] = float(vals.mean()) if not vals.empty else np.nan
             rows.append(row)
-        return self._add_plateau(pd.DataFrame(rows), space)
+
+        out = self._add_plateau(pd.DataFrame(rows), space)
+        if out.empty:
+            return out
+        out["recommendation_quality"] = out.apply(self._grade_trial, axis=1)
+        out["eligible_for_application"] = out["recommendation_quality"].isin(
+            ["ACCEPTABLE", "ROBUST"]
+        )
+        return out
+
+    def _grade_trial(self, row: pd.Series) -> str:
+        valid_folds = int(row.get("valid_folds", 0) or 0)
+        coverage = float(row.get("fold_coverage", 0.0) or 0.0)
+        neighbors = int(row.get("plateau_neighbor_count", 0) or 0)
+        drop = pd.to_numeric(
+            pd.Series([row.get("plateau_drop")]), errors="coerce"
+        ).iloc[0]
+        drop = float(drop) if pd.notna(drop) else float("inf")
+
+        if (
+            valid_folds >= self.robust_min_valid_folds
+            and coverage >= self.robust_min_fold_coverage
+            and neighbors >= self.robust_min_plateau_neighbors
+            and drop <= self.robust_max_plateau_drop
+        ):
+            return "ROBUST"
+        if (
+            valid_folds >= self.min_valid_folds
+            and coverage >= self.acceptable_min_fold_coverage
+        ):
+            return "ACCEPTABLE"
+        return "PROVISIONAL"
 
     def _add_plateau(self, trials: pd.DataFrame, space: dict[str, list[Any]]) -> pd.DataFrame:
         out = trials.copy()
+        if out.empty:
+            return out
         param_cols = list(space)
         lookup = {tuple(row[c] for c in param_cols): idx for idx, row in out.iterrows()}
         neighbor_counts: list[int] = []
@@ -272,7 +365,9 @@ class ThresholdOptimizer:
         final_scores: list[float] = []
 
         for _, row in out.iterrows():
-            robust = pd.to_numeric(pd.Series([row.get("robust_score")]), errors="coerce").iloc[0]
+            robust = pd.to_numeric(
+                pd.Series([row.get("robust_score")]), errors="coerce"
+            ).iloc[0]
             neighbors: list[float] = []
             base = [row[c] for c in param_cols]
             for pos, name in enumerate(param_cols):
@@ -290,13 +385,25 @@ class ThresholdOptimizer:
                     idx = lookup.get(tuple(key))
                     if idx is None:
                         continue
-                    nscore = pd.to_numeric(pd.Series([out.loc[idx, "robust_score"]]), errors="coerce").iloc[0]
+                    nscore = pd.to_numeric(
+                        pd.Series([out.loc[idx, "robust_score"]]), errors="coerce"
+                    ).iloc[0]
                     if pd.notna(nscore):
                         neighbors.append(float(nscore))
             neighbor_mean = float(np.mean(neighbors)) if neighbors else np.nan
-            drop = max(0.0, float(robust) - neighbor_mean) if pd.notna(robust) and np.isfinite(neighbor_mean) else 0.0
+            drop = (
+                max(0.0, float(robust) - neighbor_mean)
+                if pd.notna(robust) and np.isfinite(neighbor_mean)
+                else 0.0
+            )
             distance = float(row.get("current_distance", 0.0) or 0.0)
-            final = float(robust) - self.plateau_penalty * drop - self.distance_penalty * distance if pd.notna(robust) else np.nan
+            final = (
+                float(robust)
+                - self.plateau_penalty * drop
+                - self.distance_penalty * distance
+                if pd.notna(robust)
+                else np.nan
+            )
             neighbor_counts.append(len(neighbors))
             neighbor_means.append(neighbor_mean)
             plateau_drops.append(drop)
@@ -305,9 +412,19 @@ class ThresholdOptimizer:
         out["plateau_neighbor_mean"] = neighbor_means
         out["plateau_drop"] = plateau_drops
         out["final_score"] = final_scores
-        return out.sort_values("final_score", ascending=False, na_position="last").reset_index(drop=True)
+        return out.sort_values(
+            "final_score", ascending=False, na_position="last"
+        ).reset_index(drop=True)
 
-    def _comparison(self, frame: pd.DataFrame, folds, recommended: dict[str, Any]) -> pd.DataFrame:
+    def _comparison(
+        self,
+        frame: pd.DataFrame,
+        folds,
+        recommended: dict[str, Any],
+        *,
+        quality: str,
+        eligible: bool,
+    ) -> pd.DataFrame:
         validation_dates: set[pd.Timestamp] = set()
         for fold in folds:
             validation_dates.update(fold.validation_dates)
@@ -317,7 +434,9 @@ class ThresholdOptimizer:
             ("CURRENT", self.adapter.current_parameters()),
             ("OPTIMIZED", recommended),
         ):
-            mask = self.adapter.select_mask(eval_frame, params).reindex(eval_frame.index, fill_value=False).fillna(False).astype(bool)
+            mask = self.adapter.select_mask(eval_frame, params).reindex(
+                eval_frame.index, fill_value=False
+            ).fillna(False).astype(bool)
             metrics = performance_metrics(
                 eval_frame[mask],
                 target_column=self.target_column,
@@ -325,7 +444,15 @@ class ThresholdOptimizer:
                 excursion_column=self.excursion_column,
                 date_column=self.adapter.date_column,
             )
-            rows.append({"config": label, **params, **metrics})
+            rows.append(
+                {
+                    "config": label,
+                    "recommendation_quality": quality,
+                    "eligible_for_application": bool(eligible),
+                    **params,
+                    **metrics,
+                }
+            )
         return pd.DataFrame(rows)
 
     def run(self, df: pd.DataFrame) -> OptimizationResult:
@@ -333,37 +460,104 @@ class ThresholdOptimizer:
         folds = self.splitter.split(frame[self.adapter.date_column])
         if not folds:
             raise ValueError(
-                "No walk-forward fold could be created. Increase the range or reduce "
-                "min_train/validation/purge trading days in optimizer config."
+                "No walk-forward fold could be created after partial-fold filtering. "
+                "Increase the range or reduce min_train/validation/purge trading days."
             )
+
         space = self.adapter.parameter_space(self.config)
         grid = self._grid(space)
         param_cols = list(space)
-        fold_frames = [self._evaluate_fold(frame, fold, grid, param_cols) for fold in folds]
-        fold_results = pd.concat(fold_frames, ignore_index=True) if fold_frames else pd.DataFrame()
+        fold_frames = [
+            self._evaluate_fold(frame, fold, grid, param_cols) for fold in folds
+        ]
+        prepared_frames = [
+            f.dropna(axis=1, how="all") for f in fold_frames if not f.empty
+        ]
+        fold_results = (
+            pd.concat(prepared_frames, ignore_index=True)
+            if prepared_frames
+            else pd.DataFrame()
+        )
+        if fold_results.empty:
+            raise ValueError("Walk-forward evaluation produced no fold results.")
+
         trials = self._aggregate(fold_results, space, len(folds))
-        valid = trials[
+        strict = trials[
             trials["final_score"].notna()
             & (trials["valid_folds"] >= self.min_valid_folds)
+            & trials["eligible_for_application"].fillna(False).astype(bool)
         ].copy()
-        if valid.empty:
-            raise ValueError(
-                "No threshold combination passed train/validation sample requirements. "
-                "Use a longer range or relax optimizer sample constraints."
-            )
-        best = valid.iloc[0]
+
+        used_provisional_fallback = False
+        if strict.empty:
+            provisional = trials[
+                trials["final_score"].notna()
+                & (trials["valid_folds"] >= 1)
+            ].copy()
+            if not self.allow_provisional_fallback or provisional.empty:
+                raise ValueError(
+                    "No threshold combination passed the strict walk-forward evidence "
+                    "requirements and no provisional candidate is available. Use a longer "
+                    "range rather than relaxing application thresholds."
+                )
+            candidate_pool = provisional
+            used_provisional_fallback = True
+        else:
+            candidate_pool = strict
+
+        best = candidate_pool.iloc[0]
         recommended = {name: _native(best[name]) for name in space}
-        comparison = self._comparison(frame, folds, recommended)
-        top = valid.head(self.top_n).copy()
+        quality = str(best.get("recommendation_quality", "PROVISIONAL"))
+        eligible = bool(best.get("eligible_for_application", False)) and not used_provisional_fallback
+
+        comparison = self._comparison(
+            frame,
+            folds,
+            recommended,
+            quality=quality,
+            eligible=eligible,
+        )
+        top = candidate_pool.head(self.top_n).copy()
         stability_cols = list(space) + [
-            "valid_folds", "fold_coverage", "mean_validation_objective",
-            "std_validation_objective", "robust_score", "plateau_neighbor_count",
-            "plateau_neighbor_mean", "plateau_drop", "current_distance", "final_score",
+            "valid_folds",
+            "total_folds",
+            "fold_coverage",
+            "mean_validation_objective",
+            "std_validation_objective",
+            "robust_score",
+            "plateau_neighbor_count",
+            "plateau_neighbor_mean",
+            "plateau_drop",
+            "current_distance",
+            "final_score",
+            "recommendation_quality",
+            "eligible_for_application",
         ]
-        stability = valid[[c for c in stability_cols if c in valid.columns]].head(min(20, len(valid))).copy()
+        stability = candidate_pool[
+            [c for c in stability_cols if c in candidate_pool.columns]
+        ].head(min(20, len(candidate_pool))).copy()
+
+        diagnostics = {
+            "analyzer": self.adapter.analyzer_name,
+            "phase": self.adapter.phase,
+            "total_walk_forward_folds": len(folds),
+            "required_valid_folds": self.min_valid_folds,
+            "best_valid_folds": int(best.get("valid_folds", 0) or 0),
+            "best_fold_coverage": float(best.get("fold_coverage", 0.0) or 0.0),
+            "best_std_validation_objective": _native(best.get("std_validation_objective")),
+            "best_plateau_neighbor_count": int(best.get("plateau_neighbor_count", 0) or 0),
+            "best_plateau_drop": _native(best.get("plateau_drop")),
+            "used_provisional_fallback": used_provisional_fallback,
+            "min_validation_fraction": self.splitter.min_validation_fraction,
+            "min_validation_days": self.splitter.min_validation_days,
+        }
+
         return OptimizationResult(
             recommended_params=recommended,
             recommended_config=self.adapter.export_config(recommended),
+            recommendation_quality=quality,
+            eligible_for_application=eligible,
+            recommendation_diagnostics=diagnostics,
             all_trials=trials,
             fold_results=fold_results,
             folds=self._fold_table(folds),
