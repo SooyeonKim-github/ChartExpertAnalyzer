@@ -76,7 +76,6 @@ def _ensure_d5_path_metrics(df: pd.DataFrame) -> pd.DataFrame:
 def main() -> None:
     p = argparse.ArgumentParser(description="KJB D+5 purged walk-forward threshold optimizer")
     p.add_argument("--range-file")
-    # D+5 optimizer는 live default가 아니라 실험용 d5 config를 기본으로 사용한다.
     p.add_argument("--config", default="config/d5_diagnostics.yaml")
     p.add_argument("--optimizer-config", default="config/threshold_optimizer.yaml")
     p.add_argument("--out")
@@ -88,7 +87,12 @@ def main() -> None:
         _resolve(args.optimizer_config, BASE_DIR / "config/threshold_optimizer.yaml").read_text(encoding="utf-8")
     ) or {}
 
-    df = pd.read_csv(range_file, encoding="utf-8-sig", dtype={"ticker": str})
+    df = pd.read_csv(
+        range_file,
+        encoding="utf-8-sig",
+        dtype={"ticker": str},
+        low_memory=False,
+    )
     print(f"[INFO] optimizer input: {range_file}")
     df = _ensure_d5_path_metrics(df)
     out_dir = _resolve(args.out, range_file.parent / "optimizer_d5")
@@ -96,9 +100,24 @@ def main() -> None:
     adapter = KJBThresholdAdapter(phase="confirmed", analyzer_config=cfg)
     result = ThresholdOptimizer(adapter, optimizer_cfg).run(df)
     paths = result.write(out_dir / "confirmed")
-    result.current_vs_optimized.to_csv(out_dir / "current_vs_optimized.csv", index=False, encoding="utf-8-sig")
-    (out_dir / "recommended_thresholds.yaml").write_text(
-        yaml.safe_dump(result.recommended_config, allow_unicode=True, sort_keys=False),
+    result.current_vs_optimized.to_csv(
+        out_dir / "current_vs_optimized.csv", index=False, encoding="utf-8-sig"
+    )
+
+    eligible_path = out_dir / "recommended_thresholds.yaml"
+    provisional_path = out_dir / "provisional_thresholds.yaml"
+    if result.eligible_for_application:
+        eligible_payload = result.recommended_config
+        provisional_payload = {}
+    else:
+        eligible_payload = {}
+        provisional_payload = result.recommended_config
+    eligible_path.write_text(
+        yaml.safe_dump(eligible_payload, allow_unicode=True, sort_keys=False),
+        encoding="utf-8",
+    )
+    provisional_path.write_text(
+        yaml.safe_dump(provisional_payload, allow_unicode=True, sort_keys=False),
         encoding="utf-8",
     )
 
@@ -108,13 +127,17 @@ def main() -> None:
     print(f"Input : {range_file}")
     print(f"Output: {out_dir}")
     print("Target: D+5")
-    print("Score : D5 score (Selection - OverextensionPenalty)")
-    print("Path metrics: MFE_D5 / MAE_D5 / excursion_ratio_D5 (D+1..D+5 close path)")
-    print("Recommended:")
+    print("Candidate:")
     for key, value in result.recommended_params.items():
         print(f"  {key}: {value}")
-    print(f"Details: {paths['top_configs']}")
-    print("NOTE: recommendation is not applied to config/default.yaml automatically.")
+    print(f"Quality     : {result.recommendation_quality}")
+    print(f"Application : {'ELIGIBLE' if result.eligible_for_application else 'NOT ELIGIBLE'}")
+    print(f"Summary     : {paths['recommendation_summary']}")
+    if result.eligible_for_application:
+        print(f"Eligible config: {eligible_path}")
+    else:
+        print(f"Provisional only: {provisional_path}")
+    print("NOTE: only ACCEPTABLE/ROBUST recommendations are eligible for application.")
 
 
 if __name__ == "__main__":
