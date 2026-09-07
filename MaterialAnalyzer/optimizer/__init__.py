@@ -1,3 +1,12 @@
-from .material_threshold_optimizer import MaterialThresholdOptimizer, OptimizerRunResult
+from .material_quality_optimizer import MaterialQualityOptimizer, QualityOptimizerRunResult
 
-__all__ = ["MaterialThresholdOptimizer", "OptimizerRunResult"]
+# Backward-compatible import name. New code should use MaterialQualityOptimizer.
+MaterialThresholdOptimizer = MaterialQualityOptimizer
+OptimizerRunResult = QualityOptimizerRunResult
+
+__all__ = [
+    "MaterialQualityOptimizer",
+    "QualityOptimizerRunResult",
+    "MaterialThresholdOptimizer",
+    "OptimizerRunResult",
+]
