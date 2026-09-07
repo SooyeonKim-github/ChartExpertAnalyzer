@@ -36,9 +36,6 @@ def _latest_range_file() -> Path:
         raise FileNotFoundError(
             "No LeaderStockAnalyzer range_all_results.csv found. Run run_range.bat first."
         )
-    # Use the file that was actually generated/updated most recently. Sorting by
-    # range folder name first can incorrectly prefer a newer single-day range
-    # over a freshly generated long range.
     return max(candidates, key=lambda p: p.stat().st_mtime)
 
 
@@ -74,7 +71,6 @@ def _write_strong_insufficient_diagnostics(
     out_dir: Path,
     error: Exception,
 ) -> Path:
-    """Persist useful diagnostics instead of losing a successful CONFIRMED run."""
     strong_dir = out_dir / "strong"
     strong_dir.mkdir(parents=True, exist_ok=True)
 
@@ -107,15 +103,13 @@ def _write_strong_insufficient_diagnostics(
     current_valid = current_strong[current_strong["_d20_valid"]]
     note = (
         "STRONG threshold optimization was skipped because no parameter combination "
-        "passed the configured out-of-sample sample requirements.\n\n"
+        "had enough out-of-sample observations even for a provisional recommendation.\n\n"
         f"Reason: {error}\n\n"
         f"Current STRONG rows: {len(current_strong):,}\n"
         f"Current STRONG rows with valid D+20: {len(current_valid):,}\n"
         f"Current STRONG unique dates with valid D+20: "
         f"{current_valid['_scan_date'].nunique():,}\n\n"
-        "CONFIRMED optimization remains valid and its recommendation is preserved.\n"
-        "Do not relax STRONG sample constraints merely to force a result. "
-        "Prefer a longer historical range (ideally multiple market regimes).\n"
+        "Keep the current STRONG thresholds and use a longer historical Range.\n"
     )
     (strong_dir / "INSUFFICIENT_SAMPLE.txt").write_text(note, encoding="utf-8")
     return diag_path
@@ -131,9 +125,6 @@ def _run_phase(
     confirmed_floor: dict | None = None,
 ):
     phase_cfg = deepcopy(optimizer_cfg)
-    # LeaderStockAnalyzer currently uses one shared max_confirmed_chase_risk for
-    # CONFIRMED and STRONG_CONFIRMED. In a two-phase run, keep that threshold
-    # identical instead of producing contradictory recommendations.
     if phase == "strong" and confirmed_floor is not None:
         strong_space = phase_cfg.setdefault("search_space", {}).setdefault("strong", {})
         strong_space["max_chase_risk"] = [float(confirmed_floor["max_chase_risk"])]
@@ -146,11 +137,21 @@ def _run_phase(
     optimizer = ThresholdOptimizer(adapter, phase_cfg)
     result = optimizer.run(df)
     paths = result.write(out_dir / phase)
-    print(f"\n[{phase.upper()}] recommended")
+
+    print(f"\n[{phase.upper()}] candidate")
     for key, value in result.recommended_params.items():
         print(f"  {key}: {value}")
-    print(f"  -> {paths['recommended_thresholds']}")
+    print(f"  quality     : {result.recommendation_quality}")
+    print(f"  application : {'ELIGIBLE' if result.eligible_for_application else 'NOT ELIGIBLE'}")
+    print(f"  summary     : {paths['recommendation_summary']}")
     return result
+
+
+def _current_confirmed_floor(analyzer_cfg: dict) -> dict:
+    return LeaderThresholdAdapter(
+        phase="confirmed",
+        analyzer_config=analyzer_cfg,
+    ).current_parameters()
 
 
 def main() -> None:
@@ -192,7 +193,13 @@ def main() -> None:
         )
 
     if args.phase in {"strong", "both"}:
-        floor = confirmed_result.recommended_params if confirmed_result is not None else None
+        # Never let a PROVISIONAL confirmed recommendation redefine the STRONG
+        # search floor. Use the current production confirmed thresholds until the
+        # confirmed recommendation is application-eligible.
+        if confirmed_result is not None and confirmed_result.eligible_for_application:
+            floor = confirmed_result.recommended_params
+        else:
+            floor = _current_confirmed_floor(analyzer_cfg)
         try:
             strong_result = _run_phase(
                 "strong",
@@ -207,29 +214,37 @@ def main() -> None:
                 raise
             strong_skip_error = exc
             diag = _write_strong_insufficient_diagnostics(df, out_dir, exc)
-            print("\n[STRONG] optimization skipped: insufficient out-of-sample sample")
+            print("\n[STRONG] optimization skipped: insufficient OOS sample")
             print(f"  reason     : {exc}")
             print(f"  diagnostics: {diag}")
-            print("  action     : keep current STRONG thresholds; use a longer Range before optimizing STRONG")
+            print("  action     : keep current STRONG thresholds and extend the historical Range")
 
-    combined: dict = {}
+    eligible_config: dict = {}
+    provisional_config: dict = {}
     summary_rows: list[pd.DataFrame] = []
-    if confirmed_result is not None:
-        combined = _deep_merge(combined, confirmed_result.recommended_config)
-        tmp = confirmed_result.current_vs_optimized.copy()
-        tmp.insert(0, "phase", "confirmed")
-        summary_rows.append(tmp)
-    if strong_result is not None:
-        combined = _deep_merge(combined, strong_result.recommended_config)
-        tmp = strong_result.current_vs_optimized.copy()
-        tmp.insert(0, "phase", "strong")
+
+    for phase_name, result in (("confirmed", confirmed_result), ("strong", strong_result)):
+        if result is None:
+            continue
+        if result.eligible_for_application:
+            eligible_config = _deep_merge(eligible_config, result.recommended_config)
+        else:
+            provisional_config = _deep_merge(provisional_config, result.recommended_config)
+        tmp = result.current_vs_optimized.copy()
+        tmp.insert(0, "phase", phase_name)
         summary_rows.append(tmp)
 
     combined_path = out_dir / "recommended_thresholds.yaml"
     combined_path.write_text(
-        yaml.safe_dump(combined, allow_unicode=True, sort_keys=False),
+        yaml.safe_dump(eligible_config, allow_unicode=True, sort_keys=False),
         encoding="utf-8",
     )
+    provisional_path = out_dir / "provisional_thresholds.yaml"
+    provisional_path.write_text(
+        yaml.safe_dump(provisional_config, allow_unicode=True, sort_keys=False),
+        encoding="utf-8",
+    )
+
     if summary_rows:
         pd.concat(summary_rows, ignore_index=True).to_csv(
             out_dir / "current_vs_optimized.csv",
@@ -242,10 +257,16 @@ def main() -> None:
     print("============================================")
     print(f"Input : {range_file}")
     print(f"Output: {out_dir}")
-    print(f"Recommended config: {combined_path}")
+    if eligible_config:
+        print(f"Application-eligible config: {combined_path}")
+    else:
+        print("Application-eligible config: NONE")
+        print("  -> recommended_thresholds.yaml is intentionally empty")
+    if provisional_config:
+        print(f"Provisional diagnostics    : {provisional_path}")
     if strong_skip_error is not None:
-        print("STRONG: skipped because OOS sample was insufficient; current STRONG thresholds were not replaced.")
-    print("NOTE: recommended_thresholds.yaml is NOT applied to default.yaml automatically.")
+        print("STRONG: insufficient sample; current STRONG thresholds remain unchanged.")
+    print("NOTE: only ACCEPTABLE/ROBUST recommendations are eligible for application.")
 
 
 if __name__ == "__main__":
