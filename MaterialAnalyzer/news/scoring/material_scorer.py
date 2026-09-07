@@ -23,7 +23,7 @@ ROUTINE_GOVERNANCE_RE = re.compile(
 
 
 class MaterialScorer:
-    VERSION = "RULE_MATERIAL_SCORE_V1_2"
+    VERSION = "RULE_MATERIAL_SCORE_V2_0"
 
     def __init__(self, repository):
         self.repository = repository
@@ -32,26 +32,25 @@ class MaterialScorer:
     def score_event(event: ScoreInput) -> MaterialScoreRecord:
         direct, direct_reason = direct_company_score(event)
         certainty, certainty_reason = event_certainty_score(event)
-        impact, impact_reason = financial_impact_score(event)
+        importance, importance_reason = financial_impact_score(event)
 
-        # Routine governance disclosures are official and certain, but usually have low
-        # standalone price-impact. Keep them as events while preventing an automatic
-        # CONFIRMED result just because they are direct DART/KIND filings.
+        # Routine governance can be official/certain yet still be low importance as a
+        # standalone market catalyst. Preserve the event but cap the importance component.
         if event.event_type == "CORPORATE_GOVERNANCE" and ROUTINE_GOVERNANCE_RE.search(event.event_title or ""):
-            impact = min(impact, 2.0)
-            impact_reason = "routine governance disclosure"
+            importance = min(importance, 3.0)
+            importance_reason = "routine governance disclosure"
 
         quant, quant_reason = quantification_score(event)
         novelty, novelty_reason = novelty_component_score(event)
         source, source_reason = source_reliability_score(event)
         multi, multi_reason = multi_source_score(event)
 
-        total = round(direct + certainty + impact + quant + novelty + source + multi, 2)
+        total = round(direct + certainty + importance + quant + novelty + source + multi, 2)
         status = status_from_score(total)
         reasons = [
             f"direct={direct:g}({direct_reason})",
             f"certainty={certainty:g}({certainty_reason})",
-            f"impact={impact:g}({impact_reason})",
+            f"importance={importance:g}({importance_reason})",
             f"quant={quant:g}({quant_reason})",
             f"novelty={novelty:g}({novelty_reason})",
             f"source={source:g}({source_reason})",
@@ -64,7 +63,7 @@ class MaterialScorer:
             material_status=status,
             direct_company_score=direct,
             event_certainty_score=certainty,
-            financial_impact_score=impact,
+            financial_impact_score=importance,
             quantification_score=quant,
             novelty_component_score=novelty,
             source_reliability_score=source,
