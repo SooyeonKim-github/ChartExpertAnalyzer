@@ -19,19 +19,19 @@ class StockSelector:
         self.analyzer = analyzer
         self.provider = provider
         self.cfg = cfg
-        # 일일 스크린에서 CONFIRMED 차트를 다시 데이터 조회하지 않고 그리기 위한 캐시.
-        # key=ticker, value=(raw_ohlcv, analysis_result)
         self.last_analysis: dict[str, tuple[pd.DataFrame, object]] = {}
 
     def _row_from_result(self, r, meta=None) -> dict:
         c = getattr(r, 'overextension_components', {}) or {}
+        rank_by_d5 = bool(self.cfg.get('selection', {}).get('rank_by_d5_score', False))
+        operational_score = getattr(r, 'd5_score', r.total_score) if rank_by_d5 else r.total_score
+        operational_grade = getattr(r, 'd5_grade', r.grade) if rank_by_d5 else r.grade
         row = {
             'ticker': r.ticker, 'asof': r.asof, 'close': r.close,
             'Status': classify_confirmation_v1(r, self.cfg),
-            # KJB의 실전 최종 score는 D+5 목적 점수로 사용한다.
-            # 기존 Selection Score는 raw_selection_score로 별도 보존한다.
-            'score': getattr(r, 'd5_score', r.total_score),
-            'grade': getattr(r, 'd5_grade', r.grade),
+            # 기존 실전 score는 보존한다. D+5 점수는 shadow 컬럼으로 함께 출력한다.
+            'score': operational_score,
+            'grade': operational_grade,
             'raw_selection_score': r.total_score,
             'raw_selection_grade': r.grade,
             'd5_score': getattr(r, 'd5_score', r.total_score),
@@ -69,10 +69,12 @@ class StockSelector:
         table = pd.DataFrame(rows)
         if table.empty:
             return table
-        table = table.sort_values(
-            ['d5_score', 'timing_score', 'leader_score', 'technical_score', 'risk_score'],
-            ascending=[False, False, False, False, True],
-        )
+        rank_by_d5 = bool(self.cfg.get('selection', {}).get('rank_by_d5_score', False))
+        if rank_by_d5:
+            sort_cols = ['d5_score', 'timing_score', 'leader_score', 'technical_score', 'risk_score']
+        else:
+            sort_cols = ['leader_score', 'score', 'timing_score', 'technical_score', 'risk_score']
+        table = table.sort_values(sort_cols, ascending=[False, False, False, False, True])
         if limit is None:
             limit = int(self.cfg['selection']['max_candidates'])
         if limit and limit > 0:
@@ -127,9 +129,9 @@ class StockSelector:
                 rows.append(row)
                 self.last_analysis[str(ticker)] = (df, r)
                 logger.info(
-                    '[%d/%d] %s %s 분석 완료 | D5 %.1f / Raw %.1f | %s',
+                    '[%d/%d] %s %s 분석 완료 | Raw %.1f / D5 %.1f | %s',
                     idx, len(universe), ticker, info.name,
-                    getattr(r, 'd5_score', r.total_score), r.total_score, row['Status']
+                    r.total_score, getattr(r, 'd5_score', r.total_score), row['Status']
                 )
             except Exception as exc:
                 errors.append((ticker, str(exc)))
