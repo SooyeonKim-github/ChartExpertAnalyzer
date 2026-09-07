@@ -3,36 +3,37 @@ setlocal
 cd /d "%~dp0\.."
 
 echo ==============================================================================
-echo MaterialAnalyzer - MaterialThresholdOptimizer V1
-echo Candidate weights / thresholds / validation only - NO AUTO APPLY
+echo MaterialAnalyzer - MaterialQualityOptimizer V1
+echo Catalyst quality / taxonomy / linkage / coverage audit - NO RETURN OBJECTIVE
 echo ==============================================================================
 echo.
 echo [1/2] Smoke test
 python -m MaterialAnalyzer.material_optimizer_smoke_test
 if errorlevel 1 (
   echo.
-  echo [ERROR] MaterialThresholdOptimizer smoke test failed.
+  echo [ERROR] MaterialQualityOptimizer smoke test failed.
   pause
   exit /b 1
 )
 
 echo.
-echo [2/2] Material optimizer
+echo [2/2] Material quality optimizer
 python -m MaterialAnalyzer.run_material_optimizer %*
 set RC=%ERRORLEVEL%
 
 echo.
 if not "%RC%"=="0" (
-  echo [ERROR] MaterialThresholdOptimizer exited with code %RC%.
+  echo [ERROR] MaterialQualityOptimizer exited with code %RC%.
 ) else (
-  echo [DONE] MaterialThresholdOptimizer finished.
-  echo Weights        : MaterialAnalyzer\data\history\optimizer\material_optimizer_weights.csv
-  echo Candidates     : MaterialAnalyzer\data\history\optimizer\material_optimizer_candidates.csv
-  echo Validation     : MaterialAnalyzer\data\history\optimizer\material_optimizer_validation.csv
-  echo Scored         : MaterialAnalyzer\data\history\optimizer\material_optimizer_scored.csv
-  echo Recommendation : MaterialAnalyzer\data\history\optimizer\material_optimizer_recommendation.json
+  echo [DONE] MaterialQualityOptimizer finished.
+  echo Metrics        : MaterialAnalyzer\data\history\quality_optimizer\material_quality_metrics.csv
+  echo Event Types    : MaterialAnalyzer\data\history\quality_optimizer\material_quality_event_types.csv
+  echo Thresholds     : MaterialAnalyzer\data\history\quality_optimizer\material_quality_threshold_candidates.csv
+  echo Comparison     : MaterialAnalyzer\data\history\quality_optimizer\material_quality_threshold_comparison.csv
+  echo Recommendation : MaterialAnalyzer\data\history\quality_optimizer\material_quality_recommendation.json
   echo.
-  echo IMPORTANT: optimized values are candidates only. MaterialScorer is NOT modified automatically.
+  echo FORWARD RETURNS ARE NOT USED BY THIS OPTIMIZER.
+  echo Candidate thresholds are audit suggestions only. MaterialScorer is NOT modified automatically.
 )
 
 echo.
