@@ -12,6 +12,14 @@ def _numeric(frame: pd.DataFrame, column: str) -> pd.Series:
     return pd.to_numeric(frame[column], errors="coerce").replace([np.inf, -np.inf], np.nan).dropna()
 
 
+def _bool_series(series: pd.Series) -> pd.Series:
+    if series.empty:
+        return pd.Series(dtype=bool)
+    if pd.api.types.is_bool_dtype(series):
+        return series.fillna(False).astype(bool)
+    return series.map(lambda x: str(x).strip().lower() in {"true", "1", "yes", "y"}).fillna(False)
+
+
 def performance_metrics(
     selected: pd.DataFrame,
     *,
@@ -44,14 +52,79 @@ def performance_metrics(
     }
 
 
+def leadership_metrics(
+    selected: pd.DataFrame,
+    *,
+    validity_column: str = "leadership_valid_10d",
+    date_column: str = "scan_date",
+) -> dict[str, float | int | None]:
+    """Aggregate future leadership labels for one threshold selection.
+
+    Price-return columns are included only as diagnostics. They are deliberately
+    excluded from the leadership objective map used by LeaderStockAnalyzer.
+    """
+    if validity_column not in selected.columns:
+        raise ValueError(f"leadership validity column missing: {validity_column}")
+
+    valid_mask = _bool_series(selected[validity_column])
+    valid = selected[valid_mask].copy()
+    count = int(len(valid))
+    unique_dates = (
+        int(pd.to_datetime(valid[date_column], errors="coerce").dropna().nunique())
+        if count and date_column in valid.columns
+        else 0
+    )
+
+    def mean_col(name: str) -> float | None:
+        series = _numeric(valid, name)
+        return None if series.empty else float(series.mean())
+
+    persistence = (
+        _bool_series(valid["persistence_conversion_10d"])
+        if "persistence_conversion_10d" in valid.columns
+        else pd.Series(dtype=bool)
+    )
+    false_leader = (
+        _bool_series(valid["false_leader_5d"])
+        if "false_leader_5d" in valid.columns
+        else pd.Series(dtype=bool)
+    )
+    persistence_rate = None if persistence.empty else float(persistence.mean() * 100.0)
+    false_rate = None if false_leader.empty else float(false_leader.mean() * 100.0)
+
+    d5 = _numeric(valid, "D+5")
+    d20 = _numeric(valid, "D+20")
+
+    return {
+        "count": count,
+        "unique_dates": unique_dates,
+        "leader_retention_5d": mean_col("leader_retention_5d"),
+        "market_top20_retention_5d": mean_col("market_top20_retention_5d"),
+        "turnover_top20_retention_5d": mean_col("turnover_top20_retention_5d"),
+        "persistence_conversion_10d_rate": persistence_rate,
+        "sector_leader_retention_5d": mean_col("sector_leader_retention_5d"),
+        "sector_context_future_coverage_5d": mean_col("sector_context_future_coverage_5d"),
+        "false_leader_5d_rate": false_rate,
+        "false_leader_quality_5d": None if false_rate is None else 100.0 - false_rate,
+        "avg_leadership_quality_score": mean_col("leadership_quality_score"),
+        "sample_size_score": math.log1p(count),
+        # Secondary return diagnostics only; never part of leadership objective.
+        "diag_avg_D5": None if d5.empty else float(d5.mean()),
+        "diag_avg_D20": None if d20.empty else float(d20.mean()),
+        "diag_median_D20": None if d20.empty else float(d20.median()),
+        "diag_win_rate_D20": None if d20.empty else float((d20 > 0).mean() * 100.0),
+    }
+
+
 def add_fold_objective(
     fold_trials: pd.DataFrame,
     weights: dict[str, float],
+    metric_map: dict[str, str] | None = None,
 ) -> pd.DataFrame:
-    """Z-normalize metrics within one fold and build a weighted objective."""
+    """Z-normalize configured metrics within one fold and build an objective."""
     out = fold_trials.copy()
     valid = out["sample_valid"].fillna(False).astype(bool)
-    metric_map = {
+    metric_map = metric_map or {
         "median_return": "median_return",
         "win_rate": "win_rate",
         "p25_return": "p25_return",
