@@ -8,6 +8,9 @@ optimizer:
   validation_trading_days: 40
   step_trading_days: 40
   purge_trading_days: 20
+  # A trailing validation fold must contain at least 75% of the planned window.
+  # With validation=40, folds shorter than 30 trading days are dropped.
+  min_validation_fraction: 0.75
 
   # Train에서 충분한 표본이 있는 조합 중 상위 K개만 미래 Validation으로 넘긴다.
   min_train_samples: 30
@@ -17,8 +20,18 @@ optimizer:
   # Hard sample constraints per validation fold.
   min_samples: 30
   min_unique_dates: 15
-  min_valid_folds: 1
+  # Application-grade recommendations need evidence from at least two OOS folds.
+  min_valid_folds: 2
   top_n: 50
+
+  # If strict evidence is not available, still emit a clearly labeled
+  # PROVISIONAL diagnostic recommendation, but mark it ineligible for application.
+  allow_provisional_fallback: true
+  acceptable_min_fold_coverage: 0.50
+  robust_min_valid_folds: 3
+  robust_min_fold_coverage: 0.75
+  robust_min_plateau_neighbors: 2
+  robust_max_plateau_drop: 0.75
 
   # Robustness penalties. Higher means more conservative parameter selection.
   robustness_std_penalty: 0.50
