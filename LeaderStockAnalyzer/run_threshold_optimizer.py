@@ -17,6 +17,7 @@ if str(BASE_DIR) not in sys.path:
 
 from ThresholdOptimization import ThresholdOptimizer  # noqa: E402
 from leader_stock_analyzer import load_config  # noqa: E402
+from leader_stock_analyzer.leadership_validation import LeadershipValidationEngine  # noqa: E402
 from leader_stock_analyzer.optimization import LeaderThresholdAdapter  # noqa: E402
 
 
@@ -66,6 +67,60 @@ def _print_input_summary(range_file: Path, df: pd.DataFrame) -> None:
         print(f"  date range   : {unique.iloc[0].date()} ~ {unique.iloc[-1].date()}")
 
 
+def _ensure_leadership_labels(
+    df: pd.DataFrame,
+    analyzer_cfg: dict,
+    out_dir: Path,
+) -> pd.DataFrame:
+    required = {
+        "leadership_valid_10d",
+        "leader_retention_5d",
+        "market_top20_retention_5d",
+        "turnover_top20_retention_5d",
+        "persistence_conversion_10d",
+        "false_leader_5d",
+    }
+    if required.issubset(df.columns):
+        print("[INFO] leadership validation labels: already present in Range CSV")
+        return df
+
+    print("[INFO] leadership validation labels: deriving from completed Range history...")
+    engine = LeadershipValidationEngine(analyzer_cfg)
+    out = engine.annotate(df)
+
+    metric_cols = [
+        "scan_date",
+        "ticker",
+        "name",
+        "status",
+        "leader_type",
+        "leadership_valid_5d",
+        "leadership_valid_10d",
+        "future_observed_days_5d",
+        "future_observed_days_10d",
+        "leader_retention_5d",
+        "market_top20_retention_5d",
+        "turnover_top20_retention_5d",
+        "persistence_conversion_10d",
+        "sector_leader_retention_5d",
+        "sector_context_future_coverage_5d",
+        "false_leader_5d",
+        "leadership_quality_score",
+        "D+5",
+        "D+20",
+    ]
+    available = [c for c in metric_cols if c in out.columns]
+    metrics_path = out_dir / "leadership_validation_metrics.csv"
+    out[available].to_csv(metrics_path, index=False, encoding="utf-8-sig")
+
+    overall = engine.summary(out)
+    by_status = engine.summary(out, "status")
+    overall.to_csv(out_dir / "leadership_validation_overall.csv", index=False, encoding="utf-8-sig")
+    by_status.to_csv(out_dir / "leadership_validation_by_status.csv", index=False, encoding="utf-8-sig")
+    print(f"[INFO] leadership validation metrics: {metrics_path}")
+    return out
+
+
 def _write_strong_insufficient_diagnostics(
     df: pd.DataFrame,
     out_dir: Path,
@@ -76,7 +131,16 @@ def _write_strong_insufficient_diagnostics(
 
     work = df.copy()
     work["_scan_date"] = _parse_scan_dates(work)
-    work["_d20_valid"] = pd.to_numeric(work.get("D+20"), errors="coerce").notna()
+    validity = work.get(
+        "leadership_valid_10d",
+        pd.Series(False, index=work.index),
+    )
+    if pd.api.types.is_bool_dtype(validity):
+        work["_leadership_valid"] = validity.fillna(False).astype(bool)
+    else:
+        work["_leadership_valid"] = validity.map(
+            lambda x: str(x).strip().lower() in {"true", "1", "yes", "y"}
+        ).fillna(False)
     status = work.get("status", pd.Series(index=work.index, dtype=str)).astype(str)
     work["_current_strong"] = status.eq("STRONG_CONFIRMED")
     work["month"] = work["_scan_date"].dt.to_period("M").astype(str)
@@ -89,9 +153,9 @@ def _write_strong_insufficient_diagnostics(
                 "month": month,
                 "trading_days": int(grp["_scan_date"].nunique()),
                 "current_strong_count": int(len(strong)),
-                "current_strong_D20_valid": int(strong["_d20_valid"].sum()),
-                "current_strong_unique_dates_D20": int(
-                    strong.loc[strong["_d20_valid"], "_scan_date"].nunique()
+                "current_strong_leadership_valid": int(strong["_leadership_valid"].sum()),
+                "current_strong_unique_dates_valid": int(
+                    strong.loc[strong["_leadership_valid"], "_scan_date"].nunique()
                 ),
             }
         )
@@ -100,15 +164,15 @@ def _write_strong_insufficient_diagnostics(
     pd.DataFrame(rows).to_csv(diag_path, index=False, encoding="utf-8-sig")
 
     current_strong = work[work["_current_strong"]]
-    current_valid = current_strong[current_strong["_d20_valid"]]
+    current_valid = current_strong[current_strong["_leadership_valid"]]
     note = (
-        "STRONG threshold optimization was skipped because no parameter combination "
-        "had enough out-of-sample observations even for a provisional recommendation.\n\n"
+        "STRONG leadership-threshold optimization was skipped because no parameter "
+        "combination had enough out-of-sample leadership observations even for a "
+        "provisional recommendation.\n\n"
         f"Reason: {error}\n\n"
         f"Current STRONG rows: {len(current_strong):,}\n"
-        f"Current STRONG rows with valid D+20: {len(current_valid):,}\n"
-        f"Current STRONG unique dates with valid D+20: "
-        f"{current_valid['_scan_date'].nunique():,}\n\n"
+        f"Current STRONG rows with valid leadership labels: {len(current_valid):,}\n"
+        f"Current STRONG unique valid dates: {current_valid['_scan_date'].nunique():,}\n\n"
         "Keep the current STRONG thresholds and use a longer historical Range.\n"
     )
     (strong_dir / "INSUFFICIENT_SAMPLE.txt").write_text(note, encoding="utf-8")
@@ -141,6 +205,7 @@ def _run_phase(
     print(f"\n[{phase.upper()}] candidate")
     for key, value in result.recommended_params.items():
         print(f"  {key}: {value}")
+    print(f"  objective   : {result.recommendation_diagnostics.get('objective_profile')}")
     print(f"  quality     : {result.recommendation_quality}")
     print(f"  application : {'ELIGIBLE' if result.eligible_for_application else 'NOT ELIGIBLE'}")
     print(f"  summary     : {paths['recommendation_summary']}")
@@ -156,7 +221,7 @@ def _current_confirmed_floor(analyzer_cfg: dict) -> dict:
 
 def main() -> None:
     p = argparse.ArgumentParser(
-        description="LeaderStockAnalyzer purged walk-forward threshold optimizer"
+        description="LeaderStockAnalyzer leadership-quality threshold optimizer"
     )
     p.add_argument("--range-file", help="range_all_results.csv; default=latest modified range result")
     p.add_argument("--config", default="config/default.yaml")
@@ -183,6 +248,8 @@ def main() -> None:
     out_dir = _resolve_path(args.out, range_file.parent / "optimizer")
     out_dir.mkdir(parents=True, exist_ok=True)
 
+    df = _ensure_leadership_labels(df, analyzer_cfg, out_dir)
+
     confirmed_result = None
     strong_result = None
     strong_skip_error: Exception | None = None
@@ -193,9 +260,6 @@ def main() -> None:
         )
 
     if args.phase in {"strong", "both"}:
-        # Never let a PROVISIONAL confirmed recommendation redefine the STRONG
-        # search floor. Use the current production confirmed thresholds until the
-        # confirmed recommendation is application-eligible.
         if confirmed_result is not None and confirmed_result.eligible_for_application:
             floor = confirmed_result.recommended_params
         else:
@@ -214,7 +278,7 @@ def main() -> None:
                 raise
             strong_skip_error = exc
             diag = _write_strong_insufficient_diagnostics(df, out_dir, exc)
-            print("\n[STRONG] optimization skipped: insufficient OOS sample")
+            print("\n[STRONG] optimization skipped: insufficient OOS leadership sample")
             print(f"  reason     : {exc}")
             print(f"  diagnostics: {diag}")
             print("  action     : keep current STRONG thresholds and extend the historical Range")
@@ -253,10 +317,11 @@ def main() -> None:
         )
 
     print("\n============================================")
-    print(" Threshold Optimizer complete")
+    print(" Leadership Threshold Optimizer complete")
     print("============================================")
     print(f"Input : {range_file}")
     print(f"Output: {out_dir}")
+    print("Objective: leadership_quality (returns are diagnostics only)")
     if eligible_config:
         print(f"Application-eligible config: {combined_path}")
     else:
