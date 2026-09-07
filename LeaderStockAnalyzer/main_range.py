@@ -9,6 +9,7 @@ from leader_stock_analyzer import load_config, screen_date
 from leader_stock_analyzer.data_provider import PyKrxLeaderDataProvider
 from leader_stock_analyzer.emerging_reporting import EmergingTransitionAnalyzerV12
 from leader_stock_analyzer.exhaustion import ExhaustionRiskEngine, ExhaustionTransitionAnalyzer
+from leader_stock_analyzer.leadership_validation import LeadershipValidationEngine
 from leader_stock_analyzer.lifecycle import LeaderLifecycleEngine
 from leader_stock_analyzer.performance import ForwardPerformanceEngine, PerformanceAttributionEngine
 
@@ -38,6 +39,7 @@ def main() -> None:
     exhaustion_engine = ExhaustionRiskEngine(cfg)
     performance = ForwardPerformanceEngine(cfg)
     attribution = PerformanceAttributionEngine(cfg)
+    leadership_validation = LeadershipValidationEngine(cfg)
     emerging_report = EmergingTransitionAnalyzerV12(cfg)
     exhaustion_report = ExhaustionTransitionAnalyzer(cfg)
 
@@ -62,6 +64,10 @@ def main() -> None:
         "[INFO] Exhaustion Risk V1.1 enabled | Overextension5 + MomentumRollover30 + "
         "Distribution25 + MoneyDecay20 + StructureDeterioration20 "
         "| peak-to-current=ON | observational_only=ON"
+    )
+    print(
+        "[INFO] Leadership Validation enabled | future Leader/Rank/Turnover retention + "
+        "Persistence conversion + False Leader | returns=diagnostic only"
     )
 
     max_horizon = max(performance.horizons + performance.excursion_horizons)
@@ -110,7 +116,12 @@ def main() -> None:
                 )
             rows.append(rec)
 
+    # Future leadership labels are added only after every point-in-time scan is
+    # complete. They are for Range validation/optimization and never feed D0.
     df = pd.DataFrame(rows)
+    if not df.empty and cfg.get("leadership_validation", {}).get("enabled", True):
+        df = leadership_validation.annotate(df)
+
     out_dir = base_dir / args.out / f"range_{start}_{end}"
     out_dir.mkdir(parents=True, exist_ok=True)
     all_path = out_dir / "range_all_results.csv"
@@ -121,6 +132,12 @@ def main() -> None:
     exhaustion_events_path = out_dir / "exhaustion_events.csv"
     exhaustion_summary_path = out_dir / "exhaustion_summary.csv"
     exhaustion_score_report_path = out_dir / "exhaustion_score_report.csv"
+
+    leadership_dir = out_dir / "leadership_validation"
+    leadership_dir.mkdir(parents=True, exist_ok=True)
+    leadership_overall_path = leadership_dir / "overall_summary.csv"
+    leadership_status_path = leadership_dir / "by_status.csv"
+    leadership_type_path = leadership_dir / "by_leader_type.csv"
 
     df.to_csv(all_path, index=False, encoding="utf-8-sig")
     if not df.empty:
@@ -134,6 +151,13 @@ def main() -> None:
     else:
         df.to_csv(cand_path, index=False, encoding="utf-8-sig")
         df.to_csv(lifecycle_path, index=False, encoding="utf-8-sig")
+
+    leadership_overall = leadership_validation.summary(df)
+    leadership_by_status = leadership_validation.summary(df, "status")
+    leadership_by_type = leadership_validation.summary(df, "leader_type")
+    leadership_overall.to_csv(leadership_overall_path, index=False, encoding="utf-8-sig")
+    leadership_by_status.to_csv(leadership_status_path, index=False, encoding="utf-8-sig")
+    leadership_by_type.to_csv(leadership_type_path, index=False, encoding="utf-8-sig")
 
     emerging_events = emerging_report.events(df)
     emerging_summary = emerging_report.summary(emerging_events)
@@ -162,9 +186,27 @@ def main() -> None:
     print(f"[DONE] {exhaustion_events_path}")
     print(f"[DONE] {exhaustion_summary_path}")
     print(f"[DONE] {exhaustion_score_report_path}")
+    print(f"[DONE] leadership validation -> {leadership_dir}")
+    print(f"       overall: {leadership_overall_path.name}")
+    print(f"       status : {leadership_status_path.name}")
+    print(f"       type   : {leadership_type_path.name}")
     print(f"[DONE] performance reports -> {perf_dir}")
     for name, path in report_paths.items():
         print(f"       {name}: {path.name}")
+
+    if not leadership_by_status.empty:
+        print("\n[LEADERSHIP VALIDATION]")
+        for _, row in leadership_by_status.iterrows():
+            label = row.get("group", "UNKNOWN")
+            count = int(row.get("count", 0))
+            retention = row.get("avg_leader_retention_5d", "-")
+            market = row.get("avg_market_top20_retention_5d", "-")
+            persistent = row.get("persistence_conversion_10d_rate", "-")
+            false_rate = row.get("false_leader_5d_rate", "-")
+            print(
+                f"  {label:<18} count={count:<4} leader5={retention} "
+                f"market20={market} persistent10={persistent} false5={false_rate}"
+            )
 
     if not df.empty and "emerging_label" in df.columns:
         counts = df["emerging_label"].value_counts()
