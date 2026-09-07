@@ -42,13 +42,10 @@ selection:
   max_candidates: 30
   reject_if_below_long_ma: false
   require_market_uptrend_for_pyramiding: true
-  # D+5 점수는 먼저 Range에서 검증하고, 검증 후 true로 전환한다.
+  # D+5 V2는 walk-forward 검증 후 live ranking에 연결한다.
   rank_by_d5_score: false
 
-# KJB D+5 overextension penalty.
-# Raw Selection Score is preserved. d5_score is always calculated for
-# diagnostics/optimizer, while live Screen/Status remain unchanged until the
-# walk-forward validation confirms that the penalty thresholds are useful.
+# 기존 live용 과열 score. 기존 화면 동작 보존을 위해 유지한다.
 overextension:
   enabled: true
   max_total_penalty: 20
@@ -71,9 +68,29 @@ overextension:
     medium_penalty: 0.0
     high_penalty: 4.0
 
-# KJB CONFIRMED V1 - D+5 short swing target.
-# false = 현재 실전 Status 보존. run_d5_diagnostics.py는 별도로 d5_status를
-# 산출하고 optimizer 검증 후 true 전환한다.
+# KJB D+5 V2 diagnostic/optimizer baseline.
+# RS 고점 단독보다는 Leader/Sector 과열 및 복합 과열을 중심으로 감점한다.
+# optimizer가 이 값들을 walk-forward로 다시 탐색한다.
+d5_v2:
+  enabled_for_live: false
+  selection_weight: 0.45
+  timing_weight: 0.55
+  selection_min: 70
+  timing_min: 72
+  d5_score_min: 70
+  overextension_max_exclusive: 8
+  rs_hard: 92
+  leader_soft: 80
+  leader_hard: 88
+  sector_soft: 78
+  sector_hard: 86
+  combo_rs_leader_penalty: 3
+  combo_triple_penalty: 4
+  daily_top_n: 3
+  market_regime: all
+
+# KJB CONFIRMED V1 - 기존 실전 Status는 그대로 보존한다.
+# D5_Status는 d5_diagnostics.py에서 병렬로 생성한다.
 confirmation_v1:
   use_d5_score: false
   selection_min: 70
