@@ -23,7 +23,7 @@ def _latest_range_file() -> Path:
     files = list((BASE_DIR / "results").glob("range_*/range_all_results.csv"))
     if not files:
         raise FileNotFoundError("No Swing range_all_results.csv found. Run main_range.py first.")
-    return max(files, key=lambda p: (p.parent.name, p.stat().st_mtime))
+    return max(files, key=lambda p: p.stat().st_mtime)
 
 
 def _resolve(value: str | None, default: Path) -> Path:
@@ -45,6 +45,7 @@ def main() -> None:
         _resolve(args.optimizer_config, BASE_DIR / "threshold_optimizer.yaml").read_text(encoding="utf-8")
     ) or {}
     df = pd.read_csv(range_file, encoding="utf-8-sig", dtype={"Ticker": str})
+    print(f"[INFO] optimizer input: {range_file}")
 
     mfe = pd.to_numeric(df.get("MFE_20D_Pct"), errors="coerce")
     mae = pd.to_numeric(df.get("MAE_20D_Pct"), errors="coerce")
