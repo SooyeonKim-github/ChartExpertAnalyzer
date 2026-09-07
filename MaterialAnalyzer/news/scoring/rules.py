@@ -13,6 +13,7 @@ POLICY_OR_SECTOR_EVENT_TYPES = {
     "SECONDARY_BATTERY", "DEFENSE", "NUCLEAR", "SHIPBUILDING", "BIO", "SUPPLY", "SHORTAGE",
 }
 
+# 20 points: how certain/realized the event is.
 CERTAINTY_SCORE = {
     "COMPLETED": 20.0,
     "STARTED": 20.0,
@@ -25,82 +26,86 @@ CERTAINTY_SCORE = {
     "UNKNOWN": 4.0,
 }
 
-FINANCIAL_IMPACT_SCORE = {
-    "ORDER_CONTRACT": 15.0,
-    "MNA": 15.0,
-    "EARNINGS": 15.0,
-    "GUIDANCE": 15.0,
-    "PUBLIC_OFFER": 14.0,
-    "RESTRUCTURING": 14.0,
-    "CAPEX": 14.0,
-    "INVESTMENT": 14.0,
-    "ASSET_TRANSACTION": 14.0,
-    "CAPITAL_RAISE": 13.0,
-    "BUYBACK": 13.0,
-    "VALUE_UP": 13.0,
-    "CAPITAL_REDUCTION": 13.0,
-    "APPROVAL": 13.0,
-    "CLINICAL": 12.0,
-    "DIVIDEND": 12.0,
-    "TREASURY_STOCK_DISPOSAL": 12.0,
-    "CONVERTIBLE_EXERCISE": 12.0,
-    "INVESTMENT_DISPOSAL": 12.0,
-    "DERIVATIVE_LOSS": 12.0,
-    "PRICE_INCREASE": 12.0,
-    "SHORTAGE": 12.0,
-    "SANCTION": 12.0,
-    "RECALL": 12.0,
-    "GOV_POLICY": 12.0,
-    "LITIGATION": 11.0,
-    "TRADING_HALT": 11.0,
-    "SUBSIDY": 11.0,
-    "DEFENSE": 11.0,
-    "NUCLEAR": 11.0,
-    "AI_DATACENTER": 11.0,
-    "PRODUCT": 11.0,
-    "CONVERTIBLE_ADJUSTMENT": 10.0,
-    "FINANCING": 10.0,
-    "MATERIAL_MANAGEMENT": 10.0,
-    "AI": 10.0,
-    "SEMICONDUCTOR": 10.0,
-    "SECONDARY_BATTERY": 10.0,
-    "SHIPBUILDING": 10.0,
-    "BIO": 10.0,
-    "DEBT_GUARANTEE": 10.0,
-    "SHARE_CONSOLIDATION": 9.0,
-    "PARTNERSHIP": 9.0,
-    "SUPPLY": 9.0,
-    "REGULATION": 9.0,
-    "PATENT": 8.0,
-    "OWNERSHIP_CHANGE": 8.0,
-    "CORPORATE_GOVERNANCE": 6.0,
-    "MARKET_QUERY": 5.0,
-    "IR_EVENT": 4.0,
+# 30 points: intrinsic catalyst importance. This is deliberately the largest component.
+# It measures whether the market should pay attention, not whether the stock should go up.
+EVENT_IMPORTANCE_SCORE = {
+    "ORDER_CONTRACT": 30.0,
+    "MNA": 30.0,
+    "EARNINGS": 30.0,
+    "GUIDANCE": 30.0,
+    "PUBLIC_OFFER": 29.0,
+    "RESTRUCTURING": 29.0,
+    "CAPEX": 28.0,
+    "INVESTMENT": 28.0,
+    "ASSET_TRANSACTION": 28.0,
+    "CAPITAL_RAISE": 27.0,
+    "BUYBACK": 27.0,
+    "VALUE_UP": 27.0,
+    "CAPITAL_REDUCTION": 27.0,
+    "APPROVAL": 27.0,
+    "CLINICAL": 26.0,
+    "TRADING_HALT": 26.0,
+    "SANCTION": 26.0,
+    "RECALL": 25.0,
+    "DIVIDEND": 24.0,
+    "TREASURY_STOCK_DISPOSAL": 24.0,
+    "CONVERTIBLE_EXERCISE": 24.0,
+    "INVESTMENT_DISPOSAL": 24.0,
+    "DERIVATIVE_LOSS": 24.0,
+    "PRICE_INCREASE": 24.0,
+    "SHORTAGE": 24.0,
+    "GOV_POLICY": 24.0,
+    "LITIGATION": 23.0,
+    "SUBSIDY": 23.0,
+    "DEFENSE": 23.0,
+    "NUCLEAR": 23.0,
+    "AI_DATACENTER": 23.0,
+    "PRODUCT": 22.0,
+    "CONVERTIBLE_ADJUSTMENT": 21.0,
+    "FINANCING": 21.0,
+    "MATERIAL_MANAGEMENT": 21.0,
+    "AI": 21.0,
+    "SEMICONDUCTOR": 21.0,
+    "SECONDARY_BATTERY": 21.0,
+    "SHIPBUILDING": 21.0,
+    "BIO": 21.0,
+    "DEBT_GUARANTEE": 21.0,
+    "SHARE_CONSOLIDATION": 20.0,
+    "PARTNERSHIP": 19.0,
+    "SUPPLY": 19.0,
+    "REGULATION": 19.0,
+    "PATENT": 17.0,
+    "OWNERSHIP_CHANGE": 17.0,
+    "CORPORATE_GOVERNANCE": 10.0,
+    "MARKET_QUERY": 8.0,
+    "IR_EVENT": 5.0,
 }
 
+# Novelty is supportive evidence, not the definition of importance.
 NOVELTY_COMPONENT_SCORE = {
     "NEW_EVENT": 10.0,
     "FOLLOW_UP": 8.0,
-    "CONFIRMATION": 5.0,
-    "REHASH": 1.0,
+    "CONFIRMATION": 6.0,
+    "REHASH": 3.0,
     "MARKET_REACTION": 0.0,
 }
 
+# Source reliability is capped at 5 so an official but routine filing cannot dominate.
 SOURCE_SCORE = {
-    "DART": 10.0,
-    "KIND": 10.0,
-    "MOTIR": 9.0,
-    "MSIT": 9.0,
-    "MCEE": 9.0,
-    "MFDS": 9.0,
-    "FSC": 9.0,
+    "DART": 5.0,
+    "KIND": 5.0,
+    "MOTIR": 5.0,
+    "MSIT": 5.0,
+    "MCEE": 5.0,
+    "MFDS": 5.0,
+    "FSC": 5.0,
 }
 
 GRADE_SCORE = {
-    "S": 9.0,
-    "A": 7.0,
-    "B": 5.0,
-    "C": 3.0,
+    "S": 5.0,
+    "A": 4.0,
+    "B": 3.0,
+    "C": 2.0,
 }
 
 MONEY_RE = re.compile(r"(?:조원|억원|만원|달러|원)$", re.I)
@@ -112,13 +117,14 @@ CLINICAL_RE = re.compile(r"[123]상$", re.I)
 
 
 def direct_company_score(event: ScoreInput) -> tuple[float, str]:
+    # 15 points maximum. Directness matters, but less than the event itself.
     if event.stock_codes:
-        return 25.0, "listed ticker directly identified"
+        return 15.0, "listed ticker directly identified"
     if event.companies:
-        return 22.0, "named company directly identified"
+        return 13.0, "named company directly identified"
     if event.event_type in POLICY_OR_SECTOR_EVENT_TYPES and event.original_source_id in OFFICIAL_GOV_SOURCES:
-        return 15.0, "official policy/sector event without direct company"
-    return 8.0, "event has no direct company/ticker"
+        return 8.0, "official policy/sector event without direct company"
+    return 4.0, "event has no direct company/ticker"
 
 
 def event_certainty_score(event: ScoreInput) -> tuple[float, str]:
@@ -127,8 +133,9 @@ def event_certainty_score(event: ScoreInput) -> tuple[float, str]:
 
 
 def financial_impact_score(event: ScoreInput) -> tuple[float, str]:
-    score = FINANCIAL_IMPACT_SCORE.get(event.event_type, 7.0)
-    return score, f"event_type={event.event_type}"
+    # Column name is kept for DB/backward compatibility; semantics are catalyst importance.
+    score = EVENT_IMPORTANCE_SCORE.get(event.event_type, 12.0)
+    return score, f"event_importance={event.event_type}"
 
 
 def quantification_score(event: ScoreInput) -> tuple[float, str]:
@@ -174,7 +181,7 @@ def novelty_component_score(event: ScoreInput) -> tuple[float, str]:
 def source_reliability_score(event: ScoreInput) -> tuple[float, str]:
     source_score = SOURCE_SCORE.get(event.original_source_id, 0.0)
     grade_score = GRADE_SCORE.get((event.source_grade or "").upper(), 0.0)
-    score = max(source_score, grade_score, 4.0 if event.original_source_id else 0.0)
+    score = max(source_score, grade_score, 1.0 if event.original_source_id else 0.0)
     return score, f"source={event.original_source_id or 'UNKNOWN'},grade={event.source_grade or 'UNKNOWN'}"
 
 
