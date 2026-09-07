@@ -7,14 +7,22 @@ optimizer:
   validation_trading_days: 40
   step_trading_days: 40
   purge_trading_days: 20
+  min_validation_fraction: 0.75
 
   min_train_samples: 25
   min_train_unique_dates: 12
   min_samples: 15
   min_unique_dates: 8
-  min_valid_folds: 1
+  min_valid_folds: 2
   train_top_k: 5
   top_n: 10
+
+  allow_provisional_fallback: true
+  acceptable_min_fold_coverage: 0.50
+  robust_min_valid_folds: 3
+  robust_min_fold_coverage: 0.75
+  robust_min_plateau_neighbors: 2
+  robust_max_plateau_drop: 0.75
 
   robustness_std_penalty: 0.50
   plateau_penalty: 0.25
