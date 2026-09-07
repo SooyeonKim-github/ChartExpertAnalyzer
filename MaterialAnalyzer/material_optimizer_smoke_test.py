@@ -1,54 +1,68 @@
 from __future__ import annotations
 
+import json
 import tempfile
 from pathlib import Path
 
 import pandas as pd
 
-from .optimizer import MaterialThresholdOptimizer
+from .optimizer import MaterialQualityOptimizer
 
 
 def main():
     with tempfile.TemporaryDirectory() as td:
         root = Path(td)
-        source = root / "material_backtest_results.csv"
-        output = root / "optimizer"
-        rows = []
-        dates = pd.bdate_range("2026-01-02", periods=40)
-        for i, dt in enumerate(dates):
-            for j in range(5):
-                positive = j % 2 == 0
-                rows.append({
-                    "market_date": dt.strftime("%Y%m%d"),
-                    "ticker": f"{100000 + j:06d}",
-                    "event_id": f"E{i}_{j}",
-                    "event_type": "ORDER_CONTRACT" if positive else "SANCTION",
-                    "material_score": 70 + j * 4,
-                    "price_status": "OK",
-                    "novelty_status": "NEW_EVENT" if i % 3 else "REHASH",
-                    "relation_type": "DIRECT",
-                    "positive_negative": "POSITIVE" if positive else "NEGATIVE",
-                    "quantification_score": 15 if positive else 5,
-                    "D+5": 3.0 if positive else -2.0,
-                    "abs_D+5": 3.0 if positive else 2.0,
-                    "directional_D+5": 3.0 if positive else 2.0,
-                    "D+20": 8.0 if positive else -4.0,
-                    "abs_D+20": 8.0 if positive else 4.0,
-                    "directional_D+20": 8.0 if positive else 4.0,
-                })
-        pd.DataFrame(rows).to_csv(source, index=False, encoding="utf-8-sig")
-        result = MaterialThresholdOptimizer(min_sample=10).run(source, output)
-        assert result.train_rows > 0
-        assert result.validation_rows > 0
-        recommendation = Path(result.recommendation_json).read_text(encoding="utf-8")
-        assert '"apply_automatically": false' in recommendation
-        weights = pd.read_csv(result.weights_csv, encoding="utf-8-sig")
-        assert {"event_type", "novelty_status", "relation_type", "positive_negative", "quantification_band"}.issubset(set(weights["feature"]))
+        history = root / "history"
+        output = root / "quality_optimizer"
+        history.mkdir(parents=True, exist_ok=True)
 
-    print("[OK] MaterialThresholdOptimizer V1 smoke test")
-    print("     time-based train/validation split -> OK")
-    print("     shrinkage category adjustments -> OK")
-    print("     threshold candidate search -> OK")
+        events = pd.DataFrame([
+            {"event_id": "E1", "event_type": "ORDER_CONTRACT", "material_candidate": 1, "stock_codes": "005930", "material_candidate_reason": "MATERIAL_EVENT"},
+            {"event_id": "E2", "event_type": "MNA", "material_candidate": 1, "stock_codes": "000660", "material_candidate_reason": "MATERIAL_EVENT"},
+            {"event_id": "E3", "event_type": "VALUE_UP", "material_candidate": 1, "stock_codes": "035420", "material_candidate_reason": "MATERIAL_EVENT"},
+            {"event_id": "E4", "event_type": "ROUTINE_DISCLOSURE", "material_candidate": 0, "stock_codes": "005930", "material_candidate_reason": "ADMINISTRATIVE_ROUTINE_DISCLOSURE"},
+            {"event_id": "E5", "event_type": "UNKNOWN", "material_candidate": 0, "stock_codes": "", "material_candidate_reason": "UNKNOWN_EVENT"},
+        ])
+        scores = pd.DataFrame([
+            {"event_id": "E1", "event_type": "ORDER_CONTRACT", "material_score": 90, "material_status": "STRONG"},
+            {"event_id": "E2", "event_type": "MNA", "material_score": 82, "material_status": "CONFIRMED"},
+            {"event_id": "E3", "event_type": "VALUE_UP", "material_score": 72, "material_status": "CONFIRMED"},
+        ])
+        links = pd.DataFrame([
+            {"event_id": "E1", "relation_type": "DIRECT", "ticker": "005930"},
+            {"event_id": "E2", "relation_type": "DIRECT", "ticker": "000660"},
+            {"event_id": "E3", "relation_type": "DIRECT", "ticker": "035420"},
+        ])
+        unresolved = pd.DataFrame(columns=["event_id", "unresolved_reason"])
+        coverage = pd.DataFrame([
+            {"source_id": "DART", "date": "2026-01-02", "status": "OK"},
+            {"source_id": "DART", "date": "2026-01-03", "status": "OK"},
+        ])
+
+        events.to_csv(history / "event_report.csv", index=False, encoding="utf-8-sig")
+        scores.to_csv(history / "material_score_report.csv", index=False, encoding="utf-8-sig")
+        links.to_csv(history / "ticker_link_report.csv", index=False, encoding="utf-8-sig")
+        unresolved.to_csv(history / "ticker_link_unresolved.csv", index=False, encoding="utf-8-sig")
+        coverage.to_csv(history / "historical_source_coverage.csv", index=False, encoding="utf-8-sig")
+
+        result = MaterialQualityOptimizer(history).run(output)
+        assert result.event_rows == 5
+        assert result.score_rows == 3
+        assert result.quality_score > 0
+        metrics = pd.read_csv(result.metrics_csv, encoding="utf-8-sig")
+        assert "unknown_rate" in set(metrics["metric"])
+        assert "direct_link_coverage" in set(metrics["metric"])
+        comparison = pd.read_csv(result.threshold_comparison_csv, encoding="utf-8-sig")
+        assert {"BASELINE", "QUALITY_CANDIDATE"}.issubset(set(comparison["config"]))
+        recommendation = json.loads(Path(result.recommendation_json).read_text(encoding="utf-8"))
+        assert recommendation["uses_forward_returns"] is False
+        assert recommendation["apply_automatically"] is False
+
+    print("[OK] MaterialQualityOptimizer V1 smoke test")
+    print("     catalyst-quality metrics -> OK")
+    print("     direct-link / UNKNOWN / coverage guardrails -> OK")
+    print("     taxonomy threshold candidate search -> OK")
+    print("     forward-return objective disabled -> OK")
     print("     auto apply disabled -> OK")
 
 
