@@ -26,7 +26,7 @@ def _latest_range_file() -> Path:
     files = list((BASE_DIR / "results").glob("range_*/chart_range_events.csv"))
     if not files:
         raise FileNotFoundError("No KJB chart_range_events.csv found. Run the KJB range backtest first.")
-    return max(files, key=lambda p: (p.parent.name, p.stat().st_mtime))
+    return max(files, key=lambda p: p.stat().st_mtime)
 
 
 def _resolve(value: str | None, default: Path) -> Path:
@@ -89,6 +89,7 @@ def main() -> None:
     ) or {}
 
     df = pd.read_csv(range_file, encoding="utf-8-sig", dtype={"ticker": str})
+    print(f"[INFO] optimizer input: {range_file}")
     df = _ensure_d5_path_metrics(df)
     out_dir = _resolve(args.out, range_file.parent / "optimizer_d5")
 
