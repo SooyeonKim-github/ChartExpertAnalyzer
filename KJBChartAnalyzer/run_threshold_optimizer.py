@@ -37,13 +37,7 @@ def _resolve(value: str | None, default: Path) -> Path:
 
 
 def _ensure_d5_path_metrics(df: pd.DataFrame) -> pd.DataFrame:
-    """Build complete D+5 close-path quality metrics for old/new Range files.
-
-    The current KJB Range output already contains D+1..D+5 close returns.
-    This preprocessing keeps old Range CSVs usable without forcing a rerun.
-    Rows missing any of the five forward closes remain NaN so incomplete labels
-    cannot leak into the optimizer.
-    """
+    """Build complete D+5 close-path quality metrics for old/new Range files."""
     missing = [c for c in D5_PATH_COLUMNS if c not in df.columns]
     if missing:
         raise ValueError(f"D+5 optimizer requires forward-return columns: {missing}")
@@ -82,13 +76,14 @@ def _ensure_d5_path_metrics(df: pd.DataFrame) -> pd.DataFrame:
 def main() -> None:
     p = argparse.ArgumentParser(description="KJB D+5 purged walk-forward threshold optimizer")
     p.add_argument("--range-file")
-    p.add_argument("--config", default="config/default.yaml")
+    # D+5 optimizer는 live default가 아니라 실험용 d5 config를 기본으로 사용한다.
+    p.add_argument("--config", default="config/d5_diagnostics.yaml")
     p.add_argument("--optimizer-config", default="config/threshold_optimizer.yaml")
     p.add_argument("--out")
     args = p.parse_args()
 
     range_file = _resolve(args.range_file, _latest_range_file())
-    cfg = load_config(str(_resolve(args.config, BASE_DIR / "config/default.yaml")))
+    cfg = load_config(str(_resolve(args.config, BASE_DIR / "config/d5_diagnostics.yaml")))
     optimizer_cfg = yaml.safe_load(
         _resolve(args.optimizer_config, BASE_DIR / "config/threshold_optimizer.yaml").read_text(encoding="utf-8")
     ) or {}
@@ -112,6 +107,7 @@ def main() -> None:
     print(f"Input : {range_file}")
     print(f"Output: {out_dir}")
     print("Target: D+5")
+    print("Score : D5 score (Selection - OverextensionPenalty)")
     print("Path metrics: MFE_D5 / MAE_D5 / excursion_ratio_D5 (D+1..D+5 close path)")
     print("Recommended:")
     for key, value in result.recommended_params.items():
