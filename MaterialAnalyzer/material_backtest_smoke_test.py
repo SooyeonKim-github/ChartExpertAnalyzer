@@ -40,6 +40,14 @@ def main():
                 "theme": "", "backtest_eligible": 1,
             },
             {
+                "market_date": "20260102", "event_id": "E1B", "ticker": "005930", "name": "A",
+                "event_type": "BUYBACK", "event_stage": "CONFIRMED", "event_title": "자사주",
+                "material_score": 80, "material_status": "CONFIRMED", "relation_type": "DIRECT",
+                "relation_weight": 1.0, "mapping_relevance": 1.0, "ticker_material_score": 80,
+                "novelty_status": "NEW_EVENT", "positive_negative": "POSITIVE", "source_id": "DART",
+                "theme": "", "backtest_eligible": 1,
+            },
+            {
                 "market_date": "20260105", "event_id": "E2", "ticker": "005930", "name": "A",
                 "event_type": "DERIVATIVE_LOSS", "event_stage": "CONFIRMED", "event_title": "손실",
                 "material_score": 75, "material_status": "CONFIRMED", "relation_type": "DIRECT",
@@ -50,20 +58,23 @@ def main():
         ]
         pd.DataFrame(rows).to_csv(source, index=False, encoding="utf-8-sig")
         result = MaterialBacktester(provider=_FakeProvider()).run(source, output)
-        assert result.result_rows == 2
-        assert result.valid_entry_rows == 2
+        assert result.result_rows == 3
+        assert result.valid_entry_rows == 3
         frame = pd.read_csv(result.results_csv, encoding="utf-8-sig")
         assert round(float(frame.loc[0, "D+1"]), 6) == 1.0
         assert float(frame.loc[0, "directional_D+1"]) > 0
-        assert float(frame.loc[1, "directional_D+1"]) < 0
+        assert float(frame.loc[2, "directional_D+1"]) < 0
+        ticker_day = pd.read_csv(result.ticker_day_results_csv, encoding="utf-8-sig")
+        assert len(ticker_day) == 2
+        assert int(ticker_day.loc[ticker_day["market_date"] == 20260102, "event_count"].iloc[0]) == 2
         summary = pd.read_csv(result.summary_csv, encoding="utf-8-sig")
         assert ((summary["dimension"] == "OVERALL") & (summary["value"] == "ALL")).any()
 
-    print("[OK] MaterialBacktester V1 smoke test")
+    print("[OK] MaterialBacktester V1.1 smoke test")
     print("     point-in-time exact entry -> OK")
     print("     D+1/D+5/D+10/D+20/D+40/D+60 -> OK")
-    print("     positive/negative directional return -> OK")
-    print("     summary dimensions -> OK")
+    print("     event-level + ticker-day outputs -> OK")
+    print("     detailed price status -> OK")
 
 
 if __name__ == "__main__":
