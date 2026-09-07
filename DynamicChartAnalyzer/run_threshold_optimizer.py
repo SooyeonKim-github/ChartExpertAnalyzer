@@ -43,7 +43,12 @@ def main() -> None:
     optimizer_cfg = yaml.safe_load(
         _resolve(args.optimizer_config, BASE_DIR / "threshold_optimizer.yaml").read_text(encoding="utf-8")
     ) or {}
-    df = pd.read_csv(range_file, encoding="utf-8-sig", dtype={"ticker": str})
+    df = pd.read_csv(
+        range_file,
+        encoding="utf-8-sig",
+        dtype={"ticker": str},
+        low_memory=False,
+    )
     print(f"[INFO] optimizer input: {range_file}")
     out_dir = _resolve(args.out, range_file.parent / "optimizer")
 
@@ -52,12 +57,25 @@ def main() -> None:
         analyzer_config={"confirmed_score": float(args.current_confirmed_score)},
     )
     result = ThresholdOptimizer(adapter, optimizer_cfg).run(df)
-    result.write(out_dir / "confirmed")
+    paths = result.write(out_dir / "confirmed")
     result.current_vs_optimized.to_csv(
         out_dir / "current_vs_optimized.csv", index=False, encoding="utf-8-sig"
     )
-    (out_dir / "recommended_thresholds.yaml").write_text(
-        yaml.safe_dump(result.recommended_config, allow_unicode=True, sort_keys=False),
+
+    eligible_path = out_dir / "recommended_thresholds.yaml"
+    provisional_path = out_dir / "provisional_thresholds.yaml"
+    if result.eligible_for_application:
+        eligible_payload = result.recommended_config
+        provisional_payload = {}
+    else:
+        eligible_payload = {}
+        provisional_payload = result.recommended_config
+    eligible_path.write_text(
+        yaml.safe_dump(eligible_payload, allow_unicode=True, sort_keys=False),
+        encoding="utf-8",
+    )
+    provisional_path.write_text(
+        yaml.safe_dump(provisional_payload, allow_unicode=True, sort_keys=False),
         encoding="utf-8",
     )
 
@@ -66,9 +84,16 @@ def main() -> None:
     print("============================================")
     print(f"Input : {range_file}")
     print(f"Output: {out_dir}")
-    print(f"Recommended: {result.recommended_params}")
+    print(f"Candidate    : {result.recommended_params}")
+    print(f"Quality      : {result.recommendation_quality}")
+    print(f"Application  : {'ELIGIBLE' if result.eligible_for_application else 'NOT ELIGIBLE'}")
+    print(f"Summary      : {paths['recommendation_summary']}")
+    if result.eligible_for_application:
+        print(f"Eligible config: {eligible_path}")
+    else:
+        print(f"Provisional only: {provisional_path}")
     print("Lecture RSI/MACD/Ichimoku and 1:2:7 are not optimized.")
-    print("NOTE: recommendation is not applied to main_range.py defaults automatically.")
+    print("NOTE: only ACCEPTABLE/ROBUST recommendations are eligible for application.")
 
 
 if __name__ == "__main__":
