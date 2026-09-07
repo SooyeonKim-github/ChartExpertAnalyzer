@@ -36,7 +36,10 @@ def _latest_range_file() -> Path:
         raise FileNotFoundError(
             "No LeaderStockAnalyzer range_all_results.csv found. Run run_range.bat first."
         )
-    return max(candidates, key=lambda p: (p.parent.name, p.stat().st_mtime))
+    # Use the file that was actually generated/updated most recently. Sorting by
+    # range folder name first can incorrectly prefer a newer single-day range
+    # (for example range_20260907_20260907) over a freshly generated long range.
+    return max(candidates, key=lambda p: p.stat().st_mtime)
 
 
 def _resolve_path(value: str | None, default: Path | None = None) -> Path:
@@ -46,6 +49,17 @@ def _resolve_path(value: str | None, default: Path | None = None) -> Path:
         return default
     p = Path(value)
     return p if p.is_absolute() else BASE_DIR / p
+
+
+def _print_input_summary(range_file: Path, df: pd.DataFrame) -> None:
+    dates = pd.to_datetime(df.get("scan_date", pd.Series(dtype=str)), errors="coerce").dropna().dt.normalize()
+    unique = dates.drop_duplicates().sort_values()
+    print("\n[INFO] Threshold optimizer input")
+    print(f"  file         : {range_file}")
+    print(f"  rows         : {len(df):,}")
+    print(f"  trading days : {len(unique):,}")
+    if not unique.empty:
+        print(f"  date range   : {unique.iloc[0].date()} ~ {unique.iloc[-1].date()}")
 
 
 def _run_phase(
@@ -84,7 +98,7 @@ def main() -> None:
     p = argparse.ArgumentParser(
         description="LeaderStockAnalyzer purged walk-forward threshold optimizer"
     )
-    p.add_argument("--range-file", help="range_all_results.csv; default=latest range result")
+    p.add_argument("--range-file", help="range_all_results.csv; default=latest modified range result")
     p.add_argument("--config", default="config/default.yaml")
     p.add_argument("--optimizer-config", default="config/threshold_optimizer.yaml")
     p.add_argument("--phase", choices=["confirmed", "strong", "both"], default="both")
@@ -104,6 +118,7 @@ def main() -> None:
         encoding="utf-8-sig",
         dtype={"scan_date": str, "ticker": str},
     )
+    _print_input_summary(range_file, df)
     out_dir = _resolve_path(args.out, range_file.parent / "optimizer")
     out_dir.mkdir(parents=True, exist_ok=True)
 
