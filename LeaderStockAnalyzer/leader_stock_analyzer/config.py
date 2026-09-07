@@ -170,6 +170,17 @@ DEFAULT_CONFIG: dict[str, Any] = {
         "recovery_confirm_days": 2,
         "memory_reset_calendar_days": 10,
     },
+    "leadership_validation": {
+        "enabled": True,
+        "retention_horizon": 5,
+        "persistence_horizon": 10,
+        "market_top_rank": 20,
+        "trading_value_top_rank": 20,
+        "false_leader_consecutive_days": 3,
+        "false_leader_rank_min": 50,
+        "false_leader_score_max": 60.0,
+        "sector_min_available_days": 2,
+    },
     "performance": {
         "horizons": [1, 5, 20, 60],
         "excursion_horizons": [5, 20, 60],
