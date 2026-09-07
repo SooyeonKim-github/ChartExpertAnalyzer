@@ -22,7 +22,7 @@ def _latest_range_file() -> Path:
     files = list((BASE_DIR / "results").glob("range_*/range_all_results.csv"))
     if not files:
         raise FileNotFoundError("No MA range_all_results.csv found. Run run_ma_range.bat first.")
-    return max(files, key=lambda p: (p.parent.name, p.stat().st_mtime))
+    return max(files, key=lambda p: p.stat().st_mtime)
 
 
 def _resolve(value: str | None, default: Path) -> Path:
@@ -56,6 +56,7 @@ def main() -> None:
     ) or {}
     analyzer_cfg = DEFAULT_CONFIG.to_dict()
     df = pd.read_csv(range_file, encoding="utf-8-sig", dtype={"Ticker": str})
+    print(f"[INFO] optimizer input: {range_file}")
     out_dir = _resolve(args.out, range_file.parent / "optimizer")
     out_dir.mkdir(parents=True, exist_ok=True)
 
