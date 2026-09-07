@@ -38,7 +38,7 @@ def _latest_range_file() -> Path:
         )
     # Use the file that was actually generated/updated most recently. Sorting by
     # range folder name first can incorrectly prefer a newer single-day range
-    # (for example range_20260907_20260907) over a freshly generated long range.
+    # over a freshly generated long range.
     return max(candidates, key=lambda p: p.stat().st_mtime)
 
 
@@ -51,8 +51,15 @@ def _resolve_path(value: str | None, default: Path | None = None) -> Path:
     return p if p.is_absolute() else BASE_DIR / p
 
 
+def _parse_scan_dates(df: pd.DataFrame) -> pd.Series:
+    raw = df.get("scan_date", pd.Series(index=df.index, dtype=str)).astype(str).str.strip()
+    ymd = pd.to_datetime(raw, format="%Y%m%d", errors="coerce")
+    fallback = pd.to_datetime(raw, errors="coerce")
+    return ymd.fillna(fallback).dt.normalize()
+
+
 def _print_input_summary(range_file: Path, df: pd.DataFrame) -> None:
-    dates = pd.to_datetime(df.get("scan_date", pd.Series(dtype=str)), errors="coerce").dropna().dt.normalize()
+    dates = _parse_scan_dates(df).dropna()
     unique = dates.drop_duplicates().sort_values()
     print("\n[INFO] Threshold optimizer input")
     print(f"  file         : {range_file}")
@@ -60,6 +67,58 @@ def _print_input_summary(range_file: Path, df: pd.DataFrame) -> None:
     print(f"  trading days : {len(unique):,}")
     if not unique.empty:
         print(f"  date range   : {unique.iloc[0].date()} ~ {unique.iloc[-1].date()}")
+
+
+def _write_strong_insufficient_diagnostics(
+    df: pd.DataFrame,
+    out_dir: Path,
+    error: Exception,
+) -> Path:
+    """Persist useful diagnostics instead of losing a successful CONFIRMED run."""
+    strong_dir = out_dir / "strong"
+    strong_dir.mkdir(parents=True, exist_ok=True)
+
+    work = df.copy()
+    work["_scan_date"] = _parse_scan_dates(work)
+    work["_d20_valid"] = pd.to_numeric(work.get("D+20"), errors="coerce").notna()
+    status = work.get("status", pd.Series(index=work.index, dtype=str)).astype(str)
+    work["_current_strong"] = status.eq("STRONG_CONFIRMED")
+    work["month"] = work["_scan_date"].dt.to_period("M").astype(str)
+
+    rows = []
+    for month, grp in work[work["_scan_date"].notna()].groupby("month", sort=True):
+        strong = grp[grp["_current_strong"]]
+        rows.append(
+            {
+                "month": month,
+                "trading_days": int(grp["_scan_date"].nunique()),
+                "current_strong_count": int(len(strong)),
+                "current_strong_D20_valid": int(strong["_d20_valid"].sum()),
+                "current_strong_unique_dates_D20": int(
+                    strong.loc[strong["_d20_valid"], "_scan_date"].nunique()
+                ),
+            }
+        )
+
+    diag_path = strong_dir / "insufficient_sample_diagnostics.csv"
+    pd.DataFrame(rows).to_csv(diag_path, index=False, encoding="utf-8-sig")
+
+    current_strong = work[work["_current_strong"]]
+    current_valid = current_strong[current_strong["_d20_valid"]]
+    note = (
+        "STRONG threshold optimization was skipped because no parameter combination "
+        "passed the configured out-of-sample sample requirements.\n\n"
+        f"Reason: {error}\n\n"
+        f"Current STRONG rows: {len(current_strong):,}\n"
+        f"Current STRONG rows with valid D+20: {len(current_valid):,}\n"
+        f"Current STRONG unique dates with valid D+20: "
+        f"{current_valid['_scan_date'].nunique():,}\n\n"
+        "CONFIRMED optimization remains valid and its recommendation is preserved.\n"
+        "Do not relax STRONG sample constraints merely to force a result. "
+        "Prefer a longer historical range (ideally multiple market regimes).\n"
+    )
+    (strong_dir / "INSUFFICIENT_SAMPLE.txt").write_text(note, encoding="utf-8")
+    return diag_path
 
 
 def _run_phase(
@@ -117,6 +176,7 @@ def main() -> None:
         range_file,
         encoding="utf-8-sig",
         dtype={"scan_date": str, "ticker": str},
+        low_memory=False,
     )
     _print_input_summary(range_file, df)
     out_dir = _resolve_path(args.out, range_file.parent / "optimizer")
@@ -124,6 +184,8 @@ def main() -> None:
 
     confirmed_result = None
     strong_result = None
+    strong_skip_error: Exception | None = None
+
     if args.phase in {"confirmed", "both"}:
         confirmed_result = _run_phase(
             "confirmed", df, analyzer_cfg, optimizer_cfg, out_dir
@@ -131,14 +193,24 @@ def main() -> None:
 
     if args.phase in {"strong", "both"}:
         floor = confirmed_result.recommended_params if confirmed_result is not None else None
-        strong_result = _run_phase(
-            "strong",
-            df,
-            analyzer_cfg,
-            optimizer_cfg,
-            out_dir,
-            confirmed_floor=floor,
-        )
+        try:
+            strong_result = _run_phase(
+                "strong",
+                df,
+                analyzer_cfg,
+                optimizer_cfg,
+                out_dir,
+                confirmed_floor=floor,
+            )
+        except ValueError as exc:
+            if args.phase == "strong":
+                raise
+            strong_skip_error = exc
+            diag = _write_strong_insufficient_diagnostics(df, out_dir, exc)
+            print("\n[STRONG] optimization skipped: insufficient out-of-sample sample")
+            print(f"  reason     : {exc}")
+            print(f"  diagnostics: {diag}")
+            print("  action     : keep current STRONG thresholds; use a longer Range before optimizing STRONG")
 
     combined: dict = {}
     summary_rows: list[pd.DataFrame] = []
@@ -171,6 +243,8 @@ def main() -> None:
     print(f"Input : {range_file}")
     print(f"Output: {out_dir}")
     print(f"Recommended config: {combined_path}")
+    if strong_skip_error is not None:
+        print("STRONG: skipped because OOS sample was insufficient; current STRONG thresholds were not replaced.")
     print("NOTE: recommended_thresholds.yaml is NOT applied to default.yaml automatically.")
 
 
