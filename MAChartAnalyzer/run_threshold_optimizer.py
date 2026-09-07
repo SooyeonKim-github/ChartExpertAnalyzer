@@ -55,45 +55,88 @@ def main() -> None:
         _resolve(args.optimizer_config, BASE_DIR / "threshold_optimizer.yaml").read_text(encoding="utf-8")
     ) or {}
     analyzer_cfg = DEFAULT_CONFIG.to_dict()
-    df = pd.read_csv(range_file, encoding="utf-8-sig", dtype={"Ticker": str})
+    df = pd.read_csv(
+        range_file,
+        encoding="utf-8-sig",
+        dtype={"Ticker": str},
+        low_memory=False,
+    )
     print(f"[INFO] optimizer input: {range_file}")
     out_dir = _resolve(args.out, range_file.parent / "optimizer")
     out_dir.mkdir(parents=True, exist_ok=True)
 
     confirmed = None
     strong = None
-    combined: dict = {}
+    eligible_config: dict = {}
+    provisional_config: dict = {}
     comparisons: list[pd.DataFrame] = []
 
     if args.phase in {"confirmed", "both"}:
         adapter = MAThresholdAdapter(phase="confirmed", analyzer_config=analyzer_cfg)
         confirmed = ThresholdOptimizer(adapter, optimizer_cfg).run(df)
         confirmed.write(out_dir / "confirmed")
-        combined = _deep_merge(combined, confirmed.recommended_config)
+        target = eligible_config if confirmed.eligible_for_application else provisional_config
+        merged = _deep_merge(target, confirmed.recommended_config)
+        if confirmed.eligible_for_application:
+            eligible_config = merged
+        else:
+            provisional_config = merged
         c = confirmed.current_vs_optimized.copy()
         c.insert(0, "phase", "confirmed")
         comparisons.append(c)
+        print(
+            f"[CONFIRMED] quality={confirmed.recommendation_quality} "
+            f"application={'ELIGIBLE' if confirmed.eligible_for_application else 'NOT ELIGIBLE'}"
+        )
 
     if args.phase in {"strong", "both"}:
-        floor = confirmed.recommended_params if confirmed is not None else None
+        if confirmed is not None and confirmed.eligible_for_application:
+            floor = confirmed.recommended_params
+        else:
+            floor = MAThresholdAdapter(
+                phase="confirmed", analyzer_config=analyzer_cfg
+            ).current_parameters()
         adapter = MAThresholdAdapter(
             phase="strong",
             analyzer_config=analyzer_cfg,
             confirmed_floor=floor,
         )
-        strong = ThresholdOptimizer(adapter, optimizer_cfg).run(df)
-        strong.write(out_dir / "strong")
-        combined = _deep_merge(combined, strong.recommended_config)
-        c = strong.current_vs_optimized.copy()
-        c.insert(0, "phase", "strong")
-        comparisons.append(c)
+        try:
+            strong = ThresholdOptimizer(adapter, optimizer_cfg).run(df)
+            strong.write(out_dir / "strong")
+            target = eligible_config if strong.eligible_for_application else provisional_config
+            merged = _deep_merge(target, strong.recommended_config)
+            if strong.eligible_for_application:
+                eligible_config = merged
+            else:
+                provisional_config = merged
+            c = strong.current_vs_optimized.copy()
+            c.insert(0, "phase", "strong")
+            comparisons.append(c)
+            print(
+                f"[STRONG] quality={strong.recommendation_quality} "
+                f"application={'ELIGIBLE' if strong.eligible_for_application else 'NOT ELIGIBLE'}"
+            )
+        except ValueError as exc:
+            if args.phase == "strong":
+                raise
+            print(f"[STRONG] skipped: {exc}")
+            print("[STRONG] action: keep current thresholds and extend the historical Range")
 
     if comparisons:
         pd.concat(comparisons, ignore_index=True).to_csv(
             out_dir / "current_vs_optimized.csv", index=False, encoding="utf-8-sig"
         )
-    (out_dir / "recommended_thresholds.yaml").write_text(
-        yaml.safe_dump(combined, allow_unicode=True, sort_keys=False), encoding="utf-8"
+
+    eligible_path = out_dir / "recommended_thresholds.yaml"
+    provisional_path = out_dir / "provisional_thresholds.yaml"
+    eligible_path.write_text(
+        yaml.safe_dump(eligible_config, allow_unicode=True, sort_keys=False),
+        encoding="utf-8",
+    )
+    provisional_path.write_text(
+        yaml.safe_dump(provisional_config, allow_unicode=True, sort_keys=False),
+        encoding="utf-8",
     )
 
     print("\n============================================")
@@ -101,11 +144,13 @@ def main() -> None:
     print("============================================")
     print(f"Input : {range_file}")
     print(f"Output: {out_dir}")
-    if confirmed is not None:
-        print(f"CONFIRMED: {confirmed.recommended_params}")
-    if strong is not None:
-        print(f"STRONG   : {strong.recommended_params}")
-    print("NOTE: recommendation is not applied to config.py automatically.")
+    if eligible_config:
+        print(f"Application-eligible config: {eligible_path}")
+    else:
+        print("Application-eligible config: NONE")
+    if provisional_config:
+        print(f"Provisional diagnostics    : {provisional_path}")
+    print("NOTE: only ACCEPTABLE/ROBUST recommendations are eligible for application.")
 
 
 if __name__ == "__main__":
