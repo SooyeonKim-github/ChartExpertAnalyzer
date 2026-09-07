@@ -9,6 +9,8 @@ from MaterialAnalyzer.news.storage import Database
 FIELDS = [
     "market_date","published_at","published_at_precision","event_id","ticker","name",
     "event_type","event_stage","event_title","material_score","material_status",
+    "direct_company_score","event_certainty_score","financial_impact_score","quantification_score",
+    "novelty_component_score","source_reliability_score","multi_source_score","scoring_version",
     "relation_type","relation_weight","mapping_relevance","ticker_material_score",
     "novelty_status","novelty_score","positive_negative","theme","theme_materiality_score",
     "source_id","source_count","coverage_status","context_only","backtest_eligible","eligibility_reason",
@@ -26,6 +28,8 @@ class HistoricalMaterialReporter:
             return conn.execute(
                 "SELECT e.market_date,a.published_at,a.published_at_precision,e.event_id,l.ticker,l.name,"
                 "e.event_type,e.event_stage,e.event_title,s.material_score,s.material_status,"
+                "s.direct_company_score,s.event_certainty_score,s.financial_impact_score,s.quantification_score,"
+                "s.novelty_component_score,s.source_reliability_score,s.multi_source_score,s.scoring_version,"
                 "l.relation_type,l.relation_weight,l.mapping_relevance,l.ticker_material_score,"
                 "n.novelty_status,n.novelty_score,e.positive_negative,l.theme,l.theme_materiality_score,"
                 "e.original_source_id AS source_id,e.source_count,COALESCE(c.status,'UNKNOWN') AS coverage_status "
@@ -63,6 +67,14 @@ class HistoricalMaterialReporter:
             "event_id":row["event_id"], "ticker":row["ticker"], "name":row["name"],
             "event_type":row["event_type"], "event_stage":row["event_stage"], "event_title":row["event_title"],
             "material_score":row["material_score"], "material_status":row["material_status"],
+            "direct_company_score":row["direct_company_score"],
+            "event_certainty_score":row["event_certainty_score"],
+            "financial_impact_score":row["financial_impact_score"],
+            "quantification_score":row["quantification_score"],
+            "novelty_component_score":row["novelty_component_score"],
+            "source_reliability_score":row["source_reliability_score"],
+            "multi_source_score":row["multi_source_score"],
+            "scoring_version":row["scoring_version"],
             "relation_type":row["relation_type"], "relation_weight":row["relation_weight"],
             "mapping_relevance":row["mapping_relevance"], "ticker_material_score":row["ticker_material_score"],
             "novelty_status":row["novelty_status"] or "", "novelty_score":row["novelty_score"] if row["novelty_score"] is not None else "",
