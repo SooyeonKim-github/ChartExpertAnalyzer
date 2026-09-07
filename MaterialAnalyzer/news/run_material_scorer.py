@@ -24,8 +24,9 @@ def run(
     scorer = MaterialScorer(repository)
 
     print("=" * 76)
-    print(" MaterialScorer V1.2 - Expanded Material Event Impact Score")
-    print(" Routine Governance Impact Guard")
+    print(" MaterialScorer V2.0 - Catalyst Importance / Certainty Quality Score")
+    print(" 30 importance + 20 certainty + 15 directness + 15 scale + 10 novelty + 5 source + 5 confirmation")
+    print(" Direction (POSITIVE/NEGATIVE) is separate from material importance")
     print("=" * 76)
     print(f"DB      : {db_path}")
     print(f"Report  : {output_path}")
@@ -49,7 +50,7 @@ def run(
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Deterministic MaterialScorer V1.2")
+    parser = argparse.ArgumentParser(description="Deterministic MaterialScorer V2.0")
     parser.add_argument("--db", default=str(DEFAULT_DB))
     parser.add_argument("--output", default=str(DEFAULT_REPORT))
     parser.add_argument("--rebuild", action="store_true")
