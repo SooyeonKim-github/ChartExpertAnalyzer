@@ -57,7 +57,8 @@ echo   KR Stock Screening - Independent Analyzers
 echo ============================================
 echo Universe : recent %LOOKBACK%-trading-day avg trading-value TOP %TOP_N%
 echo Markets  : KOSPI + KOSDAQ
-echo KJB / Swing / MA / Dynamic are evaluated independently.
+echo KJB      : D+5 FINAL V1 ^(Overextension + D5 score + Daily Top3^)
+echo Swing / MA / Dynamic are evaluated independently.
 echo Dynamic status uses the same V2.2 quality rules as Dynamic range.
 echo ============================================
 echo.
@@ -69,7 +70,7 @@ if not defined LIQUIDITY_UNIVERSE_XLSX goto RUN_FAILED
 if not exist "%LIQUIDITY_UNIVERSE_XLSX%" goto RUN_FAILED
 
 echo.
-echo [1/5] KJB KR screen...
+echo [1/5] KJB KR screen - D+5 FINAL V1...
 pushd "%ROOT%KJBChartAnalyzer"
 "%PYTHON_EXE%" %PYTHON_PREFIX% app.py screen-top100 ^
     --provider pykrx ^
@@ -135,6 +136,7 @@ echo ============================================
 echo Universe : %LIQUIDITY_UNIVERSE_XLSX%
 echo History  : %ROOT%results\confirmed_candidates.csv
 echo Latest   : %ROOT%results\today_confirmed_candidates.csv
+echo [INFO] KJB CONFIRMED = finalized D+5 Daily Top3 operational candidates.
 echo [INFO] KOSPI + KOSDAQ, recent %LOOKBACK%-day avg trading-value TOP %TOP_N%.
 echo ============================================
 pause
