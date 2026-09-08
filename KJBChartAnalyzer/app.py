@@ -10,6 +10,7 @@ from chartsel.data.yfinance_provider import YFinanceProvider
 from chartsel.data.pykrx_provider import PykrxDataProvider
 from chartsel.analysis.analyzer import ChartAnalyzer
 from chartsel.selection.selector import StockSelector
+from chartsel.selection.d5_live import attach_live_sector_context, apply_live_d5_policy
 from chartsel.reporting.report import print_result, save_result_json, save_screen_csv
 from chartsel.reporting.agent_exporter import export_agent_candidates
 from chartsel.reporting.html_report import save_analysis_html, save_screen_html
@@ -46,12 +47,59 @@ def _safe_filename(value: str) -> str:
     return re.sub(r'[^0-9A-Za-z가-힣._-]+', '_', str(value or '')).strip('_')
 
 
-def _save_confirmed_charts(table, selector: StockSelector, analyzer: ChartAnalyzer, out_dir: Path) -> list[Path]:
-    """현재 스크린의 CONFIRMED 종목만 차트로 저장한다.
+def _benchmark_for_market(market: str) -> str:
+    return '^KQ11' if 'KOSDAQ' in str(market or '').upper() else '^KS11'
 
-    StockSelector가 분석 시 보관한 OHLCV/result를 재사용하므로 추가 데이터 조회는 하지 않는다.
-    이전 실행의 PNG는 삭제해 현재 CONFIRMED 결과와 섞이지 않게 한다.
-    """
+
+def _apply_final_d5_live_screen(table, selector, provider, universe, cfg, period: str):
+    """Attach live sector context and apply the frozen KJB D+5 production policy."""
+    if table.empty or not bool((cfg.get('d5_v2', {}) or {}).get('enabled_for_live', False)):
+        return table
+
+    price_cache = {
+        str(ticker).zfill(6): raw_df
+        for ticker, (raw_df, _result) in selector.last_analysis.items()
+        if raw_df is not None and not raw_df.empty
+    }
+    benchmark_cache = {}
+    for info in universe:
+        benchmark = _benchmark_for_market(getattr(info, 'market', 'KOSPI'))
+        if benchmark in benchmark_cache:
+            continue
+        try:
+            benchmark_cache[benchmark] = provider.get_ohlcv(benchmark, period=period)
+        except Exception as exc:
+            print(f'[WARN] D+5 sector benchmark load failed {benchmark}: {exc}')
+            benchmark_cache[benchmark] = None
+
+    enriched = attach_live_sector_context(
+        table,
+        price_cache=price_cache,
+        benchmark_cache=benchmark_cache,
+        # The shared liquidity-universe Excel intentionally contains only universe fields.
+        # SectorBacktestService therefore uses KJB_Info for the sector mapping, matching range.
+        sector_mapping_excel=DEFAULT_INFO_EXCEL,
+        cfg=cfg,
+    )
+    if 'sector_context_error' in enriched.columns:
+        error_text = str(enriched['sector_context_error'].iloc[0] or '').strip()
+        if error_text:
+            print(f'[WARN] D+5 sector context fallback active: {error_text}')
+
+    final = apply_live_d5_policy(enriched, cfg)
+    if 'D5_Status' in final.columns:
+        d5_confirmed = int(final['D5_Status'].eq('D5_CONFIRMED').sum())
+        operational = int(final['Status'].eq('CONFIRMED').sum())
+        top_n = int((cfg.get('d5_v2', {}) or {}).get('daily_top_n', 3))
+        print(
+            f'[KJB D+5 FINAL] D5_CONFIRMED={d5_confirmed} | '
+            f'Operational CONFIRMED Top{top_n}={operational}'
+        )
+    return final
+
+
+def _save_confirmed_charts(table, selector: StockSelector, analyzer: ChartAnalyzer, out_dir: Path) -> list[Path]:
+    """현재 스크린의 operational CONFIRMED 종목만 차트로 저장한다."""
     out_dir.mkdir(parents=True, exist_ok=True)
     for old in out_dir.glob('*.png'):
         try:
@@ -140,7 +188,7 @@ def cmd_screen(args):
 
 
 def cmd_screen_top(args):
-    """KOSPI_Info.xlsx에서 지정 기준 TOP N을 만들고 바로 차트 선별을 실행한다."""
+    """공통 Universe에서 TOP N을 만들고 KJB D+5 최종 선별을 실행한다."""
     cfg = load_config(args.config)
     provider = provider_from_args(args)
     analyzer = ChartAnalyzer(cfg)
@@ -160,6 +208,14 @@ def cmd_screen_top(args):
         universe,
         period=args.period,
         limit=args.max_results,
+    )
+    table = _apply_final_d5_live_screen(
+        table,
+        selector,
+        provider,
+        universe,
+        cfg,
+        args.period,
     )
     _print_screen(table, with_meta=True)
     if args.universe_out:
@@ -187,7 +243,7 @@ def _save_universe(universe, out_path: str):
         'market': x.market,
         'market_cap': x.market_cap,
         'trading_value': x.trading_value,
-        'volume': x.volume,
+        'volume_universe': x.volume,
     } for x in universe]).to_csv(p, index=False, encoding='utf-8-sig')
     print(f'Universe CSV: {p}')
 
@@ -202,9 +258,11 @@ def _print_screen(table, with_meta: bool = False):
     else:
         cols += ['ticker']
     cols += [
-        'Status', 'score', 'technical_score', 'timing_score', 'risk_score',
-        'relative_strength_score', 'leader_score', 'chase_risk', 'action',
-        'market_regime', 'close'
+        'Status', 'Baseline_Status', 'D5_Status', 'D5_Selected',
+        'score', 'raw_selection_score', 'd5_base_score', 'd5_adjusted_score',
+        'overextension_penalty', 'technical_score', 'timing_score', 'risk_score',
+        'relative_strength_score', 'leader_score', 'sector_leader_score',
+        'sector_name', 'chase_risk', 'action', 'market_regime', 'close'
     ]
     cols = [c for c in cols if c in table.columns]
     print(table[cols].to_string(index=False))
@@ -272,7 +330,7 @@ def build_parser():
     s.add_argument('--report', default=None, help='HTML 종목 랭킹 리포트 경로')
     s.set_defaults(func=cmd_screen)
 
-    st = sub.add_parser('screen-top100', help='KOSPI_Info.xlsx 시가총액 TOP100 자동 분석')
+    st = sub.add_parser('screen-top100', help='공통 Universe TOP N + KJB D+5 FINAL 분석')
     _add_provider_options(st, default='pykrx')
     st.add_argument('--info-excel', default=str(DEFAULT_INFO_EXCEL))
     st.add_argument('--top-n', type=int, default=100)
