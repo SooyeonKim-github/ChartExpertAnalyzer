@@ -23,6 +23,66 @@ def _parse_range(value: str) -> tuple[str, str]:
     return start, end
 
 
+def _bool_series(frame: pd.DataFrame, column: str) -> pd.Series:
+    if column not in frame.columns:
+        return pd.Series(False, index=frame.index, dtype=bool)
+    series = frame[column]
+    if pd.api.types.is_bool_dtype(series):
+        return series.fillna(False).astype(bool)
+    return series.map(lambda x: str(x).strip().lower() in {"true", "1", "yes", "y"}).fillna(False)
+
+
+def _sector_coverage_report(df: pd.DataFrame) -> pd.DataFrame:
+    columns = [
+        "month",
+        "rows",
+        "trading_days",
+        "available_rows",
+        "available_rate_pct",
+        "reliable_rows",
+        "reliable_rate_pct",
+        "distinct_sectors",
+    ]
+    if df is None or df.empty or "scan_date" not in df.columns:
+        return pd.DataFrame(columns=columns)
+
+    work = df.copy()
+    raw = work["scan_date"].astype(str).str.strip().str.replace(r"\.0$", "", regex=True)
+    ymd = pd.to_datetime(raw, format="%Y%m%d", errors="coerce")
+    fallback = pd.to_datetime(raw, errors="coerce")
+    work["_date"] = ymd.fillna(fallback).dt.normalize()
+    work = work[work["_date"].notna()].copy()
+    if work.empty:
+        return pd.DataFrame(columns=columns)
+
+    work["_month"] = work["_date"].dt.to_period("M").astype(str)
+    work["_available"] = _bool_series(work, "sector_context_available")
+    work["_reliable"] = _bool_series(work, "sector_context_reliable")
+    rows: list[dict] = []
+    for month, grp in work.groupby("_month", sort=True):
+        total = len(grp)
+        available = int(grp["_available"].sum())
+        reliable = int(grp["_reliable"].sum())
+        sector_count = (
+            int(grp.loc[grp["_available"], "sector"].dropna().astype(str).nunique())
+            if "sector" in grp.columns
+            else 0
+        )
+        rows.append(
+            {
+                "month": month,
+                "rows": total,
+                "trading_days": int(grp["_date"].nunique()),
+                "available_rows": available,
+                "available_rate_pct": round(available / total * 100.0, 2) if total else 0.0,
+                "reliable_rows": reliable,
+                "reliable_rate_pct": round(reliable / total * 100.0, 2) if total else 0.0,
+                "distinct_sectors": sector_count,
+            }
+        )
+    return pd.DataFrame(rows, columns=columns)
+
+
 def main() -> None:
     p = argparse.ArgumentParser(description="LeaderStockAnalyzer range scan")
     p.add_argument("--date-range", required=True, type=_parse_range)
@@ -50,6 +110,10 @@ def main() -> None:
     print(
         f"[INFO] Leader range ready | trading_days={len(dates)} "
         f"| daily ranking=scan-date trading_value TOP {args.top_n}"
+    )
+    print(
+        "[INFO] Sector Context membership | monthly point-in-time refresh "
+        "| prior-only fallback within configured staleness window"
     )
     print(
         "[INFO] Emerging Leader V1.1 enabled | score=Rank50 + Money25 + RS15 + Freshness10 "
@@ -132,6 +196,7 @@ def main() -> None:
     exhaustion_events_path = out_dir / "exhaustion_events.csv"
     exhaustion_summary_path = out_dir / "exhaustion_summary.csv"
     exhaustion_score_report_path = out_dir / "exhaustion_score_report.csv"
+    sector_coverage_path = out_dir / "sector_context_coverage.csv"
 
     leadership_dir = out_dir / "leadership_validation"
     leadership_dir.mkdir(parents=True, exist_ok=True)
@@ -151,6 +216,9 @@ def main() -> None:
     else:
         df.to_csv(cand_path, index=False, encoding="utf-8-sig")
         df.to_csv(lifecycle_path, index=False, encoding="utf-8-sig")
+
+    sector_coverage = _sector_coverage_report(df)
+    sector_coverage.to_csv(sector_coverage_path, index=False, encoding="utf-8-sig")
 
     leadership_overall = leadership_validation.summary(df)
     leadership_by_status = leadership_validation.summary(df, "status")
@@ -186,6 +254,7 @@ def main() -> None:
     print(f"[DONE] {exhaustion_events_path}")
     print(f"[DONE] {exhaustion_summary_path}")
     print(f"[DONE] {exhaustion_score_report_path}")
+    print(f"[DONE] {sector_coverage_path}")
     print(f"[DONE] leadership validation -> {leadership_dir}")
     print(f"       overall: {leadership_overall_path.name}")
     print(f"       status : {leadership_status_path.name}")
@@ -193,6 +262,24 @@ def main() -> None:
     print(f"[DONE] performance reports -> {perf_dir}")
     for name, path in report_paths.items():
         print(f"       {name}: {path.name}")
+
+    if not sector_coverage.empty:
+        total_rows = int(sector_coverage["rows"].sum())
+        available_rows = int(sector_coverage["available_rows"].sum())
+        reliable_rows = int(sector_coverage["reliable_rows"].sum())
+        print("\n[SECTOR CONTEXT COVERAGE]")
+        print(
+            f"  available={available_rows}/{total_rows} "
+            f"({available_rows / total_rows * 100.0:.2f}%)"
+        )
+        print(
+            f"  reliable ={reliable_rows}/{total_rows} "
+            f"({reliable_rows / total_rows * 100.0:.2f}%)"
+        )
+        weak_months = sector_coverage[sector_coverage["available_rate_pct"] < 80.0]
+        if not weak_months.empty:
+            months = ", ".join(weak_months["month"].astype(str).tolist())
+            print(f"  [WARN] sector coverage below 80%: {months}")
 
     if not leadership_by_status.empty:
         print("\n[LEADERSHIP VALIDATION]")
