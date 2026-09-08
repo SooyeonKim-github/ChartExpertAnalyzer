@@ -50,6 +50,10 @@ def main() -> None:
     top_n = int(args.top_n or cfg.get("universe", {}).get("top_n", 100))
     universe_xlsx = _resolve_universe_xlsx(base_dir, args.universe_xlsx)
 
+    out_dir = base_dir / args.out / _safe_range_key(args.date_range)
+    out_dir.mkdir(parents=True, exist_ok=True)
+    print(f"[INFO] Range output directory: {out_dir}")
+
     results, summary, errors, meta = run_range_v1(
         cfg,
         date_range=args.date_range,
@@ -58,8 +62,6 @@ def main() -> None:
         universe_xlsx=universe_xlsx,
     )
 
-    out_dir = base_dir / args.out / _safe_range_key(args.date_range)
-    out_dir.mkdir(parents=True, exist_ok=True)
     encoding = cfg.get("output", {}).get("encoding", "utf-8-sig")
 
     all_path = out_dir / "range_all_results.csv"
