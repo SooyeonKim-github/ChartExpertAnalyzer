@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import shutil
 import sys
 from copy import deepcopy
 from pathlib import Path
@@ -65,6 +66,31 @@ def _print_input_summary(range_file: Path, df: pd.DataFrame) -> None:
     print(f"  trading days : {len(unique):,}")
     if not unique.empty:
         print(f"  date range   : {unique.iloc[0].date()} ~ {unique.iloc[-1].date()}")
+
+
+def _clean_optimizer_outputs(out_dir: Path) -> None:
+    """Remove stale phase/result files from earlier optimizer runs.
+
+    Leadership validation reports are regenerated below and intentionally kept
+    outside this cleanup list. Phase folders are removed wholesale so an old
+    INSUFFICIENT_SAMPLE.txt cannot coexist with a newer successful/provisional
+    phase result.
+    """
+    for phase in ("confirmed", "strong"):
+        phase_dir = out_dir / phase
+        if phase_dir.exists():
+            shutil.rmtree(phase_dir)
+
+    for name in (
+        "current_vs_optimized.csv",
+        "recommended_thresholds.yaml",
+        "provisional_thresholds.yaml",
+        "provisional_confirmed_thresholds.yaml",
+        "provisional_strong_thresholds.yaml",
+    ):
+        path = out_dir / name
+        if path.exists():
+            path.unlink()
 
 
 def _ensure_leadership_labels(
@@ -257,6 +283,7 @@ def main() -> None:
     _print_input_summary(range_file, df)
     out_dir = _resolve_path(args.out, range_file.parent / "optimizer")
     out_dir.mkdir(parents=True, exist_ok=True)
+    _clean_optimizer_outputs(out_dir)
 
     df = _ensure_leadership_labels(df, analyzer_cfg, out_dir)
 
