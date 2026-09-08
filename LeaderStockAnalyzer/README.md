@@ -14,8 +14,8 @@
 8. 높은 점수라도 과열/윗꼬리/이격 과다이면 Chase Risk로 제어한다
 9. 강한 업종 안에서 실제 대장인지 Sector Context로 확인한다
 10. 오늘만 강한 종목과 며칠째 시장 중심인 종목을 Leader Persistence로 구분한다
-11. 미래 성과 평가는 same-day 판정 로직과 완전히 분리해 look-ahead를 방지한다
-12. Threshold는 단일 과거 최고값보다 Purged Walk-Forward와 parameter plateau를 우선한다
+11. 미래 검증은 same-day 판정 로직과 완전히 분리해 look-ahead를 방지한다
+12. Threshold는 수익률 최대화가 아니라 **실제 시장 주도력의 지속성**을 기준으로 검증한다
 
 ## Leader Score
 
@@ -30,7 +30,7 @@
 
 분봉 데이터가 없으면 Intraday Strength를 0점 처리하지 않고 **해당 가중치를 제외한 뒤 사용 가능한 신호만 재정규화**합니다.
 
-Sector Context, Persistence, Breakout Quality는 기존 100점 Leader Score에 억지로 합산하지 않고 독립 Context로 유지합니다. 따라서 Range 백테스트에서 각 로직의 효과를 따로 검증할 수 있습니다.
+Sector Context, Persistence, Breakout Quality는 기존 100점 Leader Score에 억지로 합산하지 않고 독립 Context로 유지합니다. 따라서 Range에서 각 로직의 효과를 따로 검증할 수 있습니다.
 
 ## Breakout Quality
 
@@ -114,7 +114,7 @@ Persistence가 낮다는 이유만으로 신규 주도주를 자동 탈락시키
 
 ## Range Performance Engine
 
-`main_range.py`에서는 same-day Analyzer 결과를 만든 뒤 별도 `performance/` 모듈에서 미래 성과를 계산합니다. 미래 데이터는 Leader/Timing/Status 판정에 절대 사용하지 않습니다.
+`main_range.py`에서는 same-day Analyzer 결과를 만든 뒤 별도 `performance/` 모듈에서 미래 수익률도 계산합니다. 이 값은 Leader/Timing/Status 판정에 절대 사용하지 않습니다.
 
 기본 출력:
 
@@ -129,13 +129,43 @@ Persistence가 낮다는 이유만으로 신규 주도주를 자동 탈락시키
 - `mfe_capture_D20`
 - `excursion_ratio_D20`
 
-MFE/MAE는 종가가 아니라 미래 구간의 실제 `high/low`를 사용하며 D+n은 거래일 row 기준입니다. 완전한 horizon이 없는 최근 신호는 해당 성과값을 비워 두어 기간 길이가 다른 표본을 섞지 않습니다.
+MFE/MAE는 종가가 아니라 미래 구간의 실제 `high/low`를 사용하며 D+n은 거래일 row 기준입니다. 완전한 horizon이 없는 최근 신호는 해당 성과값을 비워 둡니다.
 
-장기 Range에서 미래 OHLCV를 후보마다 반복 조회하지 않도록 종목별 전체 Range 데이터를 캐시해 재사용합니다.
+수익률 데이터는 이제 **Threshold 선택의 주목적이 아니라 2차 진단**으로 사용합니다.
+
+## Leadership Validation
+
+모든 날짜의 point-in-time 스캔이 끝난 뒤 사후적으로 미래 주도력 라벨을 계산합니다. 이 라벨은 당일 판정에 절대 들어가지 않습니다.
+
+주요 컬럼:
+
+- `leadership_valid_5d`, `leadership_valid_10d`
+- `leader_retention_5d`
+- `market_top20_retention_5d`
+- `turnover_top20_retention_5d`
+- `persistence_conversion_10d`
+- `sector_leader_retention_5d`
+- `false_leader_5d`
+- `leadership_quality_score`
+
+`leader_retention_5d`의 정답은 최적화 중인 CONFIRMED threshold 자체가 아닙니다. 독립된 Lifecycle Core 정의인 `Leader Score >= 75`와 `Market Leader Rank <= 20`을 사용합니다.
+
+`false_leader_5d`는 향후 5거래일 안에서 3거래일 연속으로 주도력이 붕괴하는지를 봅니다. 종목이 TOP N Range에서 사라지거나, `Market Rank > 50 + Leader Score < 60 + Persistence LOW`가 연속되면 False Leader로 봅니다.
+
+Range 실행 후:
+
+```text
+results/range_YYYYMMDD_YYYYMMDD/leadership_validation/
+  overall_summary.csv
+  by_status.csv
+  by_leader_type.csv
+```
+
+을 생성합니다.
 
 ## Performance Attribution
 
-Range 실행 후 자동으로 다음 파일을 만듭니다.
+수익률 진단용으로 다음 파일도 계속 만듭니다.
 
 ```text
 results/range_YYYYMMDD_YYYYMMDD/performance/
@@ -151,17 +181,6 @@ results/range_YYYYMMDD_YYYYMMDD/performance/
   performance_by_chase_risk.csv
   performance_by_combinations.csv
 ```
-
-주요 통계:
-
-- count / complete_count
-- 평균·중앙값·승률 D+5/D+20/D+60
-- D+20 p25 / p75
-- 평균·중앙 MFE/MAE D+20
-- 평균 excursion ratio / MFE capture
-- D+3 돌파 실패율
-
-기본 `min_group_count=20`이며 D+20 완전 표본이 20건 미만이면 `LOW_SAMPLE`로 표시합니다.
 
 ## Threshold Optimizer
 
@@ -181,23 +200,34 @@ LeaderStockAnalyzer/
   run_optimize_thresholds.bat
 ```
 
-기본 대상은 `D+20`이며 `CONFIRMED -> STRONG_CONFIRMED` 순으로 별도 최적화합니다.
+LeaderStockAnalyzer의 Objective profile은 `leadership_quality`입니다.
+
+```text
+Leader Core retention 5D       30%
+Market Rank TOP20 retention    20%
+Persistence conversion 10D     15%
+Trading Value TOP20 retention  15%
+Sector leadership consistency  10%
+False Leader avoidance         10%
+```
+
+`D+5`, `D+20`은 `current_vs_optimized.csv`에 진단값으로만 남고 Objective에는 들어가지 않습니다.
 
 기본 흐름:
 
 ```text
 Range 전체 결과
+    -> 미래 Leadership 라벨 생성
     -> 과거 Train에서 threshold grid 평가
     -> Train 상위 K 조합 선별
-    -> D+20 label leakage 방지용 20거래일 Purge
-    -> 미래 Validation에서 재평가
-    -> Fold 평균 성능 - Fold 편차 penalty
-    -> 주변 parameter 성능을 이용한 Plateau penalty
-    -> 현재 설정과 너무 먼 조합에 Distance penalty
-    -> recommended_thresholds.yaml
+    -> 10거래일 Purge (Persistence 10D label overlap 방지)
+    -> 미래 Validation에서 Leadership Quality 재평가
+    -> Fold 평균 - Fold 편차 penalty
+    -> Plateau / 현재 설정 거리 penalty
+    -> PROVISIONAL / ACCEPTABLE / ROBUST 등급
 ```
 
-현재 목적함수는 D+20 중앙값, 승률, P25, MAE 품질, excursion ratio, 표본수를 함께 사용합니다. Validation fold에서 최소 표본/최소 날짜 조건을 충족하지 못한 조합은 경쟁에서 제외합니다.
+기존 Range CSV에 Leadership 라벨이 없어도 `run_threshold_optimizer.py`가 날짜별 결과에서 자동 생성하므로 Range를 다시 돌릴 필요는 없습니다.
 
 실행:
 
@@ -205,16 +235,15 @@ Range 전체 결과
 run_optimize_thresholds.bat
 ```
 
-기본적으로 최신 `results/range_*/range_all_results.csv`를 자동으로 사용합니다. 직접 지정하려면:
-
-```bash
-python run_threshold_optimizer.py --range-file results/range_20230101_20260831/range_all_results.csv --phase both
-```
+기본적으로 최신 `results/range_*/range_all_results.csv`를 자동 사용합니다.
 
 산출물:
 
 ```text
 results/range_.../optimizer/
+  leadership_validation_metrics.csv
+  leadership_validation_overall.csv
+  leadership_validation_by_status.csv
   confirmed/
     all_trials.csv
     fold_results.csv
@@ -222,14 +251,15 @@ results/range_.../optimizer/
     top_configs.csv
     stability_report.csv
     current_vs_optimized.csv
-    recommended_thresholds.yaml
+    recommendation_summary.yaml
   strong/
     ...
   current_vs_optimized.csv
   recommended_thresholds.yaml
+  provisional_thresholds.yaml
 ```
 
-추천 Threshold는 `default.yaml`에 자동 적용하지 않습니다. 충분한 Out-of-Sample 안정성과 현재 대비 개선을 확인한 뒤 수동 반영합니다.
+`recommended_thresholds.yaml`에는 ACCEPTABLE / ROBUST만 들어가며 PROVISIONAL 후보는 별도 파일로 분리합니다.
 
 ## 실행
 
@@ -263,6 +293,7 @@ thresholds
 breakout_quality
 sector_context
 persistence
+leadership_validation
 performance
 ```
 
@@ -272,4 +303,4 @@ performance
 python -m pytest -q
 ```
 
-Leader/Timing/Sector/Persistence/Breakout Quality, Forward Performance/Attribution, Threshold Optimizer 합성 테스트를 포함합니다.
+Leader/Timing/Sector/Persistence/Breakout Quality, Leadership Validation, Forward Performance/Attribution, Threshold Optimizer 합성 테스트를 포함합니다.
