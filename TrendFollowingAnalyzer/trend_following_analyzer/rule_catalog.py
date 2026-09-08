@@ -55,8 +55,18 @@ RULE_CATALOG = (
     RuleSpec("stock.base_depth", EXPERIMENTAL, BACKTEST_ONLY, "Base 고점 대비 저점 깊이와 현재 고점 이격"),
     RuleSpec("stock.base_price_contraction", EXPERIMENTAL, BACKTEST_ONLY, "Base 전/후반 ATR% 및 가격범위 수축"),
     RuleSpec("stock.base_resistance_tolerance", EXPERIMENTAL, BACKTEST_ONLY, "Base 시작 저항대가 이후 고점과 3% 이내인지"),
+    RuleSpec("stock.base_failure_diagnostics", EXPERIMENTAL, BACKTEST_ONLY, "TOO_DEEP/TOO_FAR_FROM_HIGH/TOO_LOOSE/NO_RESISTANCE_ANCHOR를 최적 근접 Base 창 기준으로 분리"),
     RuleSpec("stock.prior_advance_freshness", EXPERIMENTAL, BACKTEST_ONLY, "선행 상승 고점에서 실제 Base 시작까지 거래일 수"),
     RuleSpec("stock.prior_advance_retention", EXPERIMENTAL, BACKTEST_ONLY, "선행 상승분 중 Base 저점/현재가가 유지한 비율"),
+    RuleSpec("stock.volume_contraction", LECTURE_CORE, BACKTEST_ONLY, "Base가 진행될수록 거래량이 줄고 매도 압력이 말라가는 강의 원칙"),
+    RuleSpec("stock.volume_contraction_ratio", EXPERIMENTAL, BACKTEST_ONLY, "Base 후반 평균/중앙 거래량을 전반과 비교하는 수축 비율"),
+    RuleSpec("stock.volume_dry_up", EXPERIMENTAL, BACKTEST_ONLY, "Base 전반 중앙 거래량의 70% 이하인 후반 dry-up 일수 비율"),
+    RuleSpec("stock.volume_down_vs_up", EXPERIMENTAL, BACKTEST_ONLY, "Base 내 하락일 평균 거래량 / 상승일 평균 거래량"),
+    RuleSpec("stock.breakout", LECTURE_CORE, BACKTEST_ONLY, "Base 저항을 종가로 돌파하는 강의 원칙"),
+    RuleSpec("stock.breakout_prior_session_base", EXPERIMENTAL, BACKTEST_ONLY, "돌파 당일이 자기 저항선을 올리지 않도록 전 거래일까지의 Base로 저항선을 확정"),
+    RuleSpec("stock.breakout_volume", EXPERIMENTAL, BACKTEST_ONLY, "돌파 당일 거래량 / 직전 Base 거래량 평균과 1.5배 실험 기준"),
+    RuleSpec("stock.false_breakout", EXPERIMENTAL, BACKTEST_ONLY, "장중 저항 돌파 후 종가가 다시 저항 아래로 내려오는 실패 돌파"),
+    RuleSpec("backtest.v1_stack", EXPERIMENTAL, BACKTEST_ONLY, "CORE→BASE→PRIOR→VOLUME→BREAKOUT 조합별 D+5/D+20/D+60 event-study 비교"),
 )
 
 
