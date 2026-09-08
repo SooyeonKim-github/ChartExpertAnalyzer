@@ -9,6 +9,17 @@ import pandas as pd
 
 
 _KJB_METRICS = [
+    "Baseline_Status",
+    "D5_Status",
+    "D5_Selected",
+    "d5_policy_version",
+    "raw_selection_score",
+    "d5_base_score",
+    "d5_adjusted_score",
+    "overextension_penalty",
+    "sector_leader_score",
+    "sector_name",
+    "sector_composite_score",
     "leader_score",
     "relative_strength_score",
     "relative_strength_grade",
@@ -99,10 +110,14 @@ def export_agent_candidates(
     records = [_candidate_from_row(row) for _, row in candidates.iterrows()]
     payload = {
         "expert": "kimjongbong",
-        "strategy": "relative_strength_confluence",
+        "strategy": "d5_final_relative_strength_confluence",
         "generated_at": datetime.now().astimezone().isoformat(timespec="seconds"),
         "candidate_count": len(records),
-        "selection_note": "Python 스크리너가 상대강도/리더십/기술/타이밍/리스크 기준으로 정렬하며 KJB CONFIRMED V1 상태를 함께 제공한다. 최종 TOP5는 김종봉 서브에이전트가 판단한다.",
+        "selection_note": (
+            "KJB D+5 FINAL V1: baseline CONFIRMED를 전제로 Selection/Timing 45:55, "
+            "Leader/Sector 과열 페널티, overextension<8, D5 score>=70을 적용한다. "
+            "Operational CONFIRMED는 D5_CONFIRMED 중 당일 D5 adjusted score TOP3만 사용한다."
+        ),
         "candidates": records,
     }
 
@@ -122,7 +137,8 @@ def _write_markdown(payload: dict[str, Any], path: Path) -> None:
         "",
         f"- 생성일시: {payload['generated_at']}",
         f"- 후보 수: {payload['candidate_count']}",
-        "- 용도: 이 후보들 중 김종봉 투자철학에 가장 부합하는 최종 TOP5 선정",
+        "- KJB 정책: D+5 FINAL V1",
+        "- Operational CONFIRMED: D5_CONFIRMED 중 Daily Top3",
         "",
     ]
 
@@ -132,8 +148,15 @@ def _write_markdown(payload: dict[str, Any], path: Path) -> None:
             f"## {rank}. {candidate.get('name', '')} ({candidate.get('ticker', '')})",
             "",
             f"- Status: {candidate.get('status')}",
-            f"- Selection Score: {candidate.get('strategy_score')}",
+            f"- Baseline Status: {m.get('Baseline_Status')}",
+            f"- D5 Status: {m.get('D5_Status')}",
+            f"- D5 Selected: {m.get('D5_Selected')}",
+            f"- D5 Adjusted Score: {m.get('d5_adjusted_score')}",
+            f"- Raw Selection Score: {m.get('raw_selection_score')}",
+            f"- Overextension Penalty: {m.get('overextension_penalty')}",
             f"- Leader Score: {m.get('leader_score')}",
+            f"- Sector Leader Score: {m.get('sector_leader_score')}",
+            f"- Sector: {m.get('sector_name')}",
             f"- Relative Strength: {m.get('relative_strength_score')}",
             f"- Technical: {m.get('technical_score')}",
             f"- Timing: {m.get('timing_score')}",
