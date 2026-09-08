@@ -55,6 +55,10 @@ breakout_quality:
 sector_context:
   enabled: true
   min_members: 2
+  # Range scans refresh KRX sector membership once per month. If that refresh
+  # fails, only an older point-in-time snapshot within this age may be reused.
+  # Future snapshots are never used.
+  membership_max_staleness_days: 62
   strength_weights:
     rs_5d: 0.35
     rs_20d: 0.35
