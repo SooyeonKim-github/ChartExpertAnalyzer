@@ -26,6 +26,151 @@ def _resolve_return_pct(row: pd.Series, daily: pd.DataFrame) -> float:
     return 0.0
 
 
+def _read_sector_snapshot(path: Path) -> dict[str, str]:
+    try:
+        frame = pd.read_csv(path, encoding="utf-8-sig", dtype={"ticker": str})
+    except Exception:
+        return {}
+    if not {"ticker", "sector"}.issubset(frame.columns):
+        return {}
+    ticker = frame["ticker"].astype(str).str.replace(r"\.0$", "", regex=True).str.zfill(6)
+    sector = frame["sector"].fillna("").astype(str).str.strip()
+    valid = ticker.str.fullmatch(r"\d{6}", na=False) & sector.ne("")
+    return dict(zip(ticker[valid], sector[valid]))
+
+
+def _latest_prior_sector_snapshot(
+    provider: PyKrxLeaderDataProvider,
+    target: pd.Timestamp,
+    max_staleness_days: int,
+) -> tuple[pd.Timestamp | None, dict[str, str]]:
+    """Load only a cached sector snapshot dated on/before target.
+
+    This is deliberately backward-looking. A later snapshot is never used for a
+    historical scan, so the fallback cannot introduce look-ahead membership.
+    """
+    root = getattr(provider, "sector_cache_root", None)
+    if root is None:
+        return None, {}
+    root = Path(root)
+    if not root.exists():
+        return None, {}
+
+    candidates: list[tuple[pd.Timestamp, Path]] = []
+    for path in root.glob("*.csv"):
+        try:
+            dt = pd.Timestamp.strptime(path.stem, "%Y%m%d").normalize()
+        except Exception:
+            try:
+                dt = pd.to_datetime(path.stem, format="%Y%m%d", errors="raise").normalize()
+            except Exception:
+                continue
+        age = int((target - dt).days)
+        if 0 <= age <= max_staleness_days:
+            candidates.append((dt, path))
+
+    for dt, path in sorted(candidates, key=lambda x: x[0], reverse=True):
+        mapping = _read_sector_snapshot(path)
+        if mapping:
+            return dt, mapping
+    return None, {}
+
+
+def _sector_map_for_scan(
+    provider: PyKrxLeaderDataProvider,
+    resolved: str,
+    cfg: dict,
+) -> dict[str, str]:
+    """Resolve sector membership once per month during a persistent Range scan.
+
+    KRX sector membership is classification metadata, not a daily signal. Calling
+    the KRX classification endpoint for every trading day caused long Range runs
+    to lose sector context after repeated endpoint failures. We therefore refresh
+    once per calendar month and reuse that point-in-time snapshot for the month.
+
+    If the monthly refresh fails, only an earlier snapshot may be reused and only
+    within the configured staleness window. Future snapshots are never used.
+    """
+    target = pd.Timestamp(resolved).normalize()
+    month_key = target.strftime("%Y%m")
+    scfg = cfg.get("sector_context", {})
+    max_staleness_days = max(0, int(scfg.get("membership_max_staleness_days", 62)))
+
+    cache = getattr(provider, "_leader_sector_month_cache", None)
+    if not isinstance(cache, dict):
+        cache = {}
+
+    cached = cache.get(month_key)
+    if isinstance(cached, dict) and cached.get("mapping"):
+        return dict(cached["mapping"])
+
+    fresh = provider.get_sector_map(resolved)
+    if fresh:
+        cache[month_key] = {
+            "source_date": target,
+            "mapping": dict(fresh),
+            "fallback": False,
+        }
+        setattr(provider, "_leader_sector_month_cache", cache)
+        return dict(fresh)
+
+    # Prefer an already-used historical month from this same ascending Range run.
+    prior_entries = []
+    for entry in cache.values():
+        if not isinstance(entry, dict) or not entry.get("mapping"):
+            continue
+        source = pd.to_datetime(entry.get("source_date"), errors="coerce")
+        if pd.isna(source):
+            continue
+        source = pd.Timestamp(source).normalize()
+        age = int((target - source).days)
+        if 0 <= age <= max_staleness_days:
+            prior_entries.append((source, entry))
+
+    if prior_entries:
+        source, entry = max(prior_entries, key=lambda x: x[0])
+        mapping = dict(entry["mapping"])
+        cache[month_key] = {
+            "source_date": source,
+            "mapping": mapping,
+            "fallback": True,
+        }
+        setattr(provider, "_leader_sector_month_cache", cache)
+        print(
+            f"[WARN] Sector membership refresh failed for {resolved}; "
+            f"using prior snapshot {source:%Y-%m-%d}"
+        )
+        return mapping
+
+    # A previous run may already have a safe historical snapshot on disk.
+    source, mapping = _latest_prior_sector_snapshot(
+        provider,
+        target,
+        max_staleness_days,
+    )
+    if mapping and source is not None:
+        cache[month_key] = {
+            "source_date": source,
+            "mapping": dict(mapping),
+            "fallback": True,
+        }
+        setattr(provider, "_leader_sector_month_cache", cache)
+        print(
+            f"[WARN] Sector membership refresh failed for {resolved}; "
+            f"using cached prior snapshot {source:%Y-%m-%d}"
+        )
+        return dict(mapping)
+
+    cache[month_key] = {
+        "source_date": target,
+        "mapping": {},
+        "fallback": False,
+    }
+    setattr(provider, "_leader_sector_month_cache", cache)
+    print(f"[WARN] Sector membership unavailable for {resolved}; sector context disabled for this month")
+    return {}
+
+
 def screen_date(
     cfg: dict,
     *,
@@ -80,7 +225,7 @@ def screen_date(
 
     enriched = raw_results
     if raw_results:
-        sector_map = provider.get_sector_map(resolved)
+        sector_map = _sector_map_for_scan(provider, resolved, cfg)
         market_period_returns = {
             market: {
                 3: provider.get_market_period_return(market, resolved, 3),
