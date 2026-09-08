@@ -70,5 +70,28 @@ base:
   experimental_resistance_tolerance_pct: 3.0
   experimental_loose_ratio: 1.25
 
+volume_contraction:
+  mode: BACKTEST_ONLY
+  enabled: true
+  experimental_max_contraction_ratio: 0.80
+  experimental_max_down_vs_up_ratio: 1.00
+  experimental_dry_up_volume_ratio: 0.70
+  experimental_min_dry_up_day_ratio: 0.20
+
+breakout:
+  mode: BACKTEST_ONLY
+  enabled: true
+  experimental_min_close_breakout_pct: 0.0
+  experimental_min_volume_ratio: 1.50
+  experimental_near_breakout_pct: 3.0
+  reference_volume_sessions: 20
+
+backtest:
+  version: V1
+  horizons: [5, 20, 60]
+  universe_policy: POINT_IN_TIME_ONLY
+  structure_only_for_lecture_core: true
+  overlap_policy: SIGNAL_LEVEL_EVENT_STUDY
+
 output:
   encoding: utf-8-sig
