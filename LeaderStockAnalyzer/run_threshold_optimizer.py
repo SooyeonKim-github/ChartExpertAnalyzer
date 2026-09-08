@@ -219,6 +219,16 @@ def _current_confirmed_floor(analyzer_cfg: dict) -> dict:
     ).current_parameters()
 
 
+def _phase_payload(result) -> dict:
+    return {
+        "recommendation_quality": result.recommendation_quality,
+        "eligible_for_application": bool(result.eligible_for_application),
+        "recommended_params": result.recommended_params,
+        "config": result.recommended_config,
+        "diagnostics": result.recommendation_diagnostics,
+    }
+
+
 def main() -> None:
     p = argparse.ArgumentParser(
         description="LeaderStockAnalyzer leadership-quality threshold optimizer"
@@ -284,7 +294,7 @@ def main() -> None:
             print("  action     : keep current STRONG thresholds and extend the historical Range")
 
     eligible_config: dict = {}
-    provisional_config: dict = {}
+    provisional_by_phase: dict = {}
     summary_rows: list[pd.DataFrame] = []
 
     for phase_name, result in (("confirmed", confirmed_result), ("strong", strong_result)):
@@ -293,7 +303,12 @@ def main() -> None:
         if result.eligible_for_application:
             eligible_config = _deep_merge(eligible_config, result.recommended_config)
         else:
-            provisional_config = _deep_merge(provisional_config, result.recommended_config)
+            provisional_by_phase[phase_name] = _phase_payload(result)
+            phase_path = out_dir / f"provisional_{phase_name}_thresholds.yaml"
+            phase_path.write_text(
+                yaml.safe_dump(result.recommended_config, allow_unicode=True, sort_keys=False),
+                encoding="utf-8",
+            )
         tmp = result.current_vs_optimized.copy()
         tmp.insert(0, "phase", phase_name)
         summary_rows.append(tmp)
@@ -305,7 +320,7 @@ def main() -> None:
     )
     provisional_path = out_dir / "provisional_thresholds.yaml"
     provisional_path.write_text(
-        yaml.safe_dump(provisional_config, allow_unicode=True, sort_keys=False),
+        yaml.safe_dump(provisional_by_phase, allow_unicode=True, sort_keys=False),
         encoding="utf-8",
     )
 
@@ -327,8 +342,9 @@ def main() -> None:
     else:
         print("Application-eligible config: NONE")
         print("  -> recommended_thresholds.yaml is intentionally empty")
-    if provisional_config:
+    if provisional_by_phase:
         print(f"Provisional diagnostics    : {provisional_path}")
+        print("  -> phase-specific provisional files are also written; shared keys are never merged across phases")
     if strong_skip_error is not None:
         print("STRONG: insufficient sample; current STRONG thresholds remain unchanged.")
     print("NOTE: only ACCEPTABLE/ROBUST recommendations are eligible for application.")
