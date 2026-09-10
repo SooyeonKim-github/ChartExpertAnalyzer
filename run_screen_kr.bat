@@ -63,14 +63,14 @@ echo Dynamic status uses the same V2.2 quality rules as Dynamic range.
 echo ============================================
 echo.
 
-echo [0/5] Building shared KOSPI + KOSDAQ universe...
+echo [0/6] Building shared KOSPI + KOSDAQ universe...
 call "%ROOT%prepare_liquidity_universe.bat" screen "" "%TOP_N%" "%LOOKBACK%"
 if errorlevel 1 goto RUN_FAILED
 if not defined LIQUIDITY_UNIVERSE_XLSX goto RUN_FAILED
 if not exist "%LIQUIDITY_UNIVERSE_XLSX%" goto RUN_FAILED
 
 echo.
-echo [1/5] KJB KR screen - D+5 FINAL V1...
+echo [1/6] KJB KR screen - D+5 FINAL V1...
 pushd "%ROOT%KJBChartAnalyzer"
 "%PYTHON_EXE%" %PYTHON_PREFIX% app.py screen-top100 ^
     --provider pykrx ^
@@ -86,7 +86,7 @@ if errorlevel 1 ( popd & goto RUN_FAILED )
 popd
 
 echo.
-echo [2/5] Swing KR screen...
+echo [2/6] Swing KR screen...
 pushd "%ROOT%SwingChartProbabilityAnalyzer"
 "%PYTHON_EXE%" %PYTHON_PREFIX% main.py scan ^
     --info-excel "%LIQUIDITY_UNIVERSE_XLSX%" ^
@@ -98,7 +98,7 @@ if errorlevel 1 ( popd & goto RUN_FAILED )
 popd
 
 echo.
-echo [3/5] MA KR screen...
+echo [3/6] MA KR screen...
 pushd "%ROOT%MAChartAnalyzer"
 "%PYTHON_EXE%" %PYTHON_PREFIX% main.py scan ^
     --info-excel "%LIQUIDITY_UNIVERSE_XLSX%" ^
@@ -108,7 +108,7 @@ if errorlevel 1 ( popd & goto RUN_FAILED )
 popd
 
 echo.
-echo [4/5] Dynamic KR screen ^(same V2.2 CONFIRMED/WATCH rules as range^)...
+echo [4/6] Dynamic KR screen ^(same V2.2 CONFIRMED/WATCH rules as range^)...
 pushd "%ROOT%DynamicChartAnalyzer"
 "%PYTHON_EXE%" %PYTHON_PREFIX% main_screen_kr.py ^
     --info-excel "%LIQUIDITY_UNIVERSE_XLSX%" ^
@@ -121,12 +121,16 @@ if errorlevel 1 ( popd & goto RUN_FAILED )
 popd
 
 echo.
-echo [5/5] Updating confirmed history and returns...
+echo [5/6] Updating confirmed history and returns...
 "%PYTHON_EXE%" %PYTHON_PREFIX% "%ROOT%scripts\aggregate_confirmed_candidates.py"
 if errorlevel 1 goto RUN_FAILED
 
 "%PYTHON_EXE%" %PYTHON_PREFIX% "%ROOT%scripts\export_today_confirmed_candidates.py"
 if errorlevel 1 goto RUN_FAILED
+
+echo.
+echo [6/6] Committing and pushing latest today_confirmed result...
+call "%ROOT%scripts\push_today_confirmed.bat"
 
 set "NO_PAUSE="
 echo.
@@ -137,6 +141,7 @@ echo Universe : %LIQUIDITY_UNIVERSE_XLSX%
 echo History  : %ROOT%results\confirmed_candidates.csv
 echo Latest   : %ROOT%results\today_confirmed_^<scan_date^>.csv
 echo [INFO] Latest file includes volume, moving averages, RSI, MACD, and recent 20-day high/low data.
+echo [INFO] Latest today_confirmed file is automatically committed and pushed when Git is available.
 echo [INFO] KJB CONFIRMED = finalized D+5 Daily Top3 operational candidates.
 echo [INFO] KOSPI + KOSDAQ, recent %LOOKBACK%-day avg trading-value TOP %TOP_N%.
 echo ============================================
