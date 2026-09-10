@@ -135,7 +135,8 @@ echo [DONE] KR screening finished.
 echo ============================================
 echo Universe : %LIQUIDITY_UNIVERSE_XLSX%
 echo History  : %ROOT%results\confirmed_candidates.csv
-echo Latest   : %ROOT%results\today_confirmed_candidates.csv
+echo Latest   : %ROOT%results\today_confirmed_^<scan_date^>.csv
+echo [INFO] Latest file includes volume, moving averages, RSI, MACD, and recent 20-day high/low data.
 echo [INFO] KJB CONFIRMED = finalized D+5 Daily Top3 operational candidates.
 echo [INFO] KOSPI + KOSDAQ, recent %LOOKBACK%-day avg trading-value TOP %TOP_N%.
 echo ============================================
