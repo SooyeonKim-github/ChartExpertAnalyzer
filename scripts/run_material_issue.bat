@@ -17,11 +17,17 @@ if exist "%ROOT%MaterialAnalyzer\.venv\Scripts\python.exe" (
         set "PYTHON_EXE=py"
         set "PYTHON_PREFIX=-3"
     ) else (
-        set "PYTHON_EXE=python"
+        where python >nul 2>nul
+        if not errorlevel 1 set "PYTHON_EXE=python"
     )
 )
 
-"%PYTHON_EXE%" %PYTHON_PREFIX% -c "import pandas, requests, bs4, pykrx" >nul 2>nul
+if "%PYTHON_EXE%"=="" (
+    echo [WARN] Python was not found for MaterialAnalyzer.
+    exit /b 1
+)
+
+"%PYTHON_EXE%" %PYTHON_PREFIX% -c "import pandas, requests, bs4, pykrx, FinanceDataReader" >nul 2>nul
 if errorlevel 1 (
     echo [INFO] Installing MaterialAnalyzer requirements...
     "%PYTHON_EXE%" %PYTHON_PREFIX% -m pip install -r "%ROOT%MaterialAnalyzer\requirements.txt"
