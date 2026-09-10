@@ -5,6 +5,7 @@ from datetime import datetime
 from pathlib import Path
 
 import pandas as pd
+from pandas.errors import EmptyDataError
 
 ROOT = Path(__file__).resolve().parents[1]
 LEADER_RESULTS = ROOT / "LeaderStockAnalyzer" / "results"
@@ -34,7 +35,11 @@ def main() -> int:
         print("[WARN] Leader confirmed_candidates.csv not found. today_issue export skipped.")
         return 0
 
-    df = pd.read_csv(source, dtype={"ticker": str}, encoding="utf-8-sig")
+    try:
+        df = pd.read_csv(source, dtype={"ticker": str}, encoding="utf-8-sig")
+    except EmptyDataError:
+        df = pd.DataFrame()
+
     if "ticker" in df.columns:
         df["ticker"] = df["ticker"].fillna("").astype(str).str.strip().str.zfill(6)
 
