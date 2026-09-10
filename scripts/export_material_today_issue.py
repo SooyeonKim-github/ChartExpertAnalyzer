@@ -13,7 +13,15 @@ KEEP_STATUSES = {"STRONG", "CONFIRMED", "WATCH"}
 
 
 def _date_key(value) -> str:
-    parsed = pd.to_datetime(value, errors="coerce")
+    text = str(value or "").strip()
+    if not text or text.lower() == "nan":
+        return ""
+    if text.endswith(".0") and text[:-2].isdigit():
+        text = text[:-2]
+    if len(text) == 8 and text.isdigit():
+        parsed = pd.to_datetime(text, format="%Y%m%d", errors="coerce")
+    else:
+        parsed = pd.to_datetime(text, errors="coerce")
     return "" if pd.isna(parsed) else parsed.strftime("%Y%m%d")
 
 
@@ -22,7 +30,7 @@ def main() -> int:
         print(f"[WARN] Material ticker link report not found: {SOURCE}")
         return 0
 
-    df = pd.read_csv(SOURCE, dtype={"ticker": str}, encoding="utf-8-sig")
+    df = pd.read_csv(SOURCE, dtype={"ticker": str, "market_date": str}, encoding="utf-8-sig")
     if df.empty or "market_date" not in df.columns:
         print("[WARN] Material ticker link report has no rows/market_date. today_issue export skipped.")
         return 0
