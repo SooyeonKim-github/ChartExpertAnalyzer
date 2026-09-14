@@ -4,6 +4,7 @@ import sys
 from pathlib import Path
 from typing import Any
 
+import numpy as np
 import pandas as pd
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -16,13 +17,22 @@ from ThresholdOptimization import BaseThresholdAdapter  # noqa: E402
 def _bool_series(series: pd.Series) -> pd.Series:
     if pd.api.types.is_bool_dtype(series):
         return series.fillna(False).astype(bool)
-    return (
-        series.astype(str)
-        .str.strip()
-        .str.lower()
-        .isin({"true", "1", "yes", "y"})
-        .fillna(False)
-    )
+
+    def parse(value) -> bool:
+        if pd.isna(value):
+            return False
+        if isinstance(value, (bool, np.bool_)):
+            return bool(value)
+        if isinstance(value, (int, float, np.integer, np.floating)):
+            numeric = float(value)
+            if np.isclose(numeric, 1.0):
+                return True
+            if np.isclose(numeric, 0.0):
+                return False
+            return False
+        return str(value).strip().lower() in {"true", "1", "1.0", "yes", "y"}
+
+    return series.map(parse).fillna(False).astype(bool)
 
 
 class SwingThresholdAdapter(BaseThresholdAdapter):
@@ -93,9 +103,6 @@ class SwingThresholdAdapter(BaseThresholdAdapter):
             | _bool_series(df["MA_Reclaimed"])
         )
 
-        # Historical compatibility: old range exports did not persist the
-        # Bullish_Turn flag. Rows that the original analyzer already classified
-        # as confirmed-reversal are retained as known-valid confirmation rows.
         known_confirmed_reversal = (
             df["Primary_Signal"].astype(str).isin(self.ELIGIBLE_SIGNALS)
         )
