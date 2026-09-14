@@ -33,11 +33,42 @@ def _latest_optimizer_input() -> Path:
     return max(files, key=lambda p: p.stat().st_mtime)
 
 
-def _resolve(value: str | None, default: Path) -> Path:
+def _resolve_path(value: str | None, default: Path) -> Path:
     if not value:
         return default
     p = Path(value)
     return p if p.is_absolute() else BASE_DIR / p
+
+
+def _resolve_optimizer_input(value: str | None) -> Path:
+    """Resolve convenient user input forms.
+
+    Accepted examples:
+      - Enter / None -> latest threshold_input manifest
+      - range_20210101_20260901 -> results/range_20210101_20260901
+      - results/range_20210101_20260901
+      - threshold_input directory / manifest.csv / full CSV
+      - absolute path
+    """
+    if not value:
+        return _latest_optimizer_input()
+
+    raw = Path(value)
+    if raw.is_absolute():
+        return raw
+
+    direct = BASE_DIR / raw
+    if direct.exists():
+        return direct
+
+    under_results = BASE_DIR / "results" / raw
+    if under_results.exists():
+        return under_results
+
+    # Preserve a useful path in the eventual error message even if nothing exists.
+    if raw.name.startswith("range_") and len(raw.parts) == 1:
+        return under_results
+    return direct
 
 
 def _read_csv(path: Path) -> pd.DataFrame:
@@ -92,6 +123,13 @@ def _load_optimizer_input(path: Path) -> tuple[pd.DataFrame, Path]:
             f"No threshold_input/manifest.csv or range_all_results.csv under: {path}"
         )
 
+    if not path.exists():
+        raise FileNotFoundError(
+            f"Optimizer input not found: {path}\n"
+            "Tip: enter only a range folder name such as range_20210101_20260901, "
+            "or press Enter to use the latest exported threshold_input."
+        )
+
     if path.name == "manifest.csv" and path.parent.name == "threshold_input":
         return _load_manifest(path), path.parent.parent
 
@@ -114,17 +152,17 @@ def main() -> None:
     p.add_argument(
         "--range-file",
         help=(
-            "Legacy name kept for compatibility. Accepts range_all_results.csv, "
-            "a range directory, threshold_input directory, or manifest.csv."
+            "Legacy name kept for compatibility. Accepts a bare range folder name, "
+            "range_all_results.csv, range directory, threshold_input directory, or manifest.csv."
         ),
     )
     p.add_argument("--optimizer-config", default="threshold_optimizer.yaml")
     p.add_argument("--out")
     args = p.parse_args()
 
-    input_path = _resolve(args.range_file, _latest_optimizer_input())
+    input_path = _resolve_optimizer_input(args.range_file)
     optimizer_cfg = yaml.safe_load(
-        _resolve(
+        _resolve_path(
             args.optimizer_config, BASE_DIR / "threshold_optimizer.yaml"
         ).read_text(encoding="utf-8")
     ) or {}
@@ -139,7 +177,7 @@ def main() -> None:
                 f"[INFO] date range     : {dates.min().date()} ~ {dates.max().date()}"
             )
 
-    out_dir = _resolve(args.out, range_dir / "optimizer_v2")
+    out_dir = _resolve_path(args.out, range_dir / "optimizer_v2")
     adapter = SwingThresholdAdapter(
         phase="confirmed",
         analyzer_config=DEFAULT_CONFIG.to_dict(),
