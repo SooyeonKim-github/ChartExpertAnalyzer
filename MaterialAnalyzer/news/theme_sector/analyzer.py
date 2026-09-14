@@ -7,8 +7,18 @@ from .models import AnalyzerStats
 from .rule_classifier import RuleClassifier
 
 
+_EXCLUDED_ARTICLE_CLASSES = {"DISCLOSURE", "MARKET_REACTION"}
+_EXCLUDED_SOURCE_IDS = {"DART", "KIND"}
+
+
 class ThemeSectorAnalyzer:
-    """Analyze ArticleCluster representatives without linking to individual tickers."""
+    """Analyze ArticleCluster representatives without linking to individual tickers.
+
+    Theme/Sector analysis is intentionally separated from direct corporate-event
+    extraction. DART/KIND disclosures and market-reaction articles are ignored by
+    default so the report describes underlying market/industry materials rather
+    than duplicating EventExtractor or inferring a theme from price action itself.
+    """
 
     VERSION = "THEME_SECTOR_ANALYZER_V1"
 
@@ -42,6 +52,11 @@ class ThemeSectorAnalyzer:
 
         for row in cluster_rows:
             stats.clusters_scanned += 1
+            article_class = str(row["article_class"] or "").upper()
+            source_id = str(row["source_id"] or "").upper()
+            if article_class in _EXCLUDED_ARTICLE_CLASSES or source_id in _EXCLUDED_SOURCE_IDS:
+                continue
+
             result = self.classifier.classify(
                 title=row["title"],
                 summary=row["summary"],
