@@ -1,42 +1,58 @@
 optimizer:
-  target_column: D+20_Close_Return_Pct
-  mae_column: MAE_20D_Pct
-  excursion_column: optimizer_excursion_ratio_D20
+  objective_profile: swing_return_performance
 
-  min_train_trading_days: 80
-  validation_trading_days: 40
-  step_trading_days: 40
+  # D+20 is the completeness anchor used by the shared optimizer preparation.
+  target_column: D+20_Close_Return_Pct
+
+  # Swing-specific multi-horizon / path-quality columns.
+  d10_column: D+10_Close_Return_Pct
+  d20_column: D+20_Close_Return_Pct
+  mfe20_column: MFE_20D_Pct
+  mae20_column: MAE_20D_Pct
+  hit_mid_column: Hit_Mid_Before_Stop
+  hit_prior_high_column: Hit_PriorHigh_Before_Stop
+  stop_hit_column: Stop_Hit
+
+  # Long expanding walk-forward.
+  min_train_trading_days: 252
+  validation_trading_days: 63
+  step_trading_days: 63
   purge_trading_days: 20
   min_validation_fraction: 0.75
 
-  min_train_samples: 25
-  min_train_unique_dates: 12
-  min_samples: 15
-  min_unique_dates: 8
-  min_valid_folds: 2
-  train_top_k: 5
-  top_n: 10
+  # Sample-size safeguards. Sample size is a hard constraint, not an objective.
+  min_train_samples: 50
+  min_train_unique_dates: 30
+  min_samples: 30
+  min_unique_dates: 15
+  min_valid_folds: 4
+  train_top_k: 15
+  top_n: 15
 
   allow_provisional_fallback: true
   acceptable_min_fold_coverage: 0.50
-  robust_min_valid_folds: 3
-  robust_min_fold_coverage: 0.75
+  robust_min_valid_folds: 6
+  robust_min_fold_coverage: 0.70
   robust_min_plateau_neighbors: 2
   robust_max_plateau_drop: 0.75
 
+  # Prefer stable plateaus over a single sharp optimum.
   robustness_std_penalty: 0.50
   plateau_penalty: 0.25
   distance_penalty: 0.10
   coverage_penalty: 0.50
 
+  # Fold metrics are Z-normalized by the shared optimizer before weighting.
   objective_weights:
-    median_return: 0.30
-    win_rate: 0.20
-    p25_return: 0.15
-    mae_quality: 0.15
-    excursion_ratio: 0.10
-    sample_size: 0.10
+    d10_median_return: 0.25
+    d20_median_return: 0.25
+    hit_mid_rate: 0.15
+    hit_prior_high_rate: 0.10
+    d20_p25_return: 0.10
+    mae20_quality: 0.10
+    excursion_ratio: 0.05
 
 search_space:
   confirmed:
-    confirmed_score: [80, 85, 90, 92, 95]
+    entry_score: [80, 82, 84, 86, 88, 90, 92, 94]
+    max_entry_channel_position: [0.35, 0.40, 0.45, 0.50, 0.55, 0.58, 0.60]
