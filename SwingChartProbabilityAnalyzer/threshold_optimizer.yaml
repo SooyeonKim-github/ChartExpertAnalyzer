@@ -13,7 +13,7 @@ optimizer:
   hit_prior_high_column: Hit_PriorHigh_Before_Stop
   stop_hit_column: Stop_Hit
 
-  # Long expanding walk-forward.
+  # Long expanding walk-forward on development data only.
   min_train_trading_days: 252
   validation_trading_days: 63
   step_trading_days: 63
@@ -51,6 +51,19 @@ optimizer:
     d20_p25_return: 0.10
     mae20_quality: 0.10
     excursion_ratio: 0.05
+
+evaluation:
+  # 2026 is never used to select thresholds.
+  development_end: 2025-12-31
+  holdout_start: 2026-01-01
+
+  # Remove the final 20 development trading dates so D+20 outcomes from late
+  # 2025 cannot leak 2026 price information into threshold selection.
+  holdout_purge_trading_days: 20
+
+  # Holdout sample sufficiency is reported as a hard diagnostic only.
+  holdout_min_samples: 30
+  holdout_min_unique_dates: 15
 
 search_space:
   confirmed:
