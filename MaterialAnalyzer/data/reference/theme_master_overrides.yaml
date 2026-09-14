@@ -23,7 +23,7 @@ themes:
     sectors: [AI_IT, POWER_ENERGY]
     subsectors: [DATA_CENTER, AI]
     strong_keywords: [AI 데이터센터 특별법, 데이터센터 특별법, AI 데이터센터 정책]
-    keywords: [데이터센터 제도, 데이터센터 규제, 데이터센터 하위법령, 데이터센터 법령]
+    keywords: [데이터센터 제도, 데이터센터 규제, 데이터센터 하위법령, 데이터센터 법령, 특별법 하위법령, 하위법령 마련]
     positive_keywords: [마련, 시행, 지원, 완화, 확대]
     negative_keywords: [규제 강화, 제한]
     rules: {scope: title_summary, require_any: [데이터센터, 데이터 센터]}
@@ -98,7 +98,7 @@ themes:
     family: FINANCE_MACRO
     sectors: [FINANCE, CONSTRUCTION]
     strong_keywords: [주택공급 금융지원, 주택 공급 금융지원, 주택금융 지원]
-    keywords: [주택 공급 자금, 주택 정책금융, 건설 금융지원, 주택사업 금융지원]
+    keywords: [주택 공급 자금, 주택 정책금융, 건설 금융지원, 주택사업 금융지원, 금융지원 대책, 주택공급 촉진]
     positive_keywords: [지원, 공급, 확대, 보증]
     negative_keywords: [축소, 중단]
     rules: {scope: title_summary, require_any: [주택, 주택공급], require_all: [금융]}
@@ -129,8 +129,8 @@ themes:
     sectors: [POWER_ENERGY]
     default_direction: MIXED
     fixed_direction: MIXED
-    strong_keywords: [에너지 안보, 에너지 공급 안정, 에너지 공급망 안정]
-    keywords: [원유 비축, 가스 비축, LNG 확보, 에너지 수급 안정, 에너지 공급망]
+    strong_keywords: [에너지 안보, 에너지 공급 안정, 에너지 공급망 안정, 원유 수급상황 긴급 점검]
+    keywords: [원유 비축, 가스 비축, LNG 확보, 에너지 수급 안정, 에너지 공급망, 원유 수급, 에너지 수급, 수급상황 점검]
     rules: {scope: title_summary, require_any: [에너지, 원유, 가스, LNG, 전력]}
 
   ICT_EXPORT_GROWTH:
