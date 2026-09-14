@@ -33,14 +33,16 @@ def run(
     reporter = ThemeSectorReporter()
 
     print("=" * 80)
-    print(" ThemeSectorAnalyzer V1 - Rule Based Market Theme/Sector Materials")
+    print(" ThemeSectorAnalyzer V1.2 - Declarative Theme Family / Rule Engine")
     print(" Ticker Linking / Embedding: DISABLED")
     print("=" * 80)
-    print(f"DB            : {db_path}")
-    print(f"Sector Master : {sector_master_path}")
-    print(f"Theme Master  : {theme_master_path}")
-    print(f"Days          : {days}")
-    print(f"End Date      : {end_date or 'LATEST'}")
+    print(f"DB             : {db_path}")
+    print(f"Sector Master  : {sector_master_path}")
+    print(f"Theme Master   : {theme_master_path}")
+    print(f"Theme Families : {len(catalog.theme_families)}")
+    print(f"Themes         : {len(catalog.themes)}")
+    print(f"Days           : {days}")
+    print(f"End Date       : {end_date or 'LATEST'}")
     print("-" * 80)
 
     stats, rows = analyzer.run(
@@ -65,7 +67,7 @@ def run(
 
 def main():
     parser = argparse.ArgumentParser(
-        description="ThemeSectorAnalyzer V1 - deterministic rule-based market material analyzer"
+        description="ThemeSectorAnalyzer V1.2 - deterministic declarative market theme analyzer"
     )
     parser.add_argument("--db", default=str(DEFAULT_DB))
     parser.add_argument("--output", default=str(DEFAULT_REPORT))
