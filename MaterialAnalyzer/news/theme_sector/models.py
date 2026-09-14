@@ -23,6 +23,8 @@ class SectorMatch:
 
 @dataclass
 class ThemeMatch:
+    theme_family: str
+    theme_family_name_ko: str
     theme: str
     theme_name_ko: str
     description: str
