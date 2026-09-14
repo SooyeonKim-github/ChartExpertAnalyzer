@@ -12,6 +12,8 @@ DETAIL_FIELDS = [
     "cluster_title",
     "representative_article_id",
     "representative_title",
+    "theme_family",
+    "theme_family_name_ko",
     "theme",
     "theme_name_ko",
     "theme_description",
@@ -43,6 +45,8 @@ DETAIL_FIELDS = [
 
 SUMMARY_FIELDS = [
     "market_date",
+    "theme_family",
+    "theme_family_name_ko",
     "theme",
     "theme_name_ko",
     "sectors",
@@ -103,6 +107,8 @@ class ThemeSectorReporter:
             summary_rows.append(
                 {
                     "market_date": market_date,
+                    "theme_family": lead.get("theme_family", ""),
+                    "theme_family_name_ko": lead.get("theme_family_name_ko", ""),
                     "theme": theme,
                     "theme_name_ko": lead.get("theme_name_ko", ""),
                     "sectors": sectors,
@@ -112,8 +118,6 @@ class ThemeSectorReporter:
                     "direction": direction,
                     "cluster_count": len({item.get("cluster_id") for item in items}),
                     "article_count": sum(int(item.get("article_count") or 0) for item in items),
-                    # This is evidence volume, not a unique global source count.  Each
-                    # ArticleCluster already calculates its own distinct source_count.
                     "source_evidence_count": sum(
                         int(item.get("source_count") or 0) for item in items
                     ),
