@@ -11,9 +11,15 @@ class MasterConfigError(ValueError):
     pass
 
 
+_VALID_DIRECTIONS = {"POSITIVE", "NEGATIVE", "NEUTRAL", "MIXED"}
+_VALID_SCOPES = {"all", "title_summary", "title", "summary"}
+_RULE_LIST_KEYS = {"require_any", "require_all", "exclude_any"}
+
+
 @dataclass(frozen=True)
 class MasterCatalog:
     sectors: dict[str, dict[str, Any]]
+    theme_families: dict[str, dict[str, Any]]
     themes: dict[str, dict[str, Any]]
     positive_direction_keywords: tuple[str, ...]
     negative_direction_keywords: tuple[str, ...]
@@ -24,19 +30,24 @@ class MasterCatalog:
         theme_data = _load_yaml(Path(theme_path))
 
         sectors = sector_data.get("sectors") or {}
+        theme_families = theme_data.get("theme_families") or {}
         themes = theme_data.get("themes") or {}
         direction = theme_data.get("direction_keywords") or {}
 
         if not isinstance(sectors, dict) or not sectors:
             raise MasterConfigError("sector_master.yaml must contain a non-empty 'sectors' mapping")
+        if not isinstance(theme_families, dict) or not theme_families:
+            raise MasterConfigError("theme_master.yaml must contain a non-empty 'theme_families' mapping")
         if not isinstance(themes, dict) or not themes:
             raise MasterConfigError("theme_master.yaml must contain a non-empty 'themes' mapping")
 
         _validate_sector_master(sectors)
-        _validate_theme_master(themes, sectors)
+        _validate_theme_families(theme_families)
+        _validate_theme_master(themes, sectors, theme_families)
 
         return cls(
             sectors=sectors,
+            theme_families=theme_families,
             themes=themes,
             positive_direction_keywords=tuple(_as_list(direction.get("positive"))),
             negative_direction_keywords=tuple(_as_list(direction.get("negative"))),
@@ -51,6 +62,9 @@ class MasterCatalog:
             if cfg:
                 return str(cfg.get("name_ko") or subsector)
         return subsector
+
+    def family_name(self, family: str) -> str:
+        return str((self.theme_families.get(family) or {}).get("name_ko") or family)
 
 
 def _load_yaml(path: Path) -> dict[str, Any]:
@@ -91,20 +105,37 @@ def _validate_sector_master(sectors: dict[str, dict[str, Any]]) -> None:
                 raise MasterConfigError(f"Subsector '{subsector}' requires name_ko")
 
 
+def _validate_theme_families(theme_families: dict[str, dict[str, Any]]) -> None:
+    for family, cfg in theme_families.items():
+        if not isinstance(cfg, dict):
+            raise MasterConfigError(f"Theme family '{family}' must be a mapping")
+        if not cfg.get("name_ko"):
+            raise MasterConfigError(f"Theme family '{family}' is missing name_ko")
+
+
 def _validate_theme_master(
     themes: dict[str, dict[str, Any]],
     sectors: dict[str, dict[str, Any]],
+    theme_families: dict[str, dict[str, Any]],
 ) -> None:
     valid_subsectors = {
         key
         for sector_cfg in sectors.values()
         for key in (sector_cfg.get("subsectors") or {}).keys()
     }
+
     for theme, cfg in themes.items():
         if not isinstance(cfg, dict):
             raise MasterConfigError(f"Theme '{theme}' must be a mapping")
         if not cfg.get("name_ko"):
             raise MasterConfigError(f"Theme '{theme}' is missing name_ko")
+
+        family = str(cfg.get("family") or "").strip()
+        if not family:
+            raise MasterConfigError(f"Theme '{theme}' is missing family")
+        if family not in theme_families:
+            raise MasterConfigError(f"Theme '{theme}' references unknown family '{family}'")
+
         for sector in _as_list(cfg.get("sectors")):
             if sector not in sectors:
                 raise MasterConfigError(f"Theme '{theme}' references unknown sector '{sector}'")
@@ -113,10 +144,37 @@ def _validate_theme_master(
                 raise MasterConfigError(
                     f"Theme '{theme}' references unknown subsector '{subsector}'"
                 )
+
         if not (_as_list(cfg.get("strong_keywords")) or _as_list(cfg.get("keywords"))):
             raise MasterConfigError(f"Theme '{theme}' has no keywords")
+
         direction = str(cfg.get("default_direction") or "NEUTRAL").upper()
-        if direction not in {"POSITIVE", "NEGATIVE", "NEUTRAL", "MIXED"}:
+        if direction not in _VALID_DIRECTIONS:
             raise MasterConfigError(
                 f"Theme '{theme}' has invalid default_direction '{direction}'"
             )
+
+        fixed_direction = str(cfg.get("fixed_direction") or "").upper()
+        if fixed_direction and fixed_direction not in _VALID_DIRECTIONS:
+            raise MasterConfigError(
+                f"Theme '{theme}' has invalid fixed_direction '{fixed_direction}'"
+            )
+
+        rules = cfg.get("rules") or {}
+        if not isinstance(rules, dict):
+            raise MasterConfigError(f"Theme '{theme}'.rules must be a mapping")
+
+        scope = str(rules.get("scope") or "all").lower()
+        if scope not in _VALID_SCOPES:
+            raise MasterConfigError(
+                f"Theme '{theme}'.rules.scope must be one of {sorted(_VALID_SCOPES)}"
+            )
+
+        unknown_keys = set(rules) - ({"scope"} | _RULE_LIST_KEYS)
+        if unknown_keys:
+            raise MasterConfigError(
+                f"Theme '{theme}'.rules has unsupported keys: {sorted(unknown_keys)}"
+            )
+
+        for key in _RULE_LIST_KEYS:
+            _as_list(rules.get(key))
