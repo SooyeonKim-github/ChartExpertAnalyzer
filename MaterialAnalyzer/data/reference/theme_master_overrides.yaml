@@ -1,0 +1,144 @@
+version: '1.2.1'
+
+# Live-data precision/recall tuning layered on top of theme_master.yaml.
+themes:
+  BIO_APPROVAL:
+    strong_keywords: [FDA 승인, 품목허가, 신약 승인, 의약품 승인, 신약 허가, 국내 개발 신약 허가]
+    keywords: [허가 획득, 판매 승인, 조건부 승인, 품목 허가, 허가 완료, 국내 신약 허가]
+    rules: {scope: title_summary, require_any: [신약, 의약품, 품목허가, FDA, 허가]}
+
+  RENEWABLE_INVESTMENT:
+    strong_keywords: [해상풍력 투자, 풍력 투자, 태양광 투자, 재생에너지 투자]
+    keywords: [신재생에너지 투자, 발전단지 투자, 풍력단지 투자, 태양광 발전 투자]
+    rules: {scope: title_summary, require_any: [태양광, 풍력, 해상풍력, 재생에너지, 신재생에너지]}
+
+  ROBOT_AUTOMATION:
+    strong_keywords: [휴머노이드 투자, 로봇 투자, 협동로봇 도입, 공장자동화 투자, AI 로봇 실증, 로봇 실증]
+    keywords: [휴머노이드, 스마트팩토리, 로봇 자동화, 로봇 양산, 피지컬 AI]
+    rules: {scope: title_summary, require_any: [로봇, 휴머노이드, 스마트팩토리, 피지컬 AI]}
+
+  AI_DATA_CENTER_POLICY:
+    name_ko: AI 데이터센터 정책·제도
+    family: SEMICONDUCTOR_AI
+    sectors: [AI_IT, POWER_ENERGY]
+    subsectors: [DATA_CENTER, AI]
+    strong_keywords: [AI 데이터센터 특별법, 데이터센터 특별법, AI 데이터센터 정책]
+    keywords: [데이터센터 제도, 데이터센터 규제, 데이터센터 하위법령, 데이터센터 법령]
+    positive_keywords: [마련, 시행, 지원, 완화, 확대]
+    negative_keywords: [규제 강화, 제한]
+    rules: {scope: title_summary, require_any: [데이터센터, 데이터 센터]}
+
+  PHYSICAL_AI_POLICY:
+    name_ko: 피지컬 AI·제조혁신
+    family: ROBOTICS_AUTOMATION
+    sectors: [ROBOTICS, AI_IT]
+    subsectors: [AI]
+    strong_keywords: [피지컬 AI, AI 제조혁신, 제조 AI 혁신, 중소제조 AI]
+    keywords: [AI 제조, 제조업 AI 전환, 제조 현장 AI, 제조혁신 AI]
+    positive_keywords: [혁신, 지원, 확산, 도입, 실증]
+    negative_keywords: [중단, 축소]
+    rules: {scope: title_summary, require_any: [피지컬 AI, 제조, 제조업, 공장]}
+
+  AI_GLOBAL_COOPERATION:
+    name_ko: AI·첨단기술 국제협력
+    family: SEMICONDUCTOR_AI
+    sectors: [AI_IT]
+    subsectors: [AI]
+    strong_keywords: [AI 협력, 인공지능 협력, AI·첨단기술 협력, AI 기술협력]
+    keywords: [AI, 인공지능, 양자기술, 기술 협력, 국제 협력, 공동연구]
+    positive_keywords: [강화, 확대, 협력, 공동연구, MOU]
+    negative_keywords: [중단, 축소]
+    rules: {scope: title_summary, require_any: [AI, 인공지능], require_all: [협력]}
+
+  AI_INDUSTRY_SUPPORT:
+    name_ko: 산업 AI 전환 지원
+    family: SEMICONDUCTOR_AI
+    sectors: [AI_IT]
+    subsectors: [AI]
+    strong_keywords: [AI 전환 지원, AX 지원, AI 도입 지원, 지역기업 AI 전환]
+    keywords: [AI 전환, AI 바우처, AI 활용 지원, 산업 AI 확산, 기업 AI 도입]
+    positive_keywords: [지원, 확대, 확산, 도입, 전환]
+    negative_keywords: [축소, 중단]
+    rules: {scope: title_summary, require_any: [AI, AX, 인공지능]}
+
+  ESSENTIAL_DRUG_SUPPLY:
+    name_ko: 필수의약품 공급 확대
+    family: BIO_HEALTHCARE
+    sectors: [BIO_HEALTHCARE]
+    strong_keywords: [필수의약품 공급, 국가필수의약품, 필수의약품 공적 공급]
+    keywords: [의약품 공적 공급, 의약품 공급 안정, 필수약 공급, 의약품 비축]
+    positive_keywords: [공급 확대, 안정, 지원, 비축 확대]
+    negative_keywords: [공급 부족, 품절, 중단]
+    rules: {scope: title_summary, require_any: [필수의약품, 국가필수의약품, 필수약]}
+
+  RENEWABLE_POLICY:
+    name_ko: 재생에너지 확대 정책
+    family: POWER_NUCLEAR
+    sectors: [POWER_ENERGY]
+    subsectors: [RENEWABLE]
+    strong_keywords: [재생에너지 확대, 신재생에너지 확대, 재생에너지 정책, 신재생에너지 정책]
+    keywords: [재생에너지 보급, 재생에너지 목표, 재생에너지 제도, 신재생에너지 보급]
+    positive_keywords: [확대, 상향, 지원, 보급, 강화]
+    negative_keywords: [축소, 하향, 중단]
+    rules: {scope: title_summary, require_any: [재생에너지, 신재생에너지]}
+
+  SOLAR_INDUSTRY_SUPPORT:
+    name_ko: 태양광 산업 지원
+    family: POWER_NUCLEAR
+    sectors: [POWER_ENERGY]
+    subsectors: [RENEWABLE]
+    strong_keywords: [태양광 산업경쟁력, 태양광 산업 지원, 태양광 경쟁력 강화]
+    keywords: [태양광 지원, 태양광 공급망, 태양광 산업 육성, 태양광 정책]
+    positive_keywords: [강화, 지원, 확대, 육성]
+    negative_keywords: [축소, 중단]
+    rules: {scope: title_summary, require_any: [태양광]}
+
+  HOUSING_FINANCE_SUPPORT:
+    name_ko: 주택공급 금융지원
+    family: FINANCE_MACRO
+    sectors: [FINANCE, CONSTRUCTION]
+    strong_keywords: [주택공급 금융지원, 주택 공급 금융지원, 주택금융 지원]
+    keywords: [주택 공급 자금, 주택 정책금융, 건설 금융지원, 주택사업 금융지원]
+    positive_keywords: [지원, 공급, 확대, 보증]
+    negative_keywords: [축소, 중단]
+    rules: {scope: title_summary, require_any: [주택, 주택공급], require_all: [금융]}
+
+  TRADE_FINANCE_SUPPORT:
+    name_ko: 무역·수출 금융지원
+    family: FINANCE_MACRO
+    sectors: [FINANCE]
+    strong_keywords: [무역금융, 수출금융, 수출기업 금융지원]
+    keywords: [정책금융 지원, 수출기업 지원, 무역 보험, 수출 보증]
+    positive_keywords: [공급, 확대, 지원, 보증]
+    negative_keywords: [축소, 중단]
+    rules: {scope: title_summary, require_any: [무역금융, 수출금융, 무역, 수출]}
+
+  CLIMATE_FINANCE:
+    name_ko: 기후·녹색금융 확대
+    family: FINANCE_MACRO
+    sectors: [FINANCE, POWER_ENERGY]
+    strong_keywords: [기후금융, 녹색금융, 전환금융]
+    keywords: [기후 금융, 녹색 금융, 탄소금융, 녹색투자 금융]
+    positive_keywords: [확대, 강화, 지원, 투자]
+    negative_keywords: [축소, 중단]
+    rules: {scope: title_summary, require_any: [기후금융, 녹색금융, 전환금융, 기후 금융, 녹색 금융]}
+
+  ENERGY_SECURITY:
+    name_ko: 에너지 안보·공급 안정
+    family: POWER_NUCLEAR
+    sectors: [POWER_ENERGY]
+    default_direction: MIXED
+    fixed_direction: MIXED
+    strong_keywords: [에너지 안보, 에너지 공급 안정, 에너지 공급망 안정]
+    keywords: [원유 비축, 가스 비축, LNG 확보, 에너지 수급 안정, 에너지 공급망]
+    rules: {scope: title_summary, require_any: [에너지, 원유, 가스, LNG, 전력]}
+
+  ICT_EXPORT_GROWTH:
+    name_ko: ICT 수출 증가
+    family: TELECOM
+    sectors: [TELECOM, SEMICONDUCTOR, AI_IT]
+    strong_keywords: [ICT 수출 증가, ICT 수출 호조, 정보통신기술 수출 증가]
+    keywords: [ICT 수출액 증가, ICT 수출 회복, 정보통신 수출 증가]
+    positive_keywords: [증가, 호조, 회복, 확대]
+    negative_keywords: [감소, 부진, 둔화]
+    rules: {scope: title_summary, require_any: [ICT, 정보통신]}
