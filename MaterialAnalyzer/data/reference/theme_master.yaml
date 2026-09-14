@@ -1,349 +1,108 @@
-version: "1.0"
+version: '1.2'
 
 direction_keywords:
-  positive:
-    - 사상 최대
-    - 역대 최대
-    - 증가 전망
-    - 개선 전망
-    - 상향
-    - 확대
-    - 성장
-    - 수혜
-    - 지원
-    - 투자 확대
-    - 수주
-    - 승인
-    - 통과
-    - 회복
-  negative:
-    - 감소 전망
-    - 악화
-    - 하향
-    - 축소
-    - 규제 강화
-    - 금지
-    - 제재
-    - 부진
-    - 적자
-    - 중단
-    - 지연
-    - 취소
+  positive: [사상 최대, 역대 최대, 증가 전망, 개선 전망, 상향, 확대, 성장, 수혜, 지원, 투자 확대, 수주, 승인, 통과, 회복]
+  negative: [감소 전망, 악화, 하향, 축소, 규제 강화, 금지, 제재, 부진, 적자, 중단, 지연, 취소]
 
-# V1 rule scoring:
-# - strong_keywords: base score 2.0
-# - keywords: base score 1.0
-# - title/summary/body weights are applied by RuleClassifier.
-# - min_score is the final weighted threshold.
+theme_families:
+  FINANCE_MACRO: {name_ko: 금융·금리}
+  SEMICONDUCTOR_AI: {name_ko: 반도체·AI}
+  POWER_NUCLEAR: {name_ko: 전력·원전}
+  DEFENSE_AERO: {name_ko: 방산·항공우주}
+  SHIPBUILDING_MARINE: {name_ko: 조선·해양}
+  AUTO_MOBILITY: {name_ko: 자동차·모빌리티}
+  BATTERY_MATERIALS: {name_ko: 이차전지·배터리소재}
+  BIO_HEALTHCARE: {name_ko: 바이오·헬스케어}
+  CONSTRUCTION_INFRA: {name_ko: 건설·인프라}
+  ROBOTICS_AUTOMATION: {name_ko: 로봇·자동화}
+  DISPLAY: {name_ko: 디스플레이}
+  CHEMICAL: {name_ko: 화학}
+  STEEL_MATERIALS: {name_ko: 철강·소재}
+  CONSUMER_RETAIL: {name_ko: 소비·유통}
+  TELECOM: {name_ko: 통신}
+  TRANSPORT_LOGISTICS: {name_ko: 운송·물류}
+  ENTERTAINMENT_MEDIA: {name_ko: 엔터·미디어}
+
+# V1.2 declarative rule grammar
+# rules.scope: all | title_summary | title | summary
+# rules: require_any / require_all / exclude_any
+
 themes:
-  BANK_EARNINGS:
-    name_ko: 은행 실적 개선
-    description: 은행·금융지주의 순이익, 순이자이익, NIM, 대출 성장 등 실적 개선 재료
-    sectors: [FINANCE]
-    subsectors: [BANK]
-    default_direction: POSITIVE
-    min_score: 2.0
-    strong_keywords: [순이자이익, 순이자마진, NIM, 은행 실적, 금융지주 실적]
-    keywords: [순이익, 대출 성장, 이자이익, 예대마진, 실적 전망]
-    positive_keywords: [사상 최대, 역대 최대, 증가, 개선, 상향, 성장]
-    negative_keywords: [감소, 악화, 하향, 부진]
-
-  SHAREHOLDER_RETURN:
-    name_ko: 주주환원 확대
-    description: 배당 확대, 자사주 매입·소각 등 주주환원 강화 재료
-    sectors: [FINANCE]
-    subsectors: []
-    default_direction: POSITIVE
-    min_score: 2.0
-    strong_keywords: [자사주 소각, 자사주 매입, 주주환원, 배당 확대]
-    keywords: [배당성향, 밸류업, 총주주환원율, TSR]
-    positive_keywords: [확대, 상향, 강화, 증가]
-    negative_keywords: [축소, 하향, 감소]
-
-  RATE_HIKE:
-    name_ko: 금리 상승
-    description: 기준금리·시장금리 상승 또는 인상 전망
-    sectors: [FINANCE]
-    subsectors: [BANK, INSURANCE]
-    default_direction: MIXED
-    min_score: 2.0
-    strong_keywords: [금리 인상, 기준금리 인상, 시장금리 상승]
-    keywords: [국채금리 상승, 채권금리 상승, 금리 상승]
-    positive_keywords: []
-    negative_keywords: []
-
-  RATE_CUT:
-    name_ko: 금리 인하
-    description: 기준금리·시장금리 하락 또는 인하 전망
-    sectors: [FINANCE]
-    subsectors: [BANK, SECURITIES]
-    default_direction: MIXED
-    min_score: 2.0
-    strong_keywords: [금리 인하, 기준금리 인하, 시장금리 하락]
-    keywords: [국채금리 하락, 채권금리 하락, 금리 하락]
-    positive_keywords: []
-    negative_keywords: []
-
-  HBM_DEMAND:
-    name_ko: HBM 수요 확대
-    description: HBM·고대역폭메모리 수요 증가와 공급 확대 재료
-    sectors: [SEMICONDUCTOR]
-    subsectors: [MEMORY]
-    default_direction: POSITIVE
-    min_score: 2.0
-    strong_keywords: [HBM, 고대역폭메모리, HBM4, HBM3E]
-    keywords: [AI 메모리, 메모리 수요, 공급 부족, 수요 증가]
-    positive_keywords: [수요 증가, 공급 확대, 증설, 가격 상승, 성장]
-    negative_keywords: [수요 둔화, 공급 과잉, 가격 하락]
-
-  SEMICONDUCTOR_CAPEX:
-    name_ko: 반도체 투자 확대
-    description: 팹·장비·라인 증설 등 반도체 설비투자 확대 재료
-    sectors: [SEMICONDUCTOR]
-    subsectors: [FOUNDRY, EQUIPMENT, MATERIALS]
-    default_direction: POSITIVE
-    min_score: 2.0
-    strong_keywords: [반도체 투자, 반도체 설비투자, 팹 증설, 생산라인 증설]
-    keywords: [CAPEX, 장비 투자, 생산능력 확대, 공장 증설]
-    positive_keywords: [확대, 증설, 증가, 착공]
-    negative_keywords: [축소, 지연, 취소]
-
-  SEMICONDUCTOR_EXPORT_RESTRICTION:
-    name_ko: 반도체 수출 규제
-    description: 반도체·장비·AI칩의 수출 제한 및 규제 강화 재료
-    sectors: [SEMICONDUCTOR, AI_IT]
-    subsectors: [EQUIPMENT, AI]
-    default_direction: NEGATIVE
-    min_score: 2.0
-    strong_keywords: [반도체 수출 규제, AI칩 수출 규제, 반도체 장비 수출 통제]
-    keywords: [수출통제, 수출 제한, 대중 규제, 제재 강화]
-    positive_keywords: [규제 완화, 허가, 예외]
-    negative_keywords: [규제 강화, 금지, 제한, 제재]
-
-  AI_DATA_CENTER_INVESTMENT:
-    name_ko: AI 데이터센터 투자
-    description: AI 데이터센터, GPU 서버, 클라우드 인프라 투자 확대 재료
-    sectors: [AI_IT, SEMICONDUCTOR, POWER_ENERGY]
-    subsectors: [DATA_CENTER, AI, MEMORY, GRID]
-    default_direction: POSITIVE
-    min_score: 2.0
-    strong_keywords: [AI 데이터센터, 데이터센터 투자, GPU 서버 투자]
-    keywords: [데이터센터 증설, AI 서버, 클라우드 인프라, GPU 클러스터]
-    positive_keywords: [투자, 증설, 확대, 구축, 착공]
-    negative_keywords: [투자 축소, 지연, 취소]
-
-  GRID_INVESTMENT:
-    name_ko: 전력망 투자 확대
-    description: 송배전망·변압기·전력 인프라 투자 확대 재료
-    sectors: [POWER_ENERGY]
-    subsectors: [GRID]
-    default_direction: POSITIVE
-    min_score: 2.0
-    strong_keywords: [전력망 투자, 송전망 투자, 전력 인프라 투자, 송배전 투자]
-    keywords: [전력망 확충, 변압기 수요, 송전선로, 전력기기]
-    positive_keywords: [확대, 확충, 투자, 발주, 수요 증가]
-    negative_keywords: [축소, 지연, 중단]
-
-  NUCLEAR_EXPORT:
-    name_ko: 원전 수출
-    description: 해외 원전·SMR 수주, 수출, 건설 프로젝트 재료
-    sectors: [POWER_ENERGY, CONSTRUCTION]
-    subsectors: [NUCLEAR]
-    default_direction: POSITIVE
-    min_score: 2.0
-    strong_keywords: [원전 수출, 원전 수주, 원자력발전소 수주, SMR 수출]
-    keywords: [원전 프로젝트, 원전 건설, 원전 협력, 소형모듈원자로]
-    positive_keywords: [수주, 계약, 선정, 협력, 승인]
-    negative_keywords: [취소, 중단, 지연, 탈락]
-
-  RENEWABLE_INVESTMENT:
-    name_ko: 신재생에너지 투자
-    description: 태양광·풍력·해상풍력 등 재생에너지 투자 확대 재료
-    sectors: [POWER_ENERGY]
-    subsectors: [RENEWABLE]
-    default_direction: POSITIVE
-    min_score: 2.0
-    strong_keywords: [해상풍력 투자, 풍력 투자, 태양광 투자, 재생에너지 투자]
-    keywords: [신재생에너지 확대, 발전단지, 풍력단지, 태양광 발전]
-    positive_keywords: [확대, 투자, 착공, 선정]
-    negative_keywords: [축소, 중단, 지연]
-
-  OIL_GAS_PRICE_SURGE:
-    name_ko: 유가·가스 가격 상승
-    description: 국제유가·천연가스 가격 급등 및 공급 차질 재료
-    sectors: [POWER_ENERGY, CHEMICAL, TRANSPORT_LOGISTICS]
-    subsectors: [OIL_GAS]
-    default_direction: MIXED
-    min_score: 2.0
-    strong_keywords: [국제유가 급등, 유가 급등, 천연가스 가격 급등, LNG 가격 급등]
-    keywords: [원유 가격 상승, 공급 차질, 감산, 산유국 감산]
-    positive_keywords: []
-    negative_keywords: []
-
-  DEFENSE_EXPORT:
-    name_ko: 방산 수출 확대
-    description: 무기체계 수출, 대형 방산 계약, 국가간 방산 협력 재료
-    sectors: [DEFENSE]
-    subsectors: []
-    default_direction: POSITIVE
-    min_score: 2.0
-    strong_keywords: [방산 수출, 무기 수출, 방산 계약, 무기체계 계약]
-    keywords: [전차 수출, 자주포 수출, 미사일 수출, 전투기 수출, 방산 협력]
-    positive_keywords: [계약, 수주, 수출, 선정, 확대]
-    negative_keywords: [취소, 지연, 탈락]
-
-  SHIPBUILDING_ORDERS:
-    name_ko: 조선 수주 확대
-    description: LNG선·컨테이너선·탱커 등 선박 수주 확대 재료
-    sectors: [SHIPBUILDING]
-    subsectors: []
-    default_direction: POSITIVE
-    min_score: 2.0
-    strong_keywords: [선박 수주, LNG선 수주, 조선 수주]
-    keywords: [수주잔고, 컨테이너선 수주, 탱커 수주, 선가 상승]
-    positive_keywords: [수주, 증가, 상승, 확대]
-    negative_keywords: [취소, 감소, 하락]
-
-  EV_DEMAND_RECOVERY:
-    name_ko: 전기차 수요 회복
-    description: 전기차 판매·수요 회복과 전동화 시장 개선 재료
-    sectors: [AUTOMOTIVE, BATTERY]
-    subsectors: [EV]
-    default_direction: POSITIVE
-    min_score: 2.0
-    strong_keywords: [전기차 수요 회복, 전기차 판매 회복, EV 수요 회복]
-    keywords: [전기차 판매 증가, 전동화 수요, EV 판매 증가]
-    positive_keywords: [회복, 증가, 성장, 확대]
-    negative_keywords: [둔화, 감소, 부진]
-
-  BATTERY_CAPEX:
-    name_ko: 이차전지 투자 확대
-    description: 배터리 셀·소재 생산능력 및 설비투자 확대 재료
-    sectors: [BATTERY]
-    subsectors: []
-    default_direction: POSITIVE
-    min_score: 2.0
-    strong_keywords: [배터리 투자, 이차전지 투자, 배터리 공장 증설]
-    keywords: [양극재 증설, 음극재 증설, 생산능력 확대, 배터리 CAPEX]
-    positive_keywords: [투자, 증설, 확대, 착공]
-    negative_keywords: [축소, 지연, 취소]
-
-  BIO_APPROVAL:
-    name_ko: 의약품 허가·승인
-    description: 신약·바이오의약품 허가, 품목 승인, FDA 승인 재료
-    sectors: [BIO_HEALTHCARE]
-    subsectors: []
-    default_direction: POSITIVE
-    min_score: 2.0
-    strong_keywords: [FDA 승인, 품목허가, 신약 승인, 의약품 승인]
-    keywords: [허가 획득, 판매 승인, 조건부 승인]
-    positive_keywords: [승인, 허가, 획득]
-    negative_keywords: [거절, 반려, 취소]
-
-  CLINICAL_SUCCESS:
-    name_ko: 임상 성과
-    description: 임상시험 성공, 유효성 확인, 주요 평가지표 달성 재료
-    sectors: [BIO_HEALTHCARE]
-    subsectors: []
-    default_direction: POSITIVE
-    min_score: 2.0
-    strong_keywords: [임상 성공, 임상시험 성공, 1차 평가지표 달성, 주요 평가지표 달성]
-    keywords: [유효성 확인, 통계적 유의성, 임상 결과]
-    positive_keywords: [달성, 성공, 개선, 유의성]
-    negative_keywords: [실패, 미달, 중단, 부작용]
-
-  CLINICAL_FAILURE:
-    name_ko: 임상 실패·중단
-    description: 임상시험 실패, 중단, 주요 평가지표 미달 재료
-    sectors: [BIO_HEALTHCARE]
-    subsectors: []
-    default_direction: NEGATIVE
-    min_score: 2.0
-    strong_keywords: [임상 실패, 임상시험 중단, 1차 평가지표 미달, 주요 평가지표 미달]
-    keywords: [유효성 미확인, 임상 중단, 임상 지연]
-    positive_keywords: []
-    negative_keywords: [실패, 미달, 중단, 지연]
-
-  INFRA_INVESTMENT:
-    name_ko: 인프라·SOC 투자
-    description: 정부·공공기관의 SOC, 교통, 산업 인프라 투자 확대 재료
-    sectors: [CONSTRUCTION, STEEL_MATERIALS]
-    subsectors: []
-    default_direction: POSITIVE
-    min_score: 2.0
-    strong_keywords: [SOC 투자, 인프라 투자, 사회간접자본 투자]
-    keywords: [도로 투자, 철도 투자, 항만 투자, 공공 인프라]
-    positive_keywords: [확대, 투자, 발주, 착공]
-    negative_keywords: [축소, 지연, 중단]
-
-  ROBOT_AUTOMATION:
-    name_ko: 로봇·자동화 확대
-    description: 휴머노이드·협동로봇·공장자동화 도입 및 투자 확대 재료
-    sectors: [ROBOTICS, AI_IT]
-    subsectors: [AI]
-    default_direction: POSITIVE
-    min_score: 2.0
-    strong_keywords: [휴머노이드 투자, 로봇 투자, 협동로봇 도입, 공장자동화 투자]
-    keywords: [휴머노이드, 스마트팩토리, 로봇 자동화, 로봇 양산]
-    positive_keywords: [투자, 도입, 양산, 확대]
-    negative_keywords: [중단, 지연, 축소]
-
-  DISPLAY_CAPEX:
-    name_ko: 디스플레이 투자 확대
-    description: OLED·차세대 디스플레이 설비투자 및 증설 재료
-    sectors: [DISPLAY]
-    subsectors: []
-    default_direction: POSITIVE
-    min_score: 2.0
-    strong_keywords: [OLED 투자, 디스플레이 투자, OLED 증설]
-    keywords: [8.6세대 OLED, 마이크로LED 투자, 패널 증설]
-    positive_keywords: [투자, 증설, 확대]
-    negative_keywords: [축소, 지연, 취소]
-
-  STEEL_TARIFF:
-    name_ko: 철강 관세·무역규제
-    description: 철강 제품 관세, 반덤핑, 수입 규제 등 무역정책 재료
-    sectors: [STEEL_MATERIALS]
-    subsectors: []
-    default_direction: MIXED
-    min_score: 2.0
-    strong_keywords: [철강 관세, 철강 반덤핑, 철강 수입 규제]
-    keywords: [후판 관세, 열연 관세, 무역구제, 반덤핑 관세]
-    positive_keywords: [관세 철회, 규제 완화]
-    negative_keywords: [관세 부과, 규제 강화]
-
-  CHEMICAL_SPREAD_RECOVERY:
-    name_ko: 석유화학 스프레드 회복
-    description: 에틸렌·나프타 등 석유화학 제품 스프레드 개선 재료
-    sectors: [CHEMICAL]
-    subsectors: []
-    default_direction: POSITIVE
-    min_score: 2.0
-    strong_keywords: [석유화학 스프레드 개선, 에틸렌 스프레드 개선]
-    keywords: [나프타 가격 하락, 제품가격 상승, 마진 회복]
-    positive_keywords: [개선, 회복, 상승]
-    negative_keywords: [악화, 축소, 하락]
-
-  EXPORT_GROWTH:
-    name_ko: 수출 증가
-    description: 산업 단위 수출 증가·호조를 나타내는 시장 재료
-    sectors: []
-    subsectors: []
-    default_direction: POSITIVE
-    min_score: 2.5
-    strong_keywords: [수출 증가, 수출 호조, 수출 성장]
-    keywords: [수출액 증가, 수출 회복, 수출 확대]
-    positive_keywords: [증가, 호조, 회복, 확대]
-    negative_keywords: [감소, 부진, 둔화]
-
-  GOVERNMENT_INDUSTRY_SUPPORT:
-    name_ko: 정부 산업 지원정책
-    description: 특정 산업에 대한 정부 지원, 세제·재정·규제 완화 정책 재료
-    sectors: []
-    subsectors: []
-    default_direction: POSITIVE
-    min_score: 3.0
-    strong_keywords: [산업 지원책, 산업 지원 정책, 정책금융 지원, 세제 지원]
-    keywords: [정부 지원, 규제 완화, 보조금, 정책 지원]
-    positive_keywords: [지원, 확대, 완화, 신설]
-    negative_keywords: [지원 축소, 규제 강화, 폐지]
+  BANK_EARNINGS: {name_ko: 은행 실적 개선, family: FINANCE_MACRO, sectors: [FINANCE], subsectors: [BANK], strong_keywords: [순이자이익, 순이자마진, NIM, 은행 실적, 금융지주 실적], keywords: [순이익, 대출 성장, 이자이익, 예대마진, 실적 전망], positive_keywords: [사상 최대, 증가, 개선, 상향, 성장], negative_keywords: [감소, 악화, 하향, 부진]}
+  SHAREHOLDER_RETURN: {name_ko: 주주환원 확대, family: FINANCE_MACRO, sectors: [FINANCE], strong_keywords: [자사주 소각, 자사주 매입, 주주환원, 배당 확대], keywords: [배당성향, 밸류업, 총주주환원율, TSR], positive_keywords: [확대, 상향, 강화, 증가], negative_keywords: [축소, 하향, 감소]}
+  RATE_HIKE: {name_ko: 금리 상승, family: FINANCE_MACRO, sectors: [FINANCE], subsectors: [BANK, INSURANCE], default_direction: MIXED, fixed_direction: MIXED, strong_keywords: [금리 인상, 기준금리 인상, 시장금리 상승], keywords: [국채금리 상승, 채권금리 상승, 금리 상승], rules: {scope: title_summary, require_any: [금리 인상, 기준금리 인상, 시장금리 상승, 국채금리 상승, 채권금리 상승, 금리 상승]}}
+  RATE_CUT: {name_ko: 금리 인하, family: FINANCE_MACRO, sectors: [FINANCE], subsectors: [BANK, SECURITIES], default_direction: MIXED, fixed_direction: MIXED, strong_keywords: [금리 인하, 기준금리 인하, 시장금리 하락], keywords: [국채금리 하락, 채권금리 하락, 금리 하락], rules: {scope: title_summary, require_any: [금리 인하, 기준금리 인하, 시장금리 하락, 국채금리 하락, 채권금리 하락, 금리 하락]}}
+  HOUSEHOLD_DEBT_POLICY: {name_ko: 가계부채 관리정책, family: FINANCE_MACRO, sectors: [FINANCE], subsectors: [BANK], default_direction: MIXED, fixed_direction: MIXED, strong_keywords: [가계부채 관리, 가계대출 관리, 가계부채 대책], keywords: [DSR, LTV, 가계대출 규제, 대출총량], rules: {scope: title_summary, require_any: [가계부채, 가계대출, DSR, LTV]}}
+  LOAN_REGULATION: {name_ko: 대출 규제 강화·완화, family: FINANCE_MACRO, sectors: [FINANCE], subsectors: [BANK], default_direction: MIXED, fixed_direction: MIXED, strong_keywords: [대출 규제, 대출 한도 규제, 주담대 규제], keywords: [대출 한도, 주택담보대출 규제, 대출 규제 완화], rules: {scope: title_summary, require_any: [대출 규제, 주담대, 주택담보대출, 대출 한도]}}
+  REAL_ESTATE_PF_RISK: {name_ko: 부동산 PF 리스크, family: FINANCE_MACRO, sectors: [FINANCE, CONSTRUCTION], default_direction: NEGATIVE, strong_keywords: [부동산 PF 부실, PF 부실, 프로젝트파이낸싱 부실], keywords: [부동산 PF, PF 연체, PF 충당금, PF 구조조정], negative_keywords: [부실, 연체, 손실, 충당금, 구조조정]}
+  CAPITAL_REGULATION: {name_ko: 금융 자본규제, family: FINANCE_MACRO, sectors: [FINANCE], subsectors: [BANK, INSURANCE], default_direction: MIXED, fixed_direction: MIXED, strong_keywords: [BIS 규제, 자본규제 강화, K-ICS 규제], keywords: [BIS 비율, CET1, K-ICS, 건전성 규제]}
+  SECURITIES_MARKET_BOOM: {name_ko: 증권 거래대금 증가, family: FINANCE_MACRO, sectors: [FINANCE], subsectors: [SECURITIES], strong_keywords: [거래대금 급증, 브로커리지 수익 증가], keywords: [주식 거래대금, 위탁매매 증가, 신용융자 증가], positive_keywords: [급증, 증가, 호조], negative_keywords: [감소, 부진]}
+  HBM_DEMAND: {name_ko: HBM 수요 확대, family: SEMICONDUCTOR_AI, sectors: [SEMICONDUCTOR], subsectors: [MEMORY], strong_keywords: [HBM, 고대역폭메모리, HBM4, HBM3E], keywords: [AI 메모리, 메모리 수요, HBM 수요], positive_keywords: [수요 증가, 공급 확대, 증설, 가격 상승, 성장], negative_keywords: [수요 둔화, 공급 과잉, 가격 하락]}
+  MEMORY_PRICE_UP: {name_ko: 메모리 가격 상승, family: SEMICONDUCTOR_AI, sectors: [SEMICONDUCTOR], subsectors: [MEMORY], strong_keywords: [D램 가격 상승, DRAM 가격 상승, 낸드 가격 상승, 메모리 가격 상승], keywords: [메모리 가격 반등, D램 가격 반등, 낸드 가격 반등], positive_keywords: [상승, 반등, 인상], negative_keywords: [하락], rules: {scope: title_summary, require_any: [메모리, D램, DRAM, 낸드, NAND], exclude_any: [가격 하락, 급락]}}
+  MEMORY_PRICE_DOWN: {name_ko: 메모리 가격 하락, family: SEMICONDUCTOR_AI, sectors: [SEMICONDUCTOR], subsectors: [MEMORY], default_direction: NEGATIVE, strong_keywords: [D램 가격 하락, DRAM 가격 하락, 낸드 가격 하락, 메모리 가격 하락], keywords: [메모리 가격 약세, D램 가격 약세], negative_keywords: [하락, 약세, 급락], rules: {scope: title_summary, require_any: [메모리, D램, DRAM, 낸드, NAND], exclude_any: [가격 상승, 급등, 반등]}}
+  SEMICONDUCTOR_CAPEX: {name_ko: 반도체 투자 확대, family: SEMICONDUCTOR_AI, sectors: [SEMICONDUCTOR], subsectors: [FOUNDRY, EQUIPMENT, MATERIALS], strong_keywords: [반도체 투자, 반도체 설비투자, 팹 증설, 생산라인 증설], keywords: [CAPEX, 장비 투자, 생산능력 확대, 공장 증설], positive_keywords: [확대, 증설, 증가, 착공], negative_keywords: [축소, 지연, 취소], rules: {scope: title_summary, require_any: [반도체, 팹, 파운드리, 웨이퍼]}}
+  FOUNDRY_ORDERS: {name_ko: 파운드리 수주 확대, family: SEMICONDUCTOR_AI, sectors: [SEMICONDUCTOR], subsectors: [FOUNDRY], strong_keywords: [파운드리 수주, 반도체 위탁생산 수주], keywords: [파운드리 계약, 위탁생산 계약, 첨단공정 수주], positive_keywords: [수주, 계약, 증가], negative_keywords: [취소, 감소]}
+  SEMICONDUCTOR_SUBSIDY: {name_ko: 반도체 지원정책, family: SEMICONDUCTOR_AI, sectors: [SEMICONDUCTOR], strong_keywords: [반도체 보조금, 반도체 세액공제, 반도체 지원법], keywords: [반도체 지원, 칩스법, CHIPS Act, 세제 지원], positive_keywords: [지원, 확대, 세액공제], negative_keywords: [축소, 폐지], rules: {scope: title_summary, require_any: [반도체, 칩스법, CHIPS]}}
+  SEMICONDUCTOR_EXPORT_RESTRICTION: {name_ko: 반도체 수출 규제, family: SEMICONDUCTOR_AI, sectors: [SEMICONDUCTOR, AI_IT], subsectors: [EQUIPMENT, AI], default_direction: NEGATIVE, strong_keywords: [반도체 수출 규제, AI칩 수출 규제, 반도체 장비 수출 통제], keywords: [수출통제, 수출 제한, 대중 규제, 제재 강화], positive_keywords: [규제 완화, 허가, 예외], negative_keywords: [규제 강화, 금지, 제한, 제재], rules: {scope: title_summary, require_any: [반도체, AI칩, AI 칩, GPU, 첨단칩, 반도체 장비, HBM, 메모리 칩]}}
+  AI_DATA_CENTER_INVESTMENT: {name_ko: AI 데이터센터 투자, family: SEMICONDUCTOR_AI, sectors: [AI_IT, SEMICONDUCTOR, POWER_ENERGY], subsectors: [DATA_CENTER, AI, MEMORY, GRID], strong_keywords: [AI 데이터센터, 데이터센터 투자, GPU 서버 투자], keywords: [데이터센터 증설, AI 서버, 클라우드 인프라, GPU 클러스터], positive_keywords: [투자, 증설, 확대, 구축, 착공], negative_keywords: [투자 축소, 지연, 취소]}
+  AI_CHIP_DEMAND: {name_ko: AI 칩 수요 확대, family: SEMICONDUCTOR_AI, sectors: [SEMICONDUCTOR, AI_IT], subsectors: [AI, MEMORY], strong_keywords: [AI칩 수요, AI 칩 수요, GPU 수요], keywords: [AI 가속기 수요, GPU 공급 부족, AI 반도체 수요], positive_keywords: [수요 증가, 공급 부족, 성장], negative_keywords: [수요 둔화, 과잉]}
+  CLOUD_AI_INVESTMENT: {name_ko: 클라우드·AI 투자 확대, family: SEMICONDUCTOR_AI, sectors: [AI_IT], subsectors: [CLOUD, AI], strong_keywords: [클라우드 투자, AI 인프라 투자, 생성형 AI 투자], keywords: [클라우드 CAPEX, AI 서비스 투자, AI 모델 투자], positive_keywords: [확대, 투자, 증가], negative_keywords: [축소, 지연]}
+  GRID_INVESTMENT: {name_ko: 전력망 투자 확대, family: POWER_NUCLEAR, sectors: [POWER_ENERGY], subsectors: [GRID], strong_keywords: [전력망 투자, 송전망 투자, 전력 인프라 투자, 송배전 투자], keywords: [전력망 확충, 변압기 수요, 송전선로, 전력기기], positive_keywords: [확대, 확충, 투자, 발주, 수요 증가], negative_keywords: [축소, 지연, 중단]}
+  ELECTRICITY_DEMAND_GROWTH: {name_ko: 전력 수요 증가, family: POWER_NUCLEAR, sectors: [POWER_ENERGY], strong_keywords: [전력 수요 급증, 전력수요 증가, 전력 사용량 급증], keywords: [전력 소비 증가, 최대전력 수요, 전력 피크], positive_keywords: [증가, 급증, 최대], negative_keywords: [감소]}
+  ELECTRICITY_TARIFF_HIKE: {name_ko: 전기요금 인상, family: POWER_NUCLEAR, sectors: [POWER_ENERGY], default_direction: MIXED, fixed_direction: MIXED, strong_keywords: [전기요금 인상, 전력요금 인상], keywords: [산업용 전기요금 인상, 전기료 인상], rules: {scope: title_summary, require_any: [전기요금, 전력요금, 전기료]}}
+  NUCLEAR_POLICY: {name_ko: 원전 육성 정책, family: POWER_NUCLEAR, sectors: [POWER_ENERGY], subsectors: [NUCLEAR], strong_keywords: [원전 지원정책, 원전 산업 육성, 원전 특별법, SMR 특별법], keywords: [원전 정책, 원자력 정책, SMR 육성, SMR 지원, 소형모듈원자로], positive_keywords: [지원, 육성, 확대, 시행, 법안], negative_keywords: [축소, 폐지, 중단], rules: {scope: title_summary, require_any: [원전, 원자력, SMR, 소형모듈원자로], exclude_any: [원전 수출, 원전 수주, SMR 수출]}}
+  NUCLEAR_EXPORT: {name_ko: 원전 수출, family: POWER_NUCLEAR, sectors: [POWER_ENERGY, CONSTRUCTION], subsectors: [NUCLEAR], strong_keywords: [원전 수출, 원전 수주, 원자력발전소 수주, SMR 수출], keywords: [원전 프로젝트, 원전 건설, 원전 협력, 소형모듈원자로], positive_keywords: [수주, 계약, 선정, 협력, 승인], negative_keywords: [취소, 중단, 지연, 탈락], rules: {scope: title_summary, require_any: [수출, 수주, 해외, 해외 프로젝트, 계약, 체코, 폴란드, 루마니아, UAE, 사우디]}}
+  NUCLEAR_CAPEX: {name_ko: 원전 투자·건설 확대, family: POWER_NUCLEAR, sectors: [POWER_ENERGY, CONSTRUCTION], subsectors: [NUCLEAR], strong_keywords: [신규 원전 건설, 원전 투자 확대, 원전 건설 재개], keywords: [원전 증설, 원전 건설, 원전 투자, 신규 원전], positive_keywords: [투자, 건설, 재개, 확대], negative_keywords: [중단, 취소, 축소], rules: {scope: title_summary, require_any: [원전, 원자력]}}
+  SMR_TECHNOLOGY: {name_ko: SMR 기술개발·상용화, family: POWER_NUCLEAR, sectors: [POWER_ENERGY], subsectors: [NUCLEAR], strong_keywords: [SMR 상용화, SMR 기술개발, 소형모듈원자로 개발], keywords: [SMR 실증, SMR 설계, SMR 개발, 혁신형 SMR], positive_keywords: [상용화, 개발, 실증, 승인], negative_keywords: [지연, 중단], rules: {scope: title_summary, require_any: [SMR, 소형모듈원자로]}}
+  RENEWABLE_INVESTMENT: {name_ko: 신재생에너지 투자, family: POWER_NUCLEAR, sectors: [POWER_ENERGY], subsectors: [RENEWABLE], strong_keywords: [해상풍력 투자, 풍력 투자, 태양광 투자, 재생에너지 투자], keywords: [신재생에너지 확대, 발전단지, 풍력단지, 태양광 발전], positive_keywords: [확대, 투자, 착공, 선정], negative_keywords: [축소, 중단, 지연]}
+  OIL_GAS_PRICE_SURGE: {name_ko: 유가·가스 가격 상승, family: POWER_NUCLEAR, sectors: [POWER_ENERGY, CHEMICAL, TRANSPORT_LOGISTICS], subsectors: [OIL_GAS], default_direction: MIXED, fixed_direction: MIXED, strong_keywords: [국제유가 급등, 유가 급등, 천연가스 가격 급등, LNG 가격 급등], keywords: [원유 가격 상승, 공급 차질, 감산, 산유국 감산]}
+  DEFENSE_EXPORT: {name_ko: 방산 수출 확대, family: DEFENSE_AERO, sectors: [DEFENSE], strong_keywords: [방산 수출, 무기 수출, 방산 계약, 무기체계 계약], keywords: [전차 수출, 자주포 수출, 미사일 수출, 전투기 수출, 방산 협력], positive_keywords: [계약, 수주, 수출, 선정, 확대], negative_keywords: [취소, 지연, 탈락]}
+  DEFENSE_BUDGET: {name_ko: 국방예산 확대, family: DEFENSE_AERO, sectors: [DEFENSE], strong_keywords: [국방예산 증액, 방위비 증액, 국방비 확대], keywords: [국방예산, 방위력개선비, 무기 도입 예산], positive_keywords: [증액, 확대, 증가], negative_keywords: [삭감, 축소]}
+  DEFENSE_JOINT_DEVELOPMENT: {name_ko: 방산 공동개발, family: DEFENSE_AERO, sectors: [DEFENSE], strong_keywords: [무기 공동개발, 방산 공동개발, 공동 무기개발], keywords: [전투기 공동개발, 미사일 공동개발, 방산 기술협력], positive_keywords: [협력, 개발, 계약], negative_keywords: [중단, 철회]}
+  GEOPOLITICAL_TENSION: {name_ko: 지정학적 긴장 고조, family: DEFENSE_AERO, sectors: [DEFENSE, POWER_ENERGY], default_direction: MIXED, fixed_direction: MIXED, strong_keywords: [군사 충돌, 전쟁 확산, 지정학적 긴장 고조], keywords: [무력 충돌, 국경 분쟁, 군사적 긴장, 중동 긴장]}
+  SHIPBUILDING_ORDERS: {name_ko: 조선 수주 확대, family: SHIPBUILDING_MARINE, sectors: [SHIPBUILDING], strong_keywords: [선박 수주, LNG선 수주, 조선 수주], keywords: [수주잔고, 컨테이너선 수주, 탱커 수주, 선가 상승], positive_keywords: [수주, 증가, 상승, 확대], negative_keywords: [취소, 감소, 하락]}
+  LNG_SHIP_DEMAND: {name_ko: LNG선 수요 확대, family: SHIPBUILDING_MARINE, sectors: [SHIPBUILDING], strong_keywords: [LNG선 수요, LNG운반선 수요], keywords: [LNG선 발주, LNG운반선 발주, LNG 프로젝트 선박], positive_keywords: [수요, 발주, 증가], negative_keywords: [감소, 취소]}
+  SHIP_PRICE_UP: {name_ko: 선가 상승, family: SHIPBUILDING_MARINE, sectors: [SHIPBUILDING], strong_keywords: [신조선가 상승, 선가 상승], keywords: [신조선가지수 상승, 선박 가격 상승], positive_keywords: [상승, 강세], negative_keywords: [하락]}
+  GREEN_SHIP_REGULATION: {name_ko: 친환경 선박 규제·전환, family: SHIPBUILDING_MARINE, sectors: [SHIPBUILDING], strong_keywords: [친환경 선박 규제, IMO 환경규제, 탄소배출 선박 규제], keywords: [메탄올 추진선, 암모니아 추진선, 친환경 선박 전환], positive_keywords: [전환, 규제 강화, 발주], negative_keywords: [완화]}
+  AUTO_EXPORT_GROWTH: {name_ko: 자동차 수출 증가, family: AUTO_MOBILITY, sectors: [AUTOMOTIVE], strong_keywords: [자동차 수출 증가, 완성차 수출 증가], keywords: [자동차 수출 호조, 차량 수출 증가], positive_keywords: [증가, 호조, 성장], negative_keywords: [감소, 부진]}
+  AUTO_TARIFF_RISK: {name_ko: 자동차 관세 리스크, family: AUTO_MOBILITY, sectors: [AUTOMOTIVE], default_direction: NEGATIVE, strong_keywords: [자동차 관세, 완성차 관세], keywords: [차량 관세, 자동차 품목관세], negative_keywords: [관세 부과, 인상, 부담], rules: {scope: title_summary, require_any: [자동차, 완성차, 차량], require_all: [관세]}}
+  EV_DEMAND_RECOVERY: {name_ko: 전기차 수요 회복, family: AUTO_MOBILITY, sectors: [AUTOMOTIVE, BATTERY], subsectors: [EV], strong_keywords: [전기차 수요 회복, 전기차 판매 회복, EV 수요 회복], keywords: [전기차 판매 증가, 전동화 수요, EV 판매 증가], positive_keywords: [회복, 증가, 성장, 확대], negative_keywords: [둔화, 감소, 부진]}
+  HYBRID_DEMAND: {name_ko: 하이브리드 수요 확대, family: AUTO_MOBILITY, sectors: [AUTOMOTIVE], strong_keywords: [하이브리드 판매 증가, 하이브리드 수요 증가], keywords: [HEV 판매, 하이브리드 판매, 하이브리드 수요], positive_keywords: [증가, 확대, 강세], negative_keywords: [감소, 둔화]}
+  AUTONOMOUS_DRIVING_POLICY: {name_ko: 자율주행 정책·상용화, family: AUTO_MOBILITY, sectors: [AUTOMOTIVE, AI_IT], strong_keywords: [자율주행 상용화, 자율주행 규제 완화, 자율주행 허가], keywords: [레벨4 자율주행, 무인차 운행, 자율주행 실증], positive_keywords: [상용화, 허가, 완화, 실증], negative_keywords: [규제 강화, 중단]}
+  BATTERY_CAPEX: {name_ko: 이차전지 투자 확대, family: BATTERY_MATERIALS, sectors: [BATTERY], strong_keywords: [배터리 투자, 이차전지 투자, 배터리 공장 증설], keywords: [양극재 증설, 음극재 증설, 생산능력 확대, 배터리 CAPEX], positive_keywords: [투자, 증설, 확대, 착공], negative_keywords: [축소, 지연, 취소]}
+  LITHIUM_PRICE_UP: {name_ko: 리튬 가격 상승, family: BATTERY_MATERIALS, sectors: [BATTERY], default_direction: MIXED, fixed_direction: MIXED, strong_keywords: [리튬 가격 상승, 탄산리튬 가격 상승], keywords: [리튬 가격 반등, 리튬 강세], rules: {scope: title_summary, require_any: [리튬], exclude_any: [가격 하락, 급락]}}
+  LITHIUM_PRICE_DOWN: {name_ko: 리튬 가격 하락, family: BATTERY_MATERIALS, sectors: [BATTERY], default_direction: MIXED, fixed_direction: MIXED, strong_keywords: [리튬 가격 하락, 탄산리튬 가격 하락], keywords: [리튬 가격 약세, 리튬 급락], rules: {scope: title_summary, require_any: [리튬], exclude_any: [가격 상승, 급등, 반등]}}
+  BATTERY_SUBSIDY_POLICY: {name_ko: 배터리 보조금·지원정책, family: BATTERY_MATERIALS, sectors: [BATTERY], strong_keywords: [배터리 보조금, 이차전지 보조금, 배터리 세액공제], keywords: [IRA 배터리, 배터리 지원정책, 이차전지 지원], positive_keywords: [지원, 보조금, 세액공제, 확대], negative_keywords: [축소, 폐지]}
+  CHINA_BATTERY_RESTRICTION: {name_ko: 중국 배터리 규제, family: BATTERY_MATERIALS, sectors: [BATTERY], default_direction: MIXED, fixed_direction: MIXED, strong_keywords: [중국 배터리 규제, 중국산 배터리 제한], keywords: [중국 배터리 배제, 중국산 배터리 규제, FEOC], rules: {scope: title_summary, require_any: [배터리, 이차전지, FEOC], require_all: [중국]}}
+  BIO_APPROVAL: {name_ko: 의약품 허가·승인, family: BIO_HEALTHCARE, sectors: [BIO_HEALTHCARE], strong_keywords: [FDA 승인, 품목허가, 신약 승인, 의약품 승인], keywords: [허가 획득, 판매 승인, 조건부 승인], positive_keywords: [승인, 허가, 획득], negative_keywords: [거절, 반려, 취소]}
+  CLINICAL_SUCCESS: {name_ko: 임상 성과, family: BIO_HEALTHCARE, sectors: [BIO_HEALTHCARE], strong_keywords: [임상 성공, 임상시험 성공, 1차 평가지표 달성, 주요 평가지표 달성], keywords: [유효성 확인, 통계적 유의성, 임상 결과], positive_keywords: [달성, 성공, 개선, 유의성], negative_keywords: [실패, 미달, 중단, 부작용]}
+  CLINICAL_FAILURE: {name_ko: 임상 실패·중단, family: BIO_HEALTHCARE, sectors: [BIO_HEALTHCARE], default_direction: NEGATIVE, strong_keywords: [임상 실패, 임상시험 중단, 1차 평가지표 미달, 주요 평가지표 미달], keywords: [유효성 미확인, 임상 중단, 임상 지연], negative_keywords: [실패, 미달, 중단, 지연]}
+  BIO_TECH_TRANSFER: {name_ko: 바이오 기술수출, family: BIO_HEALTHCARE, sectors: [BIO_HEALTHCARE], strong_keywords: [기술수출 계약, 라이선스 아웃, 기술이전 계약], keywords: [마일스톤 계약, 라이선싱 계약, 신약 기술이전], positive_keywords: [계약, 기술수출, 마일스톤], negative_keywords: [해지, 반환]}
+  DRUG_PRICE_POLICY: {name_ko: 약가 정책, family: BIO_HEALTHCARE, sectors: [BIO_HEALTHCARE], default_direction: MIXED, fixed_direction: MIXED, strong_keywords: [약가 인하, 약가 개편, 약가 제도], keywords: [보험약가, 약가 우대, 약가 정책], rules: {scope: title_summary, require_any: [약가, 보험약가]}}
+  BIO_INVESTMENT: {name_ko: 바이오 투자 확대, family: BIO_HEALTHCARE, sectors: [BIO_HEALTHCARE], strong_keywords: [바이오 투자 확대, 제약 투자 확대, 신약개발 투자], keywords: [바이오 펀드, R&D 투자 확대, 바이오 지원], positive_keywords: [투자, 지원, 확대], negative_keywords: [축소, 중단]}
+  INFRA_INVESTMENT: {name_ko: 인프라·SOC 투자, family: CONSTRUCTION_INFRA, sectors: [CONSTRUCTION, STEEL_MATERIALS], strong_keywords: [SOC 투자, 인프라 투자, 사회간접자본 투자], keywords: [도로 투자, 철도 투자, 항만 투자, 공공 인프라], positive_keywords: [확대, 투자, 발주, 착공], negative_keywords: [축소, 지연, 중단]}
+  HOUSING_SUPPLY_POLICY: {name_ko: 주택 공급 확대정책, family: CONSTRUCTION_INFRA, sectors: [CONSTRUCTION], strong_keywords: [주택 공급 확대, 주택 공급 대책], keywords: [공공주택 공급, 신규택지 공급, 주택 착공 확대], positive_keywords: [공급, 확대, 착공], negative_keywords: [축소, 지연]}
+  REDEVELOPMENT_POLICY: {name_ko: 재건축·재개발 규제 완화, family: CONSTRUCTION_INFRA, sectors: [CONSTRUCTION], strong_keywords: [재건축 규제 완화, 재개발 규제 완화], keywords: [정비사업 규제 완화, 용적률 완화, 재건축 활성화], positive_keywords: [완화, 활성화, 확대], negative_keywords: [강화, 규제]}
+  CONSTRUCTION_COST_RISK: {name_ko: 건설 원가 상승, family: CONSTRUCTION_INFRA, sectors: [CONSTRUCTION, STEEL_MATERIALS], default_direction: NEGATIVE, strong_keywords: [건설 원가 상승, 공사비 급등], keywords: [공사비 상승, 원자재 가격 부담, 건설비 상승], negative_keywords: [상승, 급등, 부담]}
+  ROBOT_AUTOMATION: {name_ko: 로봇·자동화 확대, family: ROBOTICS_AUTOMATION, sectors: [ROBOTICS, AI_IT], subsectors: [AI], strong_keywords: [휴머노이드 투자, 로봇 투자, 협동로봇 도입, 공장자동화 투자], keywords: [휴머노이드, 스마트팩토리, 로봇 자동화, 로봇 양산], positive_keywords: [투자, 도입, 양산, 확대], negative_keywords: [중단, 지연, 축소]}
+  HUMANOID_POLICY: {name_ko: 휴머노이드 육성정책, family: ROBOTICS_AUTOMATION, sectors: [ROBOTICS, AI_IT], subsectors: [AI], strong_keywords: [휴머노이드 지원정책, 휴머노이드 산업 육성], keywords: [휴머노이드 정책, 로봇 산업 지원, 휴머노이드 실증], positive_keywords: [지원, 육성, 실증, 확대], negative_keywords: [축소, 중단], rules: {scope: title_summary, require_any: [휴머노이드, 로봇]}}
+  SMART_FACTORY_INVESTMENT: {name_ko: 스마트팩토리 투자, family: ROBOTICS_AUTOMATION, sectors: [ROBOTICS, AI_IT], strong_keywords: [스마트팩토리 투자, 스마트공장 투자], keywords: [공장 자동화 투자, 제조 AI 투자, 스마트공장 보급], positive_keywords: [투자, 보급, 확대], negative_keywords: [축소, 지연]}
+  DISPLAY_CAPEX: {name_ko: 디스플레이 투자 확대, family: DISPLAY, sectors: [DISPLAY], strong_keywords: [OLED 투자, 디스플레이 투자, OLED 증설], keywords: [8.6세대 OLED, 마이크로LED 투자, 패널 증설], positive_keywords: [투자, 증설, 확대], negative_keywords: [축소, 지연, 취소]}
+  OLED_DEMAND: {name_ko: OLED 수요 확대, family: DISPLAY, sectors: [DISPLAY], strong_keywords: [OLED 수요 증가, OLED 출하 증가], keywords: [OLED 패널 수요, OLED 채택 확대, OLED 판매 증가], positive_keywords: [증가, 확대, 성장], negative_keywords: [감소, 둔화]}
+  CHEMICAL_SPREAD_RECOVERY: {name_ko: 석유화학 스프레드 회복, family: CHEMICAL, sectors: [CHEMICAL], strong_keywords: [석유화학 스프레드 개선, 에틸렌 스프레드 개선], keywords: [나프타 가격 하락, 제품가격 상승, 마진 회복], positive_keywords: [개선, 회복, 상승], negative_keywords: [악화, 축소, 하락]}
+  NAPHTHA_PRICE_DROP: {name_ko: 나프타 가격 하락, family: CHEMICAL, sectors: [CHEMICAL], strong_keywords: [나프타 가격 하락, 나프타 급락], keywords: [나프타 약세, 나프타 가격 안정], positive_keywords: [하락, 안정], negative_keywords: [상승, 급등], rules: {scope: title_summary, require_any: [나프타]}}
+  PETROCHEM_RESTRUCTURING: {name_ko: 석유화학 구조조정, family: CHEMICAL, sectors: [CHEMICAL], default_direction: MIXED, fixed_direction: MIXED, strong_keywords: [석유화학 구조조정, 석화 구조조정], keywords: [설비 감축, 생산능력 감축, 사업재편], rules: {scope: title_summary, require_any: [석유화학, 석화]}}
+  STEEL_TARIFF: {name_ko: 철강 관세·무역규제, family: STEEL_MATERIALS, sectors: [STEEL_MATERIALS], default_direction: MIXED, fixed_direction: MIXED, strong_keywords: [철강 관세, 철강 반덤핑, 철강 수입 규제], keywords: [후판 관세, 열연 관세, 무역구제, 반덤핑 관세], positive_keywords: [관세 철회, 규제 완화], negative_keywords: [관세 부과, 규제 강화], rules: {scope: title_summary, require_any: [철강, 후판, 열연, 냉연, 강판], require_all: [관세]}}
+  STEEL_DEMAND_RECOVERY: {name_ko: 철강 수요 회복, family: STEEL_MATERIALS, sectors: [STEEL_MATERIALS], strong_keywords: [철강 수요 회복, 철강 판매 회복], keywords: [철강 수요 증가, 강재 수요 증가, 철강 출하 증가], positive_keywords: [회복, 증가, 호조], negative_keywords: [감소, 부진]}
+  IRON_ORE_PRICE: {name_ko: 철광석 가격 변동, family: STEEL_MATERIALS, sectors: [STEEL_MATERIALS], default_direction: MIXED, fixed_direction: MIXED, strong_keywords: [철광석 가격 급등, 철광석 가격 급락], keywords: [철광석 가격 상승, 철광석 가격 하락], rules: {scope: title_summary, require_any: [철광석]}}
+  RETAIL_CONSUMPTION_RECOVERY: {name_ko: 소비·유통 회복, family: CONSUMER_RETAIL, sectors: [CONSUMER_RETAIL], strong_keywords: [소비 회복, 소매판매 회복, 백화점 매출 증가], keywords: [소비심리 개선, 소매판매 증가, 유통 매출 증가], positive_keywords: [회복, 개선, 증가], negative_keywords: [감소, 부진]}
+  TOURISM_DUTY_FREE: {name_ko: 관광·면세 수요 증가, family: CONSUMER_RETAIL, sectors: [CONSUMER_RETAIL, TRANSPORT_LOGISTICS], strong_keywords: [외국인 관광객 증가, 면세점 매출 증가], keywords: [방한 관광객 증가, 면세 수요 회복, 관광객 회복], positive_keywords: [증가, 회복, 확대], negative_keywords: [감소, 부진]}
+  K_BEAUTY_EXPORT: {name_ko: K-뷰티 수출 증가, family: CONSUMER_RETAIL, sectors: [CONSUMER_RETAIL], strong_keywords: [화장품 수출 증가, K-뷰티 수출 증가], keywords: [화장품 수출 호조, K뷰티 수출, K-뷰티 수출], positive_keywords: [증가, 호조, 성장], negative_keywords: [감소, 부진], rules: {scope: title_summary, require_any: [화장품, K-뷰티, K뷰티]}}
+  TELECOM_CAPEX: {name_ko: 통신망 투자 확대, family: TELECOM, sectors: [TELECOM], strong_keywords: [통신망 투자, 5G 투자 확대, 통신 CAPEX], keywords: [기지국 투자, 네트워크 투자, 통신 인프라 투자], positive_keywords: [투자, 확대, 증설], negative_keywords: [축소, 지연]}
+  SIX_G_POLICY: {name_ko: 6G 육성정책, family: TELECOM, sectors: [TELECOM, AI_IT], strong_keywords: [6G 지원정책, 6G 산업 육성], keywords: [6G 투자, 6G 연구개발, 6G 상용화], positive_keywords: [지원, 육성, 투자, 상용화], negative_keywords: [축소, 지연], rules: {scope: title_summary, require_any: [6G]}}
+  FREIGHT_RATE_SURGE: {name_ko: 운임 급등, family: TRANSPORT_LOGISTICS, sectors: [TRANSPORT_LOGISTICS], default_direction: MIXED, fixed_direction: MIXED, strong_keywords: [해상운임 급등, 컨테이너 운임 급등, 항공운임 급등], keywords: [SCFI 급등, 운임 상승, 물류비 상승]}
+  AIR_TRAVEL_DEMAND: {name_ko: 항공 여행수요 증가, family: TRANSPORT_LOGISTICS, sectors: [TRANSPORT_LOGISTICS], strong_keywords: [항공 여객 증가, 여객 수요 증가], keywords: [국제선 여객 증가, 항공 수요 회복, 여행 수요 증가], positive_keywords: [증가, 회복, 확대], negative_keywords: [감소, 부진]}
+  LOGISTICS_VOLUME_GROWTH: {name_ko: 물동량 증가, family: TRANSPORT_LOGISTICS, sectors: [TRANSPORT_LOGISTICS], strong_keywords: [물동량 증가, 택배 물량 증가], keywords: [항만 물동량 증가, 컨테이너 물동량 증가, 택배 물량], positive_keywords: [증가, 성장], negative_keywords: [감소, 부진]}
+  K_CONTENT_EXPORT: {name_ko: K-콘텐츠 수출 증가, family: ENTERTAINMENT_MEDIA, sectors: [ENTERTAINMENT_MEDIA], strong_keywords: [콘텐츠 수출 증가, K-콘텐츠 수출 증가], keywords: [드라마 수출, 콘텐츠 해외판매, OTT 해외판매], positive_keywords: [증가, 수출, 판매], negative_keywords: [감소]}
+  KPOP_TOUR_GROWTH: {name_ko: K팝 투어 확대, family: ENTERTAINMENT_MEDIA, sectors: [ENTERTAINMENT_MEDIA], strong_keywords: [월드투어 확대, K팝 투어 확대], keywords: [해외 공연 확대, 스타디움 투어, 글로벌 투어], positive_keywords: [확대, 증가, 매진], negative_keywords: [취소, 연기]}
+  GAME_EXPORT_GROWTH: {name_ko: 게임 수출·글로벌 흥행, family: ENTERTAINMENT_MEDIA, sectors: [ENTERTAINMENT_MEDIA], strong_keywords: [게임 수출 증가, 글로벌 흥행], keywords: [해외 매출 증가, 글로벌 출시 흥행, 게임 해외매출], positive_keywords: [흥행, 증가, 성장], negative_keywords: [부진, 감소]}
