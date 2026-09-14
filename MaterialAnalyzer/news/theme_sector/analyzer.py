@@ -12,15 +12,9 @@ _EXCLUDED_SOURCE_IDS = {"DART", "KIND"}
 
 
 class ThemeSectorAnalyzer:
-    """Analyze ArticleCluster representatives without linking to individual tickers.
+    """Analyze ArticleCluster representatives without linking to individual tickers."""
 
-    Theme/Sector analysis is intentionally separated from direct corporate-event
-    extraction. DART/KIND disclosures and market-reaction articles are ignored by
-    default so the report describes underlying market/industry materials rather
-    than duplicating EventExtractor or inferring a theme from price action itself.
-    """
-
-    VERSION = "THEME_SECTOR_ANALYZER_V1"
+    VERSION = "THEME_SECTOR_ANALYZER_V1_2"
 
     def __init__(self, database: Database, classifier: RuleClassifier):
         self.database = database
@@ -142,6 +136,8 @@ class ThemeSectorAnalyzer:
         record.update(
             {
                 "classification_type": "THEME",
+                "theme_family": theme.theme_family,
+                "theme_family_name_ko": theme.theme_family_name_ko,
                 "theme": theme.theme,
                 "theme_name_ko": theme.theme_name_ko,
                 "theme_description": theme.description,
@@ -164,6 +160,8 @@ class ThemeSectorAnalyzer:
         record.update(
             {
                 "classification_type": "SECTOR_ONLY",
+                "theme_family": "",
+                "theme_family_name_ko": "",
                 "theme": "",
                 "theme_name_ko": "",
                 "theme_description": "",
