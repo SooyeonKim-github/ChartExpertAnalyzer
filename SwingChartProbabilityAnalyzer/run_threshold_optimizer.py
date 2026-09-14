@@ -4,7 +4,6 @@ import argparse
 import sys
 from pathlib import Path
 
-import numpy as np
 import pandas as pd
 import yaml
 
@@ -14,15 +13,23 @@ for p in (REPO_ROOT, BASE_DIR):
     if str(p) not in sys.path:
         sys.path.insert(0, str(p))
 
-from ThresholdOptimization import ThresholdOptimizer  # noqa: E402
 from config import DEFAULT_CONFIG  # noqa: E402
-from optimization import SwingThresholdAdapter  # noqa: E402
+from optimization import SwingThresholdAdapter, SwingThresholdOptimizer  # noqa: E402
 
 
-def _latest_range_file() -> Path:
+def _latest_optimizer_input() -> Path:
+    manifests = list(
+        (BASE_DIR / "results").glob("range_*/threshold_input/manifest.csv")
+    )
+    if manifests:
+        return max(manifests, key=lambda p: p.stat().st_mtime)
+
     files = list((BASE_DIR / "results").glob("range_*/range_all_results.csv"))
     if not files:
-        raise FileNotFoundError("No Swing range_all_results.csv found. Run main_range.py first.")
+        raise FileNotFoundError(
+            "No Swing threshold_input/manifest.csv or range_all_results.csv found. "
+            "Run the range analyzer / threshold exporter first."
+        )
     return max(files, key=lambda p: p.stat().st_mtime)
 
 
@@ -33,39 +40,116 @@ def _resolve(value: str | None, default: Path) -> Path:
     return p if p.is_absolute() else BASE_DIR / p
 
 
-def main() -> None:
-    p = argparse.ArgumentParser(description="Swing purged walk-forward threshold optimizer")
-    p.add_argument("--range-file")
-    p.add_argument("--optimizer-config", default="threshold_optimizer.yaml")
-    p.add_argument("--out")
-    args = p.parse_args()
-
-    range_file = _resolve(args.range_file, _latest_range_file())
-    optimizer_cfg = yaml.safe_load(
-        _resolve(args.optimizer_config, BASE_DIR / "threshold_optimizer.yaml").read_text(encoding="utf-8")
-    ) or {}
-    df = pd.read_csv(
-        range_file,
+def _read_csv(path: Path) -> pd.DataFrame:
+    return pd.read_csv(
+        path,
         encoding="utf-8-sig",
         dtype={"Ticker": str},
         low_memory=False,
     )
-    print(f"[INFO] optimizer input: {range_file}")
 
-    mfe = pd.to_numeric(df.get("MFE_20D_Pct"), errors="coerce")
-    mae = pd.to_numeric(df.get("MAE_20D_Pct"), errors="coerce")
-    denom = mae.abs().replace(0, np.nan)
-    df["optimizer_excursion_ratio_D20"] = mfe / denom
 
-    out_dir = _resolve(args.out, range_file.parent / "optimizer")
+def _load_manifest(manifest_path: Path) -> pd.DataFrame:
+    manifest = _read_csv(manifest_path)
+    if "file" not in manifest.columns:
+        raise ValueError(f"manifest missing 'file' column: {manifest_path}")
+
+    parts: list[pd.DataFrame] = []
+    for name in manifest["file"].dropna().astype(str):
+        part_path = manifest_path.parent / name
+        if not part_path.exists():
+            raise FileNotFoundError(f"threshold shard not found: {part_path}")
+        parts.append(_read_csv(part_path))
+
+    if not parts:
+        raise ValueError(f"threshold manifest contains no data parts: {manifest_path}")
+    return pd.concat(parts, ignore_index=True, sort=False)
+
+
+def _load_optimizer_input(path: Path) -> tuple[pd.DataFrame, Path]:
+    """Load either exported threshold shards or a legacy full range CSV.
+
+    Returns (dataframe, range_dir). range_dir is used for optimizer outputs.
+    """
+    path = path.resolve()
+
+    if path.is_dir():
+        if path.name == "threshold_input":
+            manifest = path / "manifest.csv"
+            if not manifest.exists():
+                raise FileNotFoundError(f"manifest not found: {manifest}")
+            return _load_manifest(manifest), path.parent
+
+        threshold_manifest = path / "threshold_input" / "manifest.csv"
+        if threshold_manifest.exists():
+            return _load_manifest(threshold_manifest), path
+
+        full_range = path / "range_all_results.csv"
+        if full_range.exists():
+            return _read_csv(full_range), path
+
+        raise FileNotFoundError(
+            f"No threshold_input/manifest.csv or range_all_results.csv under: {path}"
+        )
+
+    if path.name == "manifest.csv" and path.parent.name == "threshold_input":
+        return _load_manifest(path), path.parent.parent
+
+    if path.name.startswith("threshold_input_part_") and path.suffix.lower() == ".csv":
+        return _read_csv(path), path.parent.parent
+
+    if path.suffix.lower() == ".csv":
+        return _read_csv(path), path.parent
+
+    raise ValueError(f"Unsupported optimizer input: {path}")
+
+
+def main() -> None:
+    p = argparse.ArgumentParser(
+        description=(
+            "Swing 2D threshold optimizer: entry_score x max_entry_channel_position "
+            "with purged long-horizon walk-forward validation"
+        )
+    )
+    p.add_argument(
+        "--range-file",
+        help=(
+            "Legacy name kept for compatibility. Accepts range_all_results.csv, "
+            "a range directory, threshold_input directory, or manifest.csv."
+        ),
+    )
+    p.add_argument("--optimizer-config", default="threshold_optimizer.yaml")
+    p.add_argument("--out")
+    args = p.parse_args()
+
+    input_path = _resolve(args.range_file, _latest_optimizer_input())
+    optimizer_cfg = yaml.safe_load(
+        _resolve(
+            args.optimizer_config, BASE_DIR / "threshold_optimizer.yaml"
+        ).read_text(encoding="utf-8")
+    ) or {}
+
+    df, range_dir = _load_optimizer_input(input_path)
+    print(f"[INFO] optimizer input: {input_path}")
+    print(f"[INFO] loaded rows   : {len(df):,}")
+    if "Actual_Date" in df.columns:
+        dates = pd.to_datetime(df["Actual_Date"], errors="coerce").dropna()
+        if not dates.empty:
+            print(
+                f"[INFO] date range     : {dates.min().date()} ~ {dates.max().date()}"
+            )
+
+    out_dir = _resolve(args.out, range_dir / "optimizer_v2")
     adapter = SwingThresholdAdapter(
         phase="confirmed",
         analyzer_config=DEFAULT_CONFIG.to_dict(),
     )
-    result = ThresholdOptimizer(adapter, optimizer_cfg).run(df)
+    result = SwingThresholdOptimizer(adapter, optimizer_cfg).run(df)
     paths = result.write(out_dir / "confirmed")
     result.current_vs_optimized.to_csv(
-        out_dir / "current_vs_optimized.csv", index=False, encoding="utf-8-sig"
+        out_dir / "current_vs_optimized.csv",
+        index=False,
+        encoding="utf-8-sig",
     )
 
     eligible_path = out_dir / "recommended_thresholds.yaml"
@@ -76,6 +160,7 @@ def main() -> None:
     else:
         eligible_payload = {}
         provisional_payload = result.recommended_config
+
     eligible_path.write_text(
         yaml.safe_dump(eligible_payload, allow_unicode=True, sort_keys=False),
         encoding="utf-8",
@@ -86,19 +171,27 @@ def main() -> None:
     )
 
     print("\n============================================")
-    print(" Swing Threshold Optimizer complete")
+    print(" Swing Threshold Optimizer V2 complete")
     print("============================================")
-    print(f"Input : {range_file}")
-    print(f"Output: {out_dir}")
+    print(f"Input        : {input_path}")
+    print(f"Output       : {out_dir}")
     print(f"Candidate    : {result.recommended_params}")
     print(f"Quality      : {result.recommendation_quality}")
-    print(f"Application  : {'ELIGIBLE' if result.eligible_for_application else 'NOT ELIGIBLE'}")
+    print(
+        f"Application  : {'ELIGIBLE' if result.eligible_for_application else 'NOT ELIGIBLE'}"
+    )
     print(f"Summary      : {paths['recommendation_summary']}")
+    print(f"Comparison   : {out_dir / 'current_vs_optimized.csv'}")
+    print(f"Top configs  : {paths['top_configs']}")
+    print(f"Stability    : {paths['stability_report']}")
     if result.eligible_for_application:
         print(f"Eligible config: {eligible_path}")
     else:
         print(f"Provisional only: {provisional_path}")
-    print("NOTE: only ACCEPTABLE/ROBUST recommendations are eligible for application.")
+    print(
+        "NOTE: ACCEPTABLE/ROBUST means the walk-forward threshold is eligible "
+        "for holdout review, not automatic production application."
+    )
 
 
 if __name__ == "__main__":
