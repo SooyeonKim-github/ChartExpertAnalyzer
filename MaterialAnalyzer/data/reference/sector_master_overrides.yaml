@@ -1,0 +1,16 @@
+version: '1.2.1'
+
+# Precision tuning from live V1.2 output.
+# Lists replace the corresponding base lists.
+sectors:
+  POWER_ENERGY:
+    aliases: [전력, 에너지]
+    keywords: [전력, 전력망, 에너지, 송전, 배전, 발전소, 발전량, 발전설비, 전력수요]
+
+  CONSUMER_RETAIL:
+    aliases: [유통, 리테일]
+    keywords: [유통, 유통업, 백화점, 면세점, 소매, 소비재, 화장품, 식품, 리테일]
+
+  ENTERTAINMENT_MEDIA:
+    aliases: [엔터, 미디어]
+    keywords: [엔터테인먼트, 미디어, K팝, 드라마, 게임, 영화, 웹툰, 방송, 음원, 공연, 콘텐츠 산업, 문화콘텐츠]
