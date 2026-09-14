@@ -14,16 +14,46 @@ _FIELD_WEIGHTS = {
     "body": 0.45,
 }
 
+# V1 precision gates discovered from live output review.
+# These are intentionally narrow safeguards on top of theme_master.yaml scoring:
+# - macro rate themes must be explicit in headline/summary, not only buried in body
+# - export themes require export/industry context instead of generic words
+# - rate direction remains MIXED because a hike/cut is not universally +/- by sector
+_THEME_PRECISION_GATES = {
+    "RATE_HIKE": {
+        "require_title_or_summary_match": True,
+        "fixed_direction": "MIXED",
+    },
+    "RATE_CUT": {
+        "require_title_or_summary_match": True,
+        "fixed_direction": "MIXED",
+    },
+    "NUCLEAR_EXPORT": {
+        "required_context_keywords": [
+            "수출", "수주", "해외", "해외 프로젝트", "계약",
+            "체코", "폴란드", "루마니아", "uae", "사우디",
+        ],
+        "context_scope": "title_summary",
+    },
+    "SEMICONDUCTOR_EXPORT_RESTRICTION": {
+        "required_context_keywords": [
+            "반도체", "ai칩", "ai 칩", "gpu", "첨단칩", "첨단 칩",
+            "반도체 장비", "hbm", "메모리칩", "메모리 칩",
+        ],
+        "context_scope": "title_summary",
+    },
+}
+
 
 class RuleClassifier:
     """Deterministic V1 classifier for market themes and sectors.
 
-    The classifier intentionally does not use ticker/company mappings.  It reads the
+    The classifier intentionally does not use ticker/company mappings. It reads the
     representative article of an ArticleCluster and classifies the market narrative
-    itself.  One cluster may receive multiple themes.
+    itself. One cluster may receive multiple themes.
     """
 
-    VERSION = "THEME_SECTOR_RULE_V1"
+    VERSION = "THEME_SECTOR_RULE_V1_1"
 
     def __init__(self, catalog: MasterCatalog):
         self.catalog = catalog
@@ -38,7 +68,7 @@ class RuleClassifier:
         fields = {
             "title": _normalize(title or ""),
             "summary": _normalize(summary or ""),
-            # Full government releases can be long.  V1 only needs enough context
+            # Full government releases can be long. V1 only needs enough context
             # for deterministic keywords and avoids repeatedly scanning huge bodies.
             "body": _normalize((body or "")[:12000]),
         }
@@ -69,7 +99,7 @@ class RuleClassifier:
                     subsectors.append(subsector)
                     subsector_names.append(str(sub_cfg.get("name_ko") or subsector))
 
-            # A title hit already contributes 2.0.  Body-only generic words should
+            # A title hit already contributes 2.0. Body-only generic words should
             # not be enough to label a sector by themselves.
             if score < 1.5 and not subsectors:
                 continue
@@ -101,6 +131,7 @@ class RuleClassifier:
         for theme, cfg in self.catalog.themes.items():
             normal_keywords = list(cfg.get("keywords") or [])
             strong_keywords = list(cfg.get("strong_keywords") or [])
+            all_theme_keywords = _unique([*strong_keywords, *normal_keywords])
             excludes = list(cfg.get("exclude_keywords") or [])
 
             if any(self._contains_in_any(fields, keyword) for keyword in excludes):
@@ -117,11 +148,15 @@ class RuleClassifier:
             if score < min_score:
                 continue
 
+            gate = _THEME_PRECISION_GATES.get(theme) or {}
+            if not self._passes_precision_gate(fields, all_theme_keywords, gate):
+                continue
+
             configured_sectors = [str(x) for x in (cfg.get("sectors") or [])]
             configured_subsectors = [str(x) for x in (cfg.get("subsectors") or [])]
 
             # Broad themes such as EXPORT_GROWTH or GOVERNMENT_INDUSTRY_SUPPORT
-            # deliberately leave sectors empty in theme_master.  In that case only
+            # deliberately leave sectors empty in theme_master. In that case only
             # explicit sector evidence from the article is used.
             sectors = configured_sectors or explicit_sector_codes
             sector_names = [self.catalog.sector_name(code) for code in sectors]
@@ -138,7 +173,13 @@ class RuleClassifier:
                 subsectors = sorted(explicit_subsector_codes)
             subsector_names = [self.catalog.subsector_name(code) for code in subsectors]
 
-            direction, positive_hits, negative_hits = self._direction(fields, cfg)
+            if gate.get("fixed_direction"):
+                direction = str(gate["fixed_direction"]).upper()
+                positive_hits: list[str] = []
+                negative_hits: list[str] = []
+            else:
+                direction, positive_hits, negative_hits = self._direction(fields, cfg)
+
             confidence = self._confidence(
                 score=score,
                 min_score=min_score,
@@ -165,6 +206,39 @@ class RuleClassifier:
 
         result.sort(key=lambda item: (-item.rule_score, -item.confidence, item.theme))
         return result
+
+    def _passes_precision_gate(
+        self,
+        fields: dict[str, str],
+        theme_keywords: list[str],
+        gate: dict,
+    ) -> bool:
+        if not gate:
+            return True
+
+        headline_fields = {
+            "title": fields.get("title", ""),
+            "summary": fields.get("summary", ""),
+        }
+
+        if gate.get("require_title_or_summary_match"):
+            if not any(
+                self._contains_in_any(headline_fields, keyword)
+                for keyword in theme_keywords
+            ):
+                return False
+
+        required_context = list(gate.get("required_context_keywords") or [])
+        if required_context:
+            scope = str(gate.get("context_scope") or "all").lower()
+            context_fields = headline_fields if scope == "title_summary" else fields
+            if not any(
+                self._contains_in_any(context_fields, keyword)
+                for keyword in required_context
+            ):
+                return False
+
+        return True
 
     def _direction(
         self,
