@@ -26,8 +26,20 @@ class MasterCatalog:
 
     @classmethod
     def load(cls, sector_path: str | Path, theme_path: str | Path) -> "MasterCatalog":
-        sector_data = _load_yaml(Path(sector_path))
-        theme_data = _load_yaml(Path(theme_path))
+        sector_path = Path(sector_path)
+        theme_path = Path(theme_path)
+
+        sector_data = _load_yaml(sector_path)
+        theme_data = _load_yaml(theme_path)
+
+        # V1.2.1: production tuning is kept in small override files so the base
+        # taxonomy remains stable and live-data adjustments are easy to review.
+        sector_override = sector_path.with_name(f"{sector_path.stem}_overrides.yaml")
+        theme_override = theme_path.with_name(f"{theme_path.stem}_overrides.yaml")
+        if sector_override.exists():
+            sector_data = _deep_merge(sector_data, _load_yaml(sector_override))
+        if theme_override.exists():
+            theme_data = _deep_merge(theme_data, _load_yaml(theme_override))
 
         sectors = sector_data.get("sectors") or {}
         theme_families = theme_data.get("theme_families") or {}
@@ -75,6 +87,19 @@ def _load_yaml(path: Path) -> dict[str, Any]:
     if not isinstance(data, dict):
         raise MasterConfigError(f"YAML root must be a mapping: {path}")
     return data
+
+
+def _deep_merge(base: dict[str, Any], override: dict[str, Any]) -> dict[str, Any]:
+    result = dict(base)
+    for key, value in override.items():
+        current = result.get(key)
+        if isinstance(current, dict) and isinstance(value, dict):
+            result[key] = _deep_merge(current, value)
+        else:
+            # Lists intentionally replace instead of append. This lets precision
+            # tuning remove generic aliases/keywords from the base taxonomy.
+            result[key] = value
+    return result
 
 
 def _as_list(value: Any) -> list[str]:
