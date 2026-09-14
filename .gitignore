@@ -1,3 +1,6 @@
+# -----------------------------------------------------------------------------
+# Python environments / caches
+# -----------------------------------------------------------------------------
 .venv/
 **/.venv/
 venv/
@@ -8,28 +11,65 @@ __pycache__/
 *.pyc
 *.pyo
 *.pyd
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.ipynb_checkpoints/
 
+# -----------------------------------------------------------------------------
+# Local environment / IDE
+# -----------------------------------------------------------------------------
 .env
 *.env
-
 .vscode/
 .idea/
 
+# -----------------------------------------------------------------------------
+# Logs / caches / temporary files
+# -----------------------------------------------------------------------------
 *.log
 logs/
-
+**/logs/
 cache/
+**/cache/
 .cache/
+*.tmp
+*.bak
+~$*
 
-reports/self-improvement/
-.self_improvement_state.json
+# -----------------------------------------------------------------------------
+# Generated analyzer outputs
+# Keep source code and launch scripts tracked; ignore runtime/backtest artifacts.
+# -----------------------------------------------------------------------------
+results/
+results_*/
+output/
+output_*/
+**/results/
+**/results_*/
+**/output/
+**/output_*/
 
-MaterialAnalyzer/results/
+# -----------------------------------------------------------------------------
+# MaterialAnalyzer generated runtime data
+# -----------------------------------------------------------------------------
+MaterialAnalyzer/data/*.db
+MaterialAnalyzer/data/*_report.csv
+MaterialAnalyzer/data/*_unresolved.csv
 MaterialAnalyzer/data/material_items.csv
 MaterialAnalyzer/data/schedule_items.csv
 MaterialAnalyzer/data/reference/ticker_master_krx.csv
 MaterialAnalyzer/data/reference/ticker_master_krx.refresh.json
 MaterialAnalyzer/data/history/
 
+# -----------------------------------------------------------------------------
+# Self-improvement runtime state
+# -----------------------------------------------------------------------------
+reports/self-improvement/
+.self_improvement_state.json
+
+# -----------------------------------------------------------------------------
+# OS metadata
+# -----------------------------------------------------------------------------
 Thumbs.db
 .DS_Store
