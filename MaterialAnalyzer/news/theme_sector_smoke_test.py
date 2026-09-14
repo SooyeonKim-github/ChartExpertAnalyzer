@@ -102,13 +102,14 @@ def main() -> None:
     assert _has_theme(steel_tariff, "STEEL_TARIFF"), steel_tariff
     assert not _has_theme(steel_tariff, "AUTO_TARIFF_RISK"), steel_tariff
 
-    # exclude_any: opposing price language suppresses the wrong directional theme.
-    memory_down = classifier.classify(
-        title="D램 가격 상승 기대 약화, 메모리 가격 하락 우려 확대",
-        summary="메모리 가격 하락 가능성이 커지고 있다.",
+    # exclude_any: contradictory price language is held out instead of forcing
+    # either an UP or DOWN directional material.
+    contradictory_memory = classifier.classify(
+        title="D램 가격 상승 기대와 메모리 가격 하락 우려가 동시에 확대",
+        summary="상승·하락 전망이 엇갈리며 방향성이 불분명하다.",
     )
-    assert not _has_theme(memory_down, "MEMORY_PRICE_UP"), memory_down
-    assert _has_theme(memory_down, "MEMORY_PRICE_DOWN"), memory_down
+    assert not _has_theme(contradictory_memory, "MEMORY_PRICE_UP"), contradictory_memory
+    assert not _has_theme(contradictory_memory, "MEMORY_PRICE_DOWN"), contradictory_memory
 
     unrelated = classifier.classify(
         title="정례 위원회 개최 결과 안내",
