@@ -1,0 +1,160 @@
+version: "1.0"
+sectors:
+  FINANCE:
+    name_ko: 금융
+    aliases: [금융, 금융권, 금융지주]
+    keywords: [금융지주, 금융권, 금융회사, 금융업]
+    subsectors:
+      BANK:
+        name_ko: 은행
+        aliases: [은행, 은행주]
+        keywords: [은행, 은행권, 순이자마진, NIM, 순이자이익, 예대마진, 대출성장]
+      SECURITIES:
+        name_ko: 증권
+        aliases: [증권, 증권사]
+        keywords: [증권사, 브로커리지, 위탁매매, IB 수익]
+      INSURANCE:
+        name_ko: 보험
+        aliases: [보험, 보험사]
+        keywords: [보험사, 손해보험, 생명보험, 보험손익]
+      CARD:
+        name_ko: 카드
+        aliases: [카드, 카드사]
+        keywords: [카드사, 신용카드, 카드수수료]
+
+  SEMICONDUCTOR:
+    name_ko: 반도체
+    aliases: [반도체, 칩]
+    keywords: [반도체, 메모리, 파운드리, 웨이퍼]
+    subsectors:
+      MEMORY:
+        name_ko: 메모리반도체
+        aliases: [메모리, D램, 낸드]
+        keywords: [DRAM, D램, NAND, 낸드, HBM, 고대역폭메모리]
+      FOUNDRY:
+        name_ko: 파운드리
+        aliases: [파운드리]
+        keywords: [파운드리, 위탁생산, 미세공정]
+      EQUIPMENT:
+        name_ko: 반도체장비
+        aliases: [반도체 장비, 반도체장비]
+        keywords: [반도체 장비, 노광장비, 식각장비, 증착장비]
+      MATERIALS:
+        name_ko: 반도체소재
+        aliases: [반도체 소재, 반도체소재]
+        keywords: [포토레지스트, 특수가스, 실리콘웨이퍼]
+
+  AI_IT:
+    name_ko: AI·IT
+    aliases: [AI, 인공지능, IT]
+    keywords: [인공지능, AI, 생성형 AI, 클라우드, 데이터센터]
+    subsectors:
+      AI:
+        name_ko: 인공지능
+        aliases: [AI, 인공지능]
+        keywords: [AI, 인공지능, 생성형 AI, AI 모델]
+      DATA_CENTER:
+        name_ko: 데이터센터
+        aliases: [데이터센터, 데이터 센터]
+        keywords: [데이터센터, 데이터 센터, AI 서버, GPU 서버]
+      CLOUD:
+        name_ko: 클라우드
+        aliases: [클라우드]
+        keywords: [클라우드, 클라우드 서비스, SaaS]
+
+  POWER_ENERGY:
+    name_ko: 전력·에너지
+    aliases: [전력, 에너지]
+    keywords: [전력, 전력망, 발전, 에너지, 송전, 배전]
+    subsectors:
+      GRID:
+        name_ko: 전력망
+        aliases: [전력망, 송전망]
+        keywords: [전력망, 송전망, 송배전, 변압기, 전력 인프라]
+      NUCLEAR:
+        name_ko: 원전
+        aliases: [원전, 원자력]
+        keywords: [원전, 원자력, SMR, 소형모듈원자로]
+      RENEWABLE:
+        name_ko: 신재생에너지
+        aliases: [신재생에너지, 재생에너지]
+        keywords: [태양광, 풍력, 해상풍력, 신재생에너지, 재생에너지]
+      OIL_GAS:
+        name_ko: 석유·가스
+        aliases: [석유, 가스]
+        keywords: [원유, 천연가스, LNG, 유가]
+
+  DEFENSE:
+    name_ko: 방산
+    aliases: [방산, 방위산업]
+    keywords: [방산, 방위산업, 무기체계, 방산수출, 군수]
+
+  SHIPBUILDING:
+    name_ko: 조선
+    aliases: [조선, 조선업]
+    keywords: [조선, 조선업, 선박, LNG선, 컨테이너선, 수주잔고]
+
+  AUTOMOTIVE:
+    name_ko: 자동차
+    aliases: [자동차, 완성차]
+    keywords: [자동차, 완성차, 차량, 전기차, 하이브리드]
+    subsectors:
+      EV:
+        name_ko: 전기차
+        aliases: [전기차, EV]
+        keywords: [전기차, EV, 전동화]
+
+  BATTERY:
+    name_ko: 이차전지
+    aliases: [이차전지, 배터리]
+    keywords: [이차전지, 배터리, 양극재, 음극재, 전해액, 분리막]
+
+  BIO_HEALTHCARE:
+    name_ko: 바이오·헬스케어
+    aliases: [바이오, 제약, 헬스케어]
+    keywords: [바이오, 제약, 신약, 임상, 의약품, 헬스케어]
+
+  CONSTRUCTION:
+    name_ko: 건설·인프라
+    aliases: [건설, 인프라]
+    keywords: [건설, 인프라, SOC, 플랜트, 재건축, 재개발]
+
+  ROBOTICS:
+    name_ko: 로봇·자동화
+    aliases: [로봇, 자동화]
+    keywords: [로봇, 휴머노이드, 협동로봇, 공장자동화, 스마트팩토리]
+
+  DISPLAY:
+    name_ko: 디스플레이
+    aliases: [디스플레이, OLED]
+    keywords: [디스플레이, OLED, 마이크로LED, 패널]
+
+  CHEMICAL:
+    name_ko: 화학
+    aliases: [화학, 석유화학]
+    keywords: [화학, 석유화학, 에틸렌, 프로필렌, 스프레드]
+
+  STEEL_MATERIALS:
+    name_ko: 철강·소재
+    aliases: [철강, 소재]
+    keywords: [철강, 철광석, 열연, 냉연, 후판, 비철금속, 구리, 알루미늄]
+
+  CONSUMER_RETAIL:
+    name_ko: 소비·유통
+    aliases: [소비, 유통, 리테일]
+    keywords: [유통, 백화점, 면세점, 소매, 소비재, 화장품, 식품]
+
+  TELECOM:
+    name_ko: 통신
+    aliases: [통신, 통신사]
+    keywords: [통신사, 이동통신, 5G, 6G, 통신망]
+
+  TRANSPORT_LOGISTICS:
+    name_ko: 운송·물류
+    aliases: [운송, 물류]
+    keywords: [운송, 물류, 항공, 해운, 택배, 물동량]
+
+  ENTERTAINMENT_MEDIA:
+    name_ko: 엔터·미디어
+    aliases: [엔터, 미디어, 콘텐츠]
+    keywords: [엔터테인먼트, 미디어, 콘텐츠, K팝, 드라마, 게임]
