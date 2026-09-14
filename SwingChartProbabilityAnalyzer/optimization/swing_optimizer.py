@@ -14,23 +14,32 @@ def _numeric(frame: pd.DataFrame, column: str) -> pd.Series:
     )
 
 
-def _bool_rate(frame: pd.DataFrame, column: str) -> float | None:
-    if column not in frame.columns:
-        return None
-
-    def parse(value):
-        if pd.isna(value):
-            return np.nan
-        if isinstance(value, (bool, np.bool_)):
-            return 1.0 if bool(value) else 0.0
-        text = str(value).strip().lower()
-        if text in {"true", "1", "yes", "y"}:
+def _parse_bool_value(value) -> float:
+    """Parse bool-like CSV values without silently treating arbitrary numbers as True."""
+    if pd.isna(value):
+        return np.nan
+    if isinstance(value, (bool, np.bool_)):
+        return 1.0 if bool(value) else 0.0
+    if isinstance(value, (int, float, np.integer, np.floating)):
+        numeric = float(value)
+        if np.isclose(numeric, 1.0):
             return 1.0
-        if text in {"false", "0", "no", "n"}:
+        if np.isclose(numeric, 0.0):
             return 0.0
         return np.nan
 
-    values = frame[column].map(parse).dropna()
+    text = str(value).strip().lower()
+    if text in {"true", "1", "1.0", "yes", "y"}:
+        return 1.0
+    if text in {"false", "0", "0.0", "no", "n"}:
+        return 0.0
+    return np.nan
+
+
+def _bool_rate(frame: pd.DataFrame, column: str) -> float | None:
+    if column not in frame.columns:
+        return None
+    values = frame[column].map(_parse_bool_value).dropna()
     return None if values.empty else float(values.mean() * 100.0)
 
 
@@ -83,7 +92,6 @@ class SwingThresholdOptimizer(ThresholdOptimizer):
         )
         self.stop_hit_column = str(ocfg.get("stop_hit_column", "Stop_Hit"))
 
-        # Keep the shared objective builder, but give it Swing-specific metrics.
         self.objective_metric_map = {
             "d10_median_return": "d10_median_return",
             "d20_median_return": "d20_median_return",
@@ -155,8 +163,6 @@ class SwingThresholdOptimizer(ThresholdOptimizer):
 
         d10_values = d10.dropna()
         d20_values = d20.dropna()
-        mae_values = mae20.dropna()
-
         denom = mae20.abs().replace(0, np.nan)
         excursion = (mfe20 / denom).replace([np.inf, -np.inf], np.nan)
 
@@ -195,3 +201,21 @@ class SwingThresholdOptimizer(ThresholdOptimizer):
             ),
             "median_excursion_ratio": _median(excursion),
         }
+
+    def evaluate_parameters(
+        self,
+        df: pd.DataFrame,
+        params: dict,
+    ) -> dict[str, float | int | None]:
+        """Evaluate one fixed parameter set without optimizing on the frame.
+
+        Used for the final holdout so holdout observations can never influence
+        parameter selection.
+        """
+        if not self.adapter.validate_parameters(params):
+            raise ValueError(f"Invalid Swing threshold parameters: {params}")
+        frame = self._prepare(df)
+        mask = self.adapter.select_mask(frame, params).reindex(
+            frame.index, fill_value=False
+        ).fillna(False).astype(bool)
+        return self._metrics(frame[mask].copy())
