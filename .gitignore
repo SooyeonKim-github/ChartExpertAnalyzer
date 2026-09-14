@@ -31,5 +31,12 @@ MaterialAnalyzer/data/reference/ticker_master_krx.csv
 MaterialAnalyzer/data/reference/ticker_master_krx.refresh.json
 MaterialAnalyzer/data/history/
 
+# Swing long-range raw outputs can exceed GitHub's 100 MB/file limit.
+# Keep the lightweight results/range_*/threshold_input/ export instead.
+SwingChartProbabilityAnalyzer/results/range_*/range_all_results.csv
+SwingChartProbabilityAnalyzer/results/range_*/range_candidates.csv
+SwingChartProbabilityAnalyzer/results/range_*/swing_range_backtest.xlsx
+SwingChartProbabilityAnalyzer/results/range_*/agent/
+
 Thumbs.db
 .DS_Store
