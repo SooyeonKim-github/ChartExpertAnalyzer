@@ -12,9 +12,10 @@ if not exist .venv\Scripts\python.exe (
 if errorlevel 1 goto :error
 
 echo.
-echo [Swing Threshold Optimizer V2]
+echo [Swing Threshold Optimizer V2.1]
 echo Entry Score x Max Entry Channel Position
 echo D+10/D+20 + Hit + MAE composite objective
+echo Development Walk-Forward + Strict 2026 Final Holdout
 echo Long Purged Walk-Forward ^(252/63/63/20^)
 echo.
 set /p RANGE_FILE=Threshold input or range path ^(Enter=latest threshold_input^): 
