@@ -40,6 +40,48 @@ def main() -> None:
     assert _has_theme(steel, "STEEL_TARIFF"), steel
     assert _theme(steel, "STEEL_TARIFF").direction == "NEGATIVE"
 
+    # Regression: household-debt releases can mention historical rate hikes deep in
+    # the body. RATE_HIKE must be explicit in title/summary, not body-only evidence.
+    household_debt = classifier.classify(
+        title="2026년 8월 가계대출 동향(잠정) 및 가계부채 점검회의 개최",
+        summary="가계대출 증가폭과 금융권 관리 현황을 점검했다.",
+        body="과거 기준금리 인상과 시장금리 상승기의 대출 흐름도 함께 점검했다.",
+    )
+    assert not _has_theme(household_debt, "RATE_HIKE"), household_debt
+
+    # Regression: domestic SMR legislation is nuclear-sector material, but it is not
+    # an export catalyst unless export/order/overseas context is explicit.
+    domestic_smr = classifier.classify(
+        title="소형모듈원자로(SMR) 개발·상용화, 특별법·시행령 시행으로 본격화",
+        summary="국내 SMR 기술개발과 제도 기반을 마련한다.",
+    )
+    assert not _has_theme(domestic_smr, "NUCLEAR_EXPORT"), domestic_smr
+    assert any(item.sector == "POWER_ENERGY" for item in domestic_smr.sectors), domestic_smr
+
+    nuclear_export = classifier.classify(
+        title="한국형 원전 체코 수출 프로젝트 계약 협상 본격화",
+        summary="해외 원전 수주와 계약 절차가 진행 중이다.",
+    )
+    assert _has_theme(nuclear_export, "NUCLEAR_EXPORT"), nuclear_export
+
+    # Regression: generic export-control dialogue is not automatically a
+    # semiconductor export restriction. Semiconductor/AI-chip context is required.
+    generic_export_control = classifier.classify(
+        title="제1차 한-베트남 수출통제대화 개최, 공급망 안정 및 현지 진출기업 지원 강화",
+        summary="양국 수출통제 제도와 기업 애로사항을 논의했다.",
+    )
+    assert not _has_theme(
+        generic_export_control, "SEMICONDUCTOR_EXPORT_RESTRICTION"
+    ), generic_export_control
+
+    semiconductor_export_control = classifier.classify(
+        title="미국, AI칩·반도체 장비 수출통제 강화",
+        summary="첨단 반도체와 GPU 장비의 수출 제한을 확대한다.",
+    )
+    assert _has_theme(
+        semiconductor_export_control, "SEMICONDUCTOR_EXPORT_RESTRICTION"
+    ), semiconductor_export_control
+
     unrelated = classifier.classify(
         title="정례 위원회 개최 결과 안내",
         summary="위원회는 예정된 안건을 논의했다.",
@@ -73,7 +115,7 @@ def main() -> None:
         assert detail.exists() and detail.stat().st_size > 0
         assert summary.exists() and summary.stat().st_size > 0
 
-    print("ThemeSectorAnalyzer V1 smoke test: OK")
+    print("ThemeSectorAnalyzer V1 precision smoke test: OK")
     print(f"sector_count = {len(catalog.sectors)}")
     print(f"theme_count  = {len(catalog.themes)}")
 
