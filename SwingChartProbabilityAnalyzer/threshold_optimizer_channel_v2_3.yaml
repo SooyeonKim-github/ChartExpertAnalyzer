@@ -1,0 +1,72 @@
+optimizer:
+  objective_profile: swing_channel_only_v2_3
+
+  # D+20 is the completeness anchor.
+  target_column: D+20_Close_Return_Pct
+
+  # Swing-specific multi-horizon / path-quality columns.
+  d10_column: D+10_Close_Return_Pct
+  d20_column: D+20_Close_Return_Pct
+  mfe20_column: MFE_20D_Pct
+  mae20_column: MAE_20D_Pct
+  hit_mid_column: Hit_Mid_Before_Stop
+  hit_prior_high_column: Hit_PriorHigh_Before_Stop
+  stop_hit_column: Stop_Hit
+
+  # Long expanding walk-forward on development data only.
+  min_train_trading_days: 252
+  validation_trading_days: 63
+  step_trading_days: 63
+  purge_trading_days: 20
+  min_validation_fraction: 0.75
+
+  # Sample-size safeguards.
+  min_train_samples: 50
+  min_train_unique_dates: 30
+  min_samples: 30
+  min_unique_dates: 15
+  min_valid_folds: 4
+
+  # Only five channel candidates exist in V2.3.
+  train_top_k: 5
+  top_n: 5
+
+  allow_provisional_fallback: true
+  acceptable_min_fold_coverage: 0.50
+  robust_min_valid_folds: 6
+  robust_min_fold_coverage: 0.70
+  robust_min_plateau_neighbors: 2
+  robust_max_plateau_drop: 0.75
+
+  robustness_std_penalty: 0.50
+  plateau_penalty: 0.25
+  distance_penalty: 0.10
+  coverage_penalty: 0.50
+
+  objective_weights:
+    d10_median_return: 0.25
+    d20_median_return: 0.25
+    hit_mid_rate: 0.15
+    hit_prior_high_rate: 0.10
+    d20_p25_return: 0.10
+    mae20_quality: 0.10
+    excursion_ratio: 0.05
+
+evaluation:
+  # Threshold selection is restricted to development data.
+  development_end: 2025-12-31
+  holdout_start: 2026-01-01
+
+  # Prevent late-2025 D+20 labels from using 2026 prices.
+  holdout_purge_trading_days: 20
+
+  # 2026 is reference-only because it has already been inspected in V2.2 ablation.
+  holdout_min_samples: 30
+  holdout_min_unique_dates: 15
+
+search_space:
+  confirmed:
+    # V2.2 ablation showed that lowering score to 86 degraded quality.
+    # Keep the production score threshold fixed and optimize channel only.
+    entry_score: [90]
+    max_entry_channel_position: [0.45, 0.50, 0.52, 0.55, 0.58]
