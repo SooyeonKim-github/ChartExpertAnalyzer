@@ -53,7 +53,8 @@ class NoveltyRepository:
             "LEFT JOIN event_novelty n ON n.event_id = e.event_id "
             f"WHERE {self._eligible_sql('e', 'a')} "
             "AND (n.event_id IS NULL OR n.analysis_version IS NULL OR n.analysis_version <> ? "
-            "OR n.event_updated_at IS NULL OR n.event_updated_at <> e.updated_at) "
+            "OR n.event_updated_at IS NULL OR n.event_updated_at <> e.updated_at "
+            "OR COALESCE(n.disclosure_delta_updated_at,'') <> COALESCE(d.updated_at,'')) "
             "ORDER BY COALESCE(e.first_seen_at, e.created_at) ASC, e.event_id ASC"
         )
         params: list[object] = [analysis_version]
@@ -123,8 +124,8 @@ class NoveltyRepository:
                 "polarity_changed, litigation_procedure_changed, litigation_procedure_progressed, "
                 "source_reliability_increased, confirmation_source_added, new_information_count, "
                 "previous_stage, current_stage, previous_numbers_json, current_numbers_json, "
-                "novelty_reason, analysis_version, event_updated_at"
-                ") VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) "
+                "novelty_reason, analysis_version, event_updated_at, disclosure_delta_updated_at"
+                ") VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) "
                 "ON CONFLICT(event_id) DO UPDATE SET "
                 "family_id=excluded.family_id, parent_event_id=excluded.parent_event_id, "
                 "novelty_status=excluded.novelty_status, novelty_score=excluded.novelty_score, "
@@ -140,7 +141,7 @@ class NoveltyRepository:
                 "current_stage=excluded.current_stage, previous_numbers_json=excluded.previous_numbers_json, "
                 "current_numbers_json=excluded.current_numbers_json, novelty_reason=excluded.novelty_reason, "
                 "analysis_version=excluded.analysis_version, event_updated_at=excluded.event_updated_at, "
-                "updated_at=CURRENT_TIMESTAMP",
+                "disclosure_delta_updated_at=excluded.disclosure_delta_updated_at, updated_at=CURRENT_TIMESTAMP",
                 (
                     record.event_id,
                     record.family_id,
@@ -166,6 +167,7 @@ class NoveltyRepository:
                     record.novelty_reason,
                     record.analysis_version,
                     record.event_updated_at,
+                    record.disclosure_delta_updated_at,
                 ),
             )
         return ("UPDATED" if existing else "INSERTED"), previous_family_id
