@@ -8,7 +8,7 @@ from dynamic_chart_analyzer.providers import load_csv, load_pykrx
 
 
 def parse_args():
-    p = argparse.ArgumentParser(description="RSI + MACD + Ichimoku 1:2:7 staged chart analyzer")
+    p = argparse.ArgumentParser(description="RSI + MACD + Ichimoku 2:6:2 staged chart analyzer")
     source = p.add_mutually_exclusive_group(required=False)
     source.add_argument("--csv", help="OHLCV CSV path")
     source.add_argument("--ticker", help="KRX ticker, e.g. 005930")
@@ -19,7 +19,7 @@ def parse_args():
     p.add_argument("--no-stop", action="store_true", help="Disable protective swing stop")
     p.add_argument("--dynamic-rsi", action="store_true", help="Add experimental Dynamic RSI approximation (reporting only)")
     p.add_argument("--out", default="results", help="Output directory")
-    p.add_argument("--show-plan", action="store_true", help="Print base 1:2:7 allocation plan and exit")
+    p.add_argument("--show-plan", action="store_true", help="Print base 2:6:2 allocation plan and exit")
     return p.parse_args()
 
 
@@ -33,16 +33,16 @@ def main():
     plan = build_entry_plan(cfg)
 
     print("=" * 72)
-    print("DynamicChartAnalyzer - RSI / MACD / Ichimoku staged 1:2:7")
+    print("DynamicChartAnalyzer - RSI / MACD / Ichimoku staged 2:6:2")
     print("=" * 72)
     print(f"Capital : {plan.capital_base:,.0f} KRW")
-    print(f"Stage 1 : {plan.stage1_amount:,.0f} KRW (10%) - RSI extreme-zone exit")
-    print(f"Stage 2 : {plan.stage2_amount:,.0f} KRW (20%) - MACD confirmation")
-    print(f"Stage 3 : {plan.stage3_amount:,.0f} KRW (70%) - Ichimoku trend confirmation")
+    print(f"Stage 1 : {plan.stage1_amount:,.0f} KRW (20%) - RSI extreme-zone exit")
+    print(f"Stage 2 : {plan.stage2_amount:,.0f} KRW (60%) - MACD confirmation")
+    print(f"Stage 3 : {plan.stage3_amount:,.0f} KRW (20%) - Ichimoku trend confirmation")
     print(f"Protective stop : {'ON' if cfg.use_protective_stop else 'OFF'}")
     print(f"2% account-risk cap : {'ON' if cfg.use_two_percent_risk_cap else 'OFF'}")
     if cfg.use_two_percent_risk_cap:
-        print("  Actual 1:2:7 amounts are calculated at Stage 1 after the swing-stop distance is known.")
+        print("  Actual 2:6:2 amounts are calculated at Stage 1 after the swing-stop distance is known.")
 
     if args.show_plan and not args.csv and not args.ticker:
         return
