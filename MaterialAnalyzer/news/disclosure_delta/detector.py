@@ -233,7 +233,11 @@ class DisclosureDeltaDetector:
             if direction in {"INCREASE", "DECREASE"}:
                 delta_type = _typed_delta(current.event_type, direction)
                 sentiment = _directional_sentiment(current.event_type, direction)
-                adjustment = 5.0 if direction == "INCREASE" else -15.0
+                # material_score means market importance, not bullishness. A large negative
+                # correction can be just as material as a positive one; direction belongs
+                # in effective_sentiment, while a verified numeric delta gets a small
+                # materiality bonus in either direction.
+                adjustment = 5.0
                 reason = f"comparable {previous_value.kind} changed from {previous_value.raw} to {current_value.raw}"
             else:
                 delta_type = "MINOR_REVISION"
