@@ -9,6 +9,8 @@ class MaterialEvent:
     event_id: str
     cluster_id: str
     representative_article_id: str
+    document_signature: str
+    canonical_event_key: str
     event_type: str
     event_stage: str
     event_title: str
