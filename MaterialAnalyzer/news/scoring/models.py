@@ -43,17 +43,23 @@ class ScoreInput:
     confirmation_count: int = 0
     novelty_status: str = "NEW_EVENT"
     novelty_score: float = 0.0
+    disclosure_is_revision: bool = False
+    disclosure_delta_type: str = ""
+    effective_sentiment: str = ""
+    disclosure_score_adjustment: float = 0.0
     event_updated_at: str | None = None
     novelty_updated_at: str | None = None
 
     @classmethod
     def from_row(cls, row) -> "ScoreInput":
+        original_sentiment = _row_value(row, "positive_negative", "NEUTRAL") or "NEUTRAL"
+        effective_sentiment = _row_value(row, "effective_sentiment", "") or original_sentiment
         return cls(
             event_id=row["event_id"],
             event_type=_row_value(row, "event_type", "UNKNOWN") or "UNKNOWN",
             event_stage=_row_value(row, "event_stage", "UNKNOWN") or "UNKNOWN",
             event_title=_row_value(row, "event_title", ""),
-            positive_negative=_row_value(row, "positive_negative", "NEUTRAL") or "NEUTRAL",
+            positive_negative=original_sentiment,
             companies=_json_tuple(_row_value(row, "companies_json", None)),
             stock_codes=_json_tuple(_row_value(row, "stock_codes_json", None)),
             numbers=_json_tuple(_row_value(row, "numbers_json", None)),
@@ -64,6 +70,10 @@ class ScoreInput:
             confirmation_count=int(_row_value(row, "confirmation_count", 0) or 0),
             novelty_status=_row_value(row, "novelty_status", "NEW_EVENT") or "NEW_EVENT",
             novelty_score=float(_row_value(row, "novelty_score", 0) or 0),
+            disclosure_is_revision=bool(int(_row_value(row, "is_revision", 0) or 0)),
+            disclosure_delta_type=_row_value(row, "delta_type", ""),
+            effective_sentiment=effective_sentiment,
+            disclosure_score_adjustment=float(_row_value(row, "score_adjustment", 0) or 0),
             event_updated_at=_row_value(row, "event_updated_at", None),
             novelty_updated_at=_row_value(row, "novelty_updated_at", None),
         )
