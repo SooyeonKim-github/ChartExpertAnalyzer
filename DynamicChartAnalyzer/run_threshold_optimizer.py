@@ -123,8 +123,10 @@ def _apply_performance_gate(result, optimizer: ThresholdOptimizer, df: pd.DataFr
 
     Statistical recommendation_quality is preserved. Application eligibility is
     stricter: ACCEPTABLE/ROBUST *and* the absolute performance gate must pass.
-    If no candidate passes both, the highest-ranked statistical candidate remains
-    visible as a provisional recommendation but cannot be applied automatically.
+
+    If no threshold passes both requirements, prefer an evaluable candidate that
+    still passes the absolute performance gate. This makes the provisional output
+    useful for research while keeping automatic application disabled.
     """
     gate_cfg = dict((active_cfg or {}).get("application_performance_gate", {}) or {})
     if not bool(gate_cfg.get("enabled", False)):
@@ -142,17 +144,24 @@ def _apply_performance_gate(result, optimizer: ThresholdOptimizer, df: pd.DataFr
         trials["statistically_eligible"] & trials["performance_gate_pass"]
     )
 
+    evaluable_mask = trials["final_score"].notna() & (trials["valid_folds"] >= 1)
     strict = trials[
-        trials["final_score"].notna()
+        evaluable_mask
         & (trials["valid_folds"] >= optimizer.min_valid_folds)
         & trials["eligible_for_application"].fillna(False).astype(bool)
     ].copy()
 
     used_performance_gate_fallback = strict.empty
+    used_gate_failure_fallback = False
     if used_performance_gate_fallback:
-        candidate_pool = trials[
-            trials["final_score"].notna() & (trials["valid_folds"] >= 1)
+        performance_pass = trials[
+            evaluable_mask & trials["performance_gate_pass"].fillna(False).astype(bool)
         ].copy()
+        if not performance_pass.empty:
+            candidate_pool = performance_pass
+        else:
+            candidate_pool = trials[evaluable_mask].copy()
+            used_gate_failure_fallback = True
         if candidate_pool.empty:
             raise ValueError("Performance gate left no evaluable Dynamic threshold candidate.")
     else:
@@ -163,11 +172,15 @@ def _apply_performance_gate(result, optimizer: ThresholdOptimizer, df: pd.DataFr
     ).reset_index(drop=True)
     best = candidate_pool.iloc[0]
     space = optimizer.adapter.parameter_space(optimizer.config)
-    recommended = {name: best[name].item() if hasattr(best[name], "item") else best[name] for name in space}
+    recommended = {
+        name: best[name].item() if hasattr(best[name], "item") else best[name]
+        for name in space
+    }
     quality = str(best.get("recommendation_quality", "PROVISIONAL"))
     gate_pass = bool(best.get("performance_gate_pass", False))
+    statistically_eligible = bool(best.get("statistically_eligible", False))
     eligible = (
-        bool(best.get("statistically_eligible", False))
+        statistically_eligible
         and gate_pass
         and not used_performance_gate_fallback
     )
@@ -220,6 +233,16 @@ def _apply_performance_gate(result, optimizer: ThresholdOptimizer, df: pd.DataFr
     diagnostics = dict(result.recommendation_diagnostics or {})
     diagnostics.update(
         {
+            # Refresh every "best" field after the performance gate possibly
+            # reselects a different threshold candidate.
+            "best_valid_folds": int(best.get("valid_folds", 0) or 0),
+            "best_fold_coverage": float(best.get("fold_coverage", 0.0) or 0.0),
+            "best_std_validation_objective": best.get("std_validation_objective"),
+            "best_plateau_neighbor_count": int(
+                best.get("plateau_neighbor_count", 0) or 0
+            ),
+            "best_plateau_drop": best.get("plateau_drop"),
+            "best_statistically_eligible": statistically_eligible,
             "performance_gate_enabled": True,
             "performance_gate_thresholds": {
                 "min_mean_median_return": gate_cfg.get("min_mean_median_return"),
@@ -234,6 +257,7 @@ def _apply_performance_gate(result, optimizer: ThresholdOptimizer, df: pd.DataFr
             "best_mean_win_rate": best.get("mean_win_rate"),
             "best_mean_p25_return": best.get("mean_p25_return"),
             "used_performance_gate_fallback": used_performance_gate_fallback,
+            "used_gate_failure_fallback": used_gate_failure_fallback,
             "used_provisional_fallback": bool(
                 diagnostics.get("used_provisional_fallback", False)
                 or used_performance_gate_fallback
@@ -326,7 +350,7 @@ def main() -> None:
     print(f"Application  : {'ELIGIBLE' if result.eligible_for_application else 'NOT ELIGIBLE'}")
     print(f"Summary      : {paths['recommendation_summary']}")
     print(f"Config       : {eligible_path if result.eligible_for_application else provisional_path}")
-    print("Lecture RSI/MACD/Ichimoku and 1:2:7 are not optimized.")
+    print("Lecture RSI/MACD/Ichimoku timing and fixed 2:6:2 allocation are not optimized here.")
     print("Only one Stage quality threshold is optimized per run.")
 
 
