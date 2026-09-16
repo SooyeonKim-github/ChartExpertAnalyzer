@@ -33,6 +33,12 @@ class DisclosureDeltaAnalyzer:
         if not is_revision_title(event.event_title):
             return None, "", 0.0, False
 
+        # Structured contract identity is cross-date and event-specific, so it is more
+        # precise than the V1 canonical key for generic DART titles.
+        detail_parent = self.repository.find_detail_key_parent(event)
+        if detail_parent is not None:
+            return input_from_row(detail_parent), "DETAIL_EVENT_KEY", 100.0, False
+
         exact = self.repository.find_exact_canonical_parent(event)
         if exact is not None:
             return input_from_row(exact), "CANONICAL_EVENT_KEY", 100.0, False
@@ -51,14 +57,9 @@ class DisclosureDeltaAnalyzer:
             confidence = 70.0 if generic_revision_anchor(event.event_title) else 90.0
             return input_from_row(matched[0]), "TITLE_COMPANY_FALLBACK", confidence, False
 
-        # Generic disclosure titles (e.g. 단일판매ㆍ공급계약체결) can occur repeatedly for
-        # one company. Without contract detail, choosing the newest row would silently link
-        # the correction to the wrong contract, so keep it unresolved.
         if generic_revision_anchor(event.event_title):
             return None, "AMBIGUOUS_GENERIC_TITLE", 0.0, True
 
-        # A discriminative suffix such as '(4회차)' remains in base_title. If multiple
-        # rows still match, the most recent prior row is a reasonable revision parent.
         return input_from_row(matched[0]), "DISCRIMINATIVE_TITLE", 85.0, False
 
     def run(self, *, rebuild: bool = False, limit: int | None = None) -> DisclosureDeltaRunResult:
