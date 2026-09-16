@@ -3,8 +3,9 @@ from __future__ import annotations
 """Canonical DynamicChartAnalyzer range backtest.
 
 This file is the current Korean-market range runner. It preserves the lecture timing
-logic (RSI -> MACD -> Ichimoku, Stage1 -> Stage2 -> Stage3, fixed 1:2:7 entry plan)
-and applies the current V2.3 stage-aware LONG quality overlay.
+logic (RSI -> MACD -> Ichimoku, Stage1 -> Stage2 -> Stage3) while testing the
+current fixed 2:6:2 staged allocation and applying the V2.3 stage-aware LONG
+quality overlay.
 
 There are no versioned main_range runners anymore. Keep this file as the single
 source of truth for Korean Dynamic range backtests.
@@ -379,7 +380,7 @@ def run_range(args) -> int:
     print(f"Universe TOP N   : {len(universe)}")
     print(f"Sort by          : {params.sort_by}")
     print(f"Forward bars     : {params.forward_bars}")
-    print(f"Capital          : {params.capital:,.0f} KRW (Stage 1/2/3 = 1:2:7)")
+    print(f"Capital          : {params.capital:,.0f} KRW (Stage 1/2/3 = 2:6:2)")
     print("Lecture timing   : RSI -> MACD -> Ichimoku (unchanged)")
     print("Stage1 quality   : RS30 / Trend20 / Structure25 / Volume15 / Reversal10")
     print("Stage2 quality   : RS25 / Momentum25 / Trend20 / Volume15 / Structure15")
@@ -390,7 +391,7 @@ def run_range(args) -> int:
         f"WATCH >= {args.watch_score:g} (same cut by stage until WFO calibration)"
     )
     print("Daily LONG rank  : within signal_date + stage only")
-    print("Stage3 deployable: research-only; does NOT alter the fixed 1:2:7 state machine")
+    print("Stage3 deployable: research-only; does NOT alter the fixed 2:6:2 state machine")
     print("Benchmark proxy  : KOSPI=069500 / KOSDAQ=229200")
     print()
 
@@ -595,7 +596,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
     p.add_argument("--forward-bars", type=int, default=60, help="Forward performance trading bars")
     p.add_argument("--history-days", type=int, default=450, help="Calendar history before start")
-    p.add_argument("--capital", type=float, default=10_000_000, help="Capital in KRW; fixed 1:2:7 split")
+    p.add_argument("--capital", type=float, default=10_000_000, help="Capital in KRW; fixed 2:6:2 split")
     p.add_argument("--risk-cap", action="store_true", help="Enable optional 2%% account-risk cap")
     p.add_argument("--no-stop", action="store_true", help="Disable protective swing stop")
     p.add_argument("--dynamic-rsi", action="store_true", help="Include experimental Dynamic RSI")
