@@ -43,7 +43,7 @@ class StrategyConfig:
     cheap_zone_position: float = 0.35
     recent_lower_touch_position: float = 0.28
     recent_lower_touch_bars: int = 15
-    max_entry_channel_position: float = 0.58
+    max_entry_channel_position: float = 0.52
 
     # 쌍바닥 / higher-low
     double_bottom_lookback_bars: int = 45
