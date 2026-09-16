@@ -87,7 +87,13 @@ class DisclosureDeltaRepository:
             ).fetchall()
         return rows[0] if len(rows) == 1 else None
 
-    def find_revision_candidates(self, event: DisclosureDeltaInput, *, limit: int = 50):
+    def find_revision_candidates(
+        self,
+        event: DisclosureDeltaInput,
+        *,
+        start_market_date: str | None = None,
+        limit: int = 50,
+    ):
         companies_json = json.dumps(event.companies, ensure_ascii=False)
         stock_codes_json = json.dumps(event.stock_codes, ensure_ascii=False)
         sql = (
@@ -95,22 +101,23 @@ class DisclosureDeltaRepository:
             "AND original_source_id IN ('DART','KIND') "
             "AND COALESCE(first_seen_at,created_at) <= COALESCE(?,COALESCE(first_seen_at,created_at)) "
             "AND ((? <> '[]' AND stock_codes_json = ?) OR (? <> '[]' AND companies_json = ?)) "
-            "ORDER BY COALESCE(first_seen_at,created_at) DESC,event_id DESC LIMIT ?"
         )
+        params: list[object] = [
+            event.event_id,
+            event.event_type,
+            event.first_seen_at,
+            stock_codes_json,
+            stock_codes_json,
+            companies_json,
+            companies_json,
+        ]
+        if start_market_date:
+            sql += "AND COALESCE(market_date,'') >= ? "
+            params.append(start_market_date)
+        sql += "ORDER BY COALESCE(first_seen_at,created_at) DESC,event_id DESC LIMIT ?"
+        params.append(int(limit))
         with self.database.connect() as conn:
-            return conn.execute(
-                sql,
-                (
-                    event.event_id,
-                    event.event_type,
-                    event.first_seen_at,
-                    stock_codes_json,
-                    stock_codes_json,
-                    companies_json,
-                    companies_json,
-                    int(limit),
-                ),
-            ).fetchall()
+            return conn.execute(sql, tuple(params)).fetchall()
 
     def upsert(self, record: DisclosureDeltaRecord) -> str:
         with self.database.connect() as conn:
