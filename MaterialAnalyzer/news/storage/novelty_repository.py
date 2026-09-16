@@ -7,12 +7,15 @@ from pathlib import Path
 from ..novelty.family_builder import primary_company, primary_ticker
 from ..novelty.models import EventView, NoveltyRecord
 from .database import Database
+from .disclosure_delta_repository import DISCLOSURE_DELTA_SCHEMA
 
 
 class NoveltyRepository:
     def __init__(self, database: Database):
         self.database = database
         self.database.initialize()
+        with self.database.connect() as conn:
+            conn.executescript(DISCLOSURE_DELTA_SCHEMA)
 
     @staticmethod
     def _eligible_sql(alias: str = "e", article_alias: str = "a") -> str:
@@ -38,9 +41,15 @@ class NoveltyRepository:
 
     def get_pending_events(self, *, analysis_version: str, limit: int | None = None):
         sql = (
-            "SELECT e.*, a.source_grade, a.source_type, a.article_class "
+            "SELECT e.*, a.source_grade, a.source_type, a.article_class, "
+            "d.parent_event_id AS disclosure_parent_event_id, "
+            "COALESCE(d.is_revision,0) AS disclosure_is_revision, "
+            "COALESCE(d.delta_type,'') AS disclosure_delta_type, "
+            "COALESCE(d.effective_sentiment,'') AS disclosure_effective_sentiment, "
+            "d.updated_at AS disclosure_delta_updated_at "
             "FROM material_events e "
             "LEFT JOIN articles a ON a.article_id = e.representative_article_id "
+            "LEFT JOIN disclosure_deltas d ON d.event_id = e.event_id "
             "LEFT JOIN event_novelty n ON n.event_id = e.event_id "
             f"WHERE {self._eligible_sql('e', 'a')} "
             "AND (n.event_id IS NULL OR n.analysis_version IS NULL OR n.analysis_version <> ? "
@@ -53,6 +62,16 @@ class NoveltyRepository:
             params.append(int(limit))
         with self.database.connect() as conn:
             return conn.execute(sql, tuple(params)).fetchall()
+
+    def get_analyzed_event(self, event_id: str, *, analysis_version: str):
+        with self.database.connect() as conn:
+            return conn.execute(
+                "SELECT e.*,a.source_grade,a.source_type,a.article_class,n.family_id "
+                "FROM event_novelty n JOIN material_events e ON e.event_id=n.event_id "
+                "LEFT JOIN articles a ON a.article_id=e.representative_article_id "
+                "WHERE n.event_id=? AND n.analysis_version=? LIMIT 1",
+                (event_id, analysis_version),
+            ).fetchone()
 
     def get_prior_analyzed_events(
         self,
@@ -241,10 +260,12 @@ class NoveltyRepository:
                 "SELECT n.*, e.market_date, e.event_type, e.event_stage, e.positive_negative, "
                 "e.event_title, e.event_summary, e.companies_json, e.stock_codes_json, e.numbers_json, "
                 "e.original_source_id, e.original_source_name, e.source_count, e.confirmation_count, "
-                "e.first_seen_at, e.last_seen_at, f.root_event_id, f.event_count AS family_event_count "
+                "e.first_seen_at, e.last_seen_at, f.root_event_id, f.event_count AS family_event_count, "
+                "d.is_revision,d.delta_type,d.effective_sentiment,d.score_adjustment,d.delta_reason "
                 "FROM event_novelty n "
                 "JOIN material_events e ON e.event_id = n.event_id "
                 "LEFT JOIN event_families f ON f.family_id = n.family_id "
+                "LEFT JOIN disclosure_deltas d ON d.event_id = n.event_id "
                 "ORDER BY e.market_date DESC, n.novelty_score DESC, e.first_seen_at ASC"
             ).fetchall()
 
@@ -258,6 +279,7 @@ class NoveltyRepository:
             "previous_stage", "current_stage", "previous_numbers", "current_numbers",
             "companies", "stock_codes", "numbers", "original_source_id", "original_source_name",
             "source_count", "confirmation_count", "event_title", "event_summary", "novelty_reason",
+            "is_revision", "delta_type", "effective_sentiment", "score_adjustment", "delta_reason",
             "first_seen_at", "last_seen_at", "analysis_version",
         ]
         with output.open("w", encoding="utf-8-sig", newline="") as f:
@@ -302,6 +324,11 @@ class NoveltyRepository:
                     "event_title": row["event_title"],
                     "event_summary": row["event_summary"],
                     "novelty_reason": row["novelty_reason"],
+                    "is_revision": row["is_revision"],
+                    "delta_type": row["delta_type"],
+                    "effective_sentiment": row["effective_sentiment"],
+                    "score_adjustment": row["score_adjustment"],
+                    "delta_reason": row["delta_reason"],
                     "first_seen_at": row["first_seen_at"],
                     "last_seen_at": row["last_seen_at"],
                     "analysis_version": row["analysis_version"],
