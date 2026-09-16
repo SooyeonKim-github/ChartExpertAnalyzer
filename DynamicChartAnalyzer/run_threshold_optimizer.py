@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import copy
 import sys
 from pathlib import Path
 
@@ -43,14 +44,14 @@ def add_close_path_excursions(df: pd.DataFrame, horizon: int = 20) -> pd.DataFra
     Dynamic range files already contain direction-adjusted D+1..D+N close returns.
     We intentionally call these *close* MFE/MAE so they are not confused with true
     intraday high/low MFE/MAE. They are useful for threshold optimization without
-    re-fetching market data and remain point-in-time reproducible from the range CSV.
+    re-fetching market data and remain reproducible from the range CSV alone.
 
     - close_MFE_D20: best direction-adjusted close return from D+1..D+20, floored at 0.
     - close_MAE_D20: worst direction-adjusted close return from D+1..D+20, capped at 0.
     - close_excursion_ratio_D20: MFE / max(|MAE|, 0.5%), clipped to [0, 10].
 
-    The 0.5% denominator floor and ratio cap prevent nearly-zero MAE observations
-    from dominating fold z-scores.
+    The denominator floor and cap keep nearly-zero MAE observations from dominating
+    fold-level z-scores.
     """
     out = df.copy()
     cols = [f"D+{h}" for h in range(1, int(horizon) + 1)]
@@ -64,19 +65,27 @@ def add_close_path_excursions(df: pd.DataFrame, horizon: int = 20) -> pd.DataFra
 
     path = out[cols].apply(pd.to_numeric, errors="coerce")
     available = path.notna().any(axis=1)
-    mfe = path.max(axis=1, skipna=True).clip(lower=0.0)
-    mae = path.min(axis=1, skipna=True).clip(upper=0.0)
-    mfe = mfe.where(available)
-    mae = mae.where(available)
-
+    mfe = path.max(axis=1, skipna=True).clip(lower=0.0).where(available)
+    mae = path.min(axis=1, skipna=True).clip(upper=0.0).where(available)
     denominator = mae.abs().clip(lower=0.005)
-    ratio = (mfe / denominator).clip(lower=0.0, upper=10.0)
-    ratio = ratio.where(available)
+    ratio = (mfe / denominator).clip(lower=0.0, upper=10.0).where(available)
 
     suffix = int(horizon)
     out[f"close_MFE_D{suffix}"] = mfe
     out[f"close_MAE_D{suffix}"] = mae
     out[f"close_excursion_ratio_D{suffix}"] = ratio
+    return out
+
+
+def _apply_stage_overrides(config: dict, stage: int) -> dict:
+    """Merge stage-specific WFO settings into the common optimizer config."""
+    out = copy.deepcopy(config or {})
+    stage_key = f"stage{int(stage)}"
+    overrides = (out.get("stage_overrides", {}) or {}).get(stage_key, {}) or {}
+    if overrides:
+        optimizer = dict(out.get("optimizer", {}) or {})
+        optimizer.update(overrides)
+        out["optimizer"] = optimizer
     return out
 
 
@@ -90,12 +99,15 @@ def main() -> None:
     args = p.parse_args()
 
     range_file = _resolve(args.range_file, _latest_range_file())
-    optimizer_cfg = yaml.safe_load(
+    base_optimizer_cfg = yaml.safe_load(
         _resolve(args.optimizer_config, BASE_DIR / "threshold_optimizer.yaml").read_text(encoding="utf-8")
     ) or {}
+    optimizer_cfg = _apply_stage_overrides(base_optimizer_cfg, args.stage)
+
     df = pd.read_csv(range_file, encoding="utf-8-sig", dtype={"ticker": str}, low_memory=False)
     df = add_close_path_excursions(df, horizon=20)
 
+    active_cfg = optimizer_cfg.get("optimizer", {}) or {}
     print(f"[INFO] optimizer input: {range_file}")
     print(f"[INFO] Dynamic V2.3 target stage: {args.stage}")
     print(
@@ -103,6 +115,14 @@ def main() -> None:
         f"{CLOSE_MAE_D20} / {CLOSE_MFE_D20} / {CLOSE_EXCURSION_RATIO_D20}"
     )
     print("[INFO] Excursions use D+1..D+20 direction-adjusted closes, not intraday high/low.")
+    print(
+        "[INFO] WFO: "
+        f"train>={active_cfg.get('min_train_trading_days')}d, "
+        f"validation={active_cfg.get('validation_trading_days')}d, "
+        f"step={active_cfg.get('step_trading_days')}d, "
+        f"purge={active_cfg.get('purge_trading_days')}d, "
+        f"validation min samples={active_cfg.get('min_samples')}"
+    )
 
     out_dir = _resolve(args.out, range_file.parent / "optimizer")
     stage_dir = out_dir / f"stage{args.stage}"
