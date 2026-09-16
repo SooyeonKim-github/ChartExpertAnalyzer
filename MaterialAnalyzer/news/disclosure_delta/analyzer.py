@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from datetime import datetime, timedelta
+
 from .detector import (
     DisclosureDeltaDetector,
     generic_revision_anchor,
@@ -17,6 +19,16 @@ class DisclosureDeltaAnalyzer:
         self.repository = repository
         self.detector = detector or DisclosureDeltaDetector()
 
+    @staticmethod
+    def _fallback_window_start(market_date: str | None) -> str | None:
+        if not market_date:
+            return None
+        try:
+            base = datetime.strptime(market_date, "%Y%m%d").date()
+        except ValueError:
+            return None
+        return (base - timedelta(days=180)).strftime("%Y%m%d")
+
     def _find_parent(self, event):
         if not is_revision_title(event.event_title):
             return None, "", 0.0, False
@@ -25,7 +37,11 @@ class DisclosureDeltaAnalyzer:
         if exact is not None:
             return input_from_row(exact), "CANONICAL_EVENT_KEY", 100.0, False
 
-        candidates = self.repository.find_revision_candidates(event, limit=50)
+        candidates = self.repository.find_revision_candidates(
+            event,
+            start_market_date=self._fallback_window_start(event.market_date),
+            limit=50,
+        )
         base_title = revision_base_title(event.event_title)
         matched = [row for row in candidates if revision_base_title(row["event_title"]) == base_title]
         if not matched:
