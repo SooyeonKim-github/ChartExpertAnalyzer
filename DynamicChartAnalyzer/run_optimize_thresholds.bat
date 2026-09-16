@@ -12,14 +12,28 @@ if not exist .venv\Scripts\python.exe (
 if errorlevel 1 goto :error
 
 echo.
-echo [Dynamic Threshold Optimizer]
+echo [Dynamic V2.3 Stage-aware Threshold Optimizer]
+echo Stage1, Stage2, Stage3 will be optimized separately.
 set /p RANGE_FILE=Range CSV path ^(Enter=latest^): 
-if "%RANGE_FILE%"=="" (
-    .venv\Scripts\python.exe run_threshold_optimizer.py
-) else (
-    .venv\Scripts\python.exe run_threshold_optimizer.py --range-file "%RANGE_FILE%"
+
+for %%S in (1 2 3) do (
+    echo.
+    echo ============================================================
+    echo [INFO] Optimizing Stage %%S
+    echo ============================================================
+    if "%RANGE_FILE%"=="" (
+        .venv\Scripts\python.exe run_threshold_optimizer.py --stage %%S
+    ) else (
+        .venv\Scripts\python.exe run_threshold_optimizer.py --stage %%S --range-file "%RANGE_FILE%"
+    )
+    if errorlevel 1 goto :error
 )
-if errorlevel 1 goto :error
+
+echo.
+echo ============================================================
+echo [DONE] Stage1 / Stage2 / Stage3 optimization completed.
+echo Check results\range_*\optimizer\stage1~stage3 folders.
+echo ============================================================
 pause
 exit /b 0
 
