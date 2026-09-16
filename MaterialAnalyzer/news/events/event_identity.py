@@ -9,9 +9,9 @@ from ..clustering.feature_extractor import normalize_company, normalize_title
 
 REVISION_PREFIX_RE = re.compile(r"^(?:기재정정|첨부정정|본문정정|정정)\s*", re.I)
 
-# These disclosure titles do not identify one business event by themselves.  For such
+# These disclosure titles do not identify one business event by themselves. For such
 # rows we deliberately add market_date to the canonical key to avoid merging unrelated
-# contracts/corporate actions from the same company.  A later detail/delta layer can
+# contracts/corporate actions from the same company. A later detail/delta layer can
 # replace this conservative daily scope with counterparty/subject based identity.
 GENERIC_DISCLOSURE_ANCHORS = {
     "단일판매 공급계약체결",
@@ -32,6 +32,11 @@ GENERIC_DISCLOSURE_ANCHORS = {
     "타법인주식및출자증권처분결정",
     "신규시설투자등",
     "신규시설투자",
+    "전환사채권발행결정",
+    "신주인수권부사채권발행결정",
+    "교환사채권발행결정",
+    "자기전환사채매도결정",
+    "감자결정",
 }
 
 
@@ -70,7 +75,7 @@ def _subject_key(companies: Iterable[str], stock_codes: Iterable[str]) -> str:
 def build_document_signature(representative) -> str:
     """Build a stable identity for the representative source document.
 
-    Prefer the source-native immutable id (DART rcept_no, KIND id, etc.).  When a
+    Prefer the source-native immutable id (DART rcept_no, KIND id, etc.). When a
     collector does not expose one, article_id/canonical URL are used as fallbacks.
     This signature intentionally says "same document", not "same business event".
     """
@@ -108,25 +113,28 @@ def build_canonical_event_key(
     """Build a conservative business-event identity.
 
     Revision labels are removed so e.g. ``[기재정정] ... (4회차)`` and the original
-    title produce the same key.  Generic DART/KIND disclosure names are daily-scoped
-    because the current collector does not yet parse counterparty/contract subject;
-    merging those across dates would create worse false positives.  The upcoming
-    disclosure-detail/delta analyzer can promote them to a stronger cross-date key.
+    title produce the same key. DART/KIND use the normalized disclosure title rather
+    than summary/body because those contents can change in the correction itself.
+
+    Generic DART/KIND disclosure names are daily-scoped because the current collector
+    does not yet parse counterparty/contract subject; merging those across dates would
+    create worse false positives. The disclosure-detail/delta analyzer can later
+    promote them to a stronger cross-date key.
     """
 
     event_type_norm = str(event_type or "UNKNOWN").strip().upper() or "UNKNOWN"
     title_anchor = _clean_anchor(event_title)
     summary_anchor = _clean_anchor(event_summary)
+    source_norm = str(source_id or "").strip().upper()
 
-    # Prefer a summary only when it actually adds event-specific information.
-    if summary_anchor and summary_anchor != title_anchor and len(summary_anchor) >= 12:
+    if source_norm in {"DART", "KIND"}:
+        anchor = title_anchor[:240]
+    elif summary_anchor and summary_anchor != title_anchor and len(summary_anchor) >= 12:
         anchor = summary_anchor[:240]
     else:
         anchor = title_anchor[:240]
 
     subject = _subject_key(companies, stock_codes)
-    source_norm = str(source_id or "").strip().upper()
-
     parts = [subject, event_type_norm, anchor or "unknown"]
     if source_norm in {"DART", "KIND"} and anchor in GENERIC_DISCLOSURE_ANCHORS:
         parts.append(f"day:{market_date or 'unknown'}")
