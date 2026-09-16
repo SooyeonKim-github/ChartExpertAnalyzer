@@ -8,10 +8,42 @@ from ..disclosure_delta.models import DisclosureDeltaInput, DisclosureDeltaRecor
 from .database import Database
 
 
+DISCLOSURE_DELTA_SCHEMA = """
+CREATE TABLE IF NOT EXISTS disclosure_deltas (
+    event_id TEXT PRIMARY KEY,
+    parent_event_id TEXT,
+    is_revision INTEGER NOT NULL DEFAULT 0,
+    parent_match_method TEXT,
+    parent_match_confidence REAL NOT NULL DEFAULT 0,
+    delta_type TEXT NOT NULL,
+    delta_direction TEXT NOT NULL DEFAULT 'NONE',
+    previous_numbers_json TEXT,
+    current_numbers_json TEXT,
+    numeric_kind TEXT,
+    previous_numeric_value REAL,
+    current_numeric_value REAL,
+    numeric_change REAL,
+    numeric_change_pct REAL,
+    effective_sentiment TEXT NOT NULL DEFAULT 'NEUTRAL',
+    score_adjustment REAL NOT NULL DEFAULT 0,
+    delta_reason TEXT,
+    analysis_version TEXT NOT NULL,
+    event_updated_at TEXT,
+    created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+    updated_at TEXT DEFAULT CURRENT_TIMESTAMP
+);
+CREATE INDEX IF NOT EXISTS idx_disclosure_deltas_parent ON disclosure_deltas(parent_event_id);
+CREATE INDEX IF NOT EXISTS idx_disclosure_deltas_type ON disclosure_deltas(delta_type);
+CREATE INDEX IF NOT EXISTS idx_disclosure_deltas_revision ON disclosure_deltas(is_revision);
+"""
+
+
 class DisclosureDeltaRepository:
     def __init__(self, database: Database):
         self.database = database
         self.database.initialize()
+        with self.database.connect() as conn:
+            conn.executescript(DISCLOSURE_DELTA_SCHEMA)
 
     def clear_all(self):
         with self.database.connect() as conn:
