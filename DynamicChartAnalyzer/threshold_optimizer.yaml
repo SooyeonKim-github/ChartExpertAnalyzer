@@ -5,8 +5,8 @@ optimizer:
 
   # Common defaults. Stage-specific density overrides are applied below.
   min_train_trading_days: 252
-  validation_trading_days: 126
-  step_trading_days: 63
+  validation_trading_days: 252
+  step_trading_days: 126
   purge_trading_days: 20
   min_validation_fraction: 0.75
 
@@ -30,6 +30,15 @@ optimizer:
   distance_penalty: 0.10
   coverage_penalty: 0.50
 
+  # Statistical robustness alone is not enough for application. A threshold
+  # must also clear these absolute OOS performance floors. Return metrics use
+  # decimal units while win_rate uses percent units.
+  application_performance_gate:
+    enabled: true
+    min_mean_median_return: 0.00
+    min_mean_win_rate: 52.0
+    min_mean_p25_return: -0.03
+
   # Return quality + downside control + path efficiency.
   objective_weights:
     median_return: 0.30
@@ -39,13 +48,13 @@ optimizer:
     excursion_ratio: 0.10
     sample_size: 0.10
 
-# Signal density differs materially by Stage. Longer OOS windows and smaller
-# minimum validation samples are used only where the underlying Stage is sparse.
+# Stage1/2 previously used 126-day validation windows. They now use 252-day
+# OOS windows so high-score thresholds have enough observations per fold.
 stage_overrides:
   stage1:
     min_train_trading_days: 252
-    validation_trading_days: 126
-    step_trading_days: 63
+    validation_trading_days: 252
+    step_trading_days: 126
     min_train_samples: 30
     min_train_unique_dates: 15
     min_samples: 12
@@ -53,8 +62,8 @@ stage_overrides:
 
   stage2:
     min_train_trading_days: 252
-    validation_trading_days: 126
-    step_trading_days: 63
+    validation_trading_days: 252
+    step_trading_days: 126
     min_train_samples: 25
     min_train_unique_dates: 15
     min_samples: 10
