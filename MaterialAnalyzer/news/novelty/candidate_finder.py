@@ -30,6 +30,25 @@ class CandidateFinder:
         return (base - timedelta(days=lookback)).strftime("%Y%m%d")
 
     def find_best_parent(self, event: EventView):
+        # A DisclosureDelta parent is stronger evidence than fuzzy title/token similarity.
+        # Use it first so a correction never becomes an unrelated NEW_EVENT merely because
+        # its title/numbers changed enough to lower RelationScorer similarity.
+        if event.disclosure_parent_event_id:
+            row = self.repository.get_analyzed_event(
+                event.disclosure_parent_event_id,
+                analysis_version=self.analysis_version,
+            )
+            if row is not None:
+                parent = EventView.from_row(row)
+                relation = RelationResult(
+                    score=100.0,
+                    title_ratio=1.0,
+                    token_overlap=1.0,
+                    days_apart=None,
+                    reason="forced disclosure revision parent",
+                )
+                return parent, row["family_id"], relation
+
         candidates = self.repository.get_prior_analyzed_events(
             event,
             start_market_date=self._window_start(event),
