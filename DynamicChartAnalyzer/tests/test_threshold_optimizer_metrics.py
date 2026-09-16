@@ -167,6 +167,8 @@ def test_gate_fallback_prefers_performance_pass_and_refreshes_diagnostics():
     )
 
     class _Adapter:
+        date_column = "scan_date"
+
         def parameter_space(self, _config):
             return {"confirmed_score": [65.0, 72.5]}
 
