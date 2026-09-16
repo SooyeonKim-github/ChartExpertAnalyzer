@@ -185,30 +185,34 @@ class TickerLinkRepository:
         output.parent.mkdir(parents=True, exist_ok=True)
         with self.database.connect() as conn:
             rows = conn.execute(
-                "SELECT l.*, e.market_date,e.event_type,e.event_stage,e.event_title,e.event_summary,"
-                "e.companies_json,e.stock_codes_json,n.novelty_status FROM material_ticker_links l "
+                "SELECT l.*, e.document_signature,e.canonical_event_key,e.market_date,e.event_type,e.event_stage,"
+                "e.event_title,e.event_summary,e.companies_json,e.stock_codes_json,n.novelty_status "
+                "FROM material_ticker_links l "
                 "JOIN material_events e ON e.event_id=l.event_id "
                 "LEFT JOIN event_novelty n ON n.event_id=l.event_id "
                 "ORDER BY e.market_date DESC,l.ticker_material_score DESC,l.link_confidence DESC"
             ).fetchall()
         fields = [
-            "event_id","market_date","ticker","name","relation_type","relation_weight","mapping_relevance",
-            "link_confidence","theme","theme_materiality_score","material_score","material_status",
-            "ticker_material_score","positive_negative","novelty_status","event_type","event_stage","companies",
-            "direct_stock_codes","event_title","event_summary","link_reason","evidence","link_version","reference_signature",
+            "event_id","document_signature","canonical_event_key","market_date","ticker","name","relation_type",
+            "relation_weight","mapping_relevance","link_confidence","theme","theme_materiality_score","material_score",
+            "material_status","ticker_material_score","positive_negative","novelty_status","event_type","event_stage",
+            "companies","direct_stock_codes","event_title","event_summary","link_reason","evidence","link_version",
+            "reference_signature",
         ]
         with output.open("w", encoding="utf-8-sig", newline="") as fp:
             writer = csv.DictWriter(fp, fieldnames=fields)
             writer.writeheader()
             for row in rows:
                 writer.writerow({
-                    "event_id":row["event_id"], "market_date":row["market_date"], "ticker":row["ticker"],
-                    "name":row["name"], "relation_type":row["relation_type"], "relation_weight":row["relation_weight"],
-                    "mapping_relevance":row["mapping_relevance"], "link_confidence":row["link_confidence"],
-                    "theme":row["theme"], "theme_materiality_score":row["theme_materiality_score"],
-                    "material_score":row["material_score"], "material_status":row["material_status"],
-                    "ticker_material_score":row["ticker_material_score"], "positive_negative":row["positive_negative"],
-                    "novelty_status":row["novelty_status"], "event_type":row["event_type"], "event_stage":row["event_stage"],
+                    "event_id":row["event_id"], "document_signature":row["document_signature"],
+                    "canonical_event_key":row["canonical_event_key"], "market_date":row["market_date"],
+                    "ticker":row["ticker"], "name":row["name"], "relation_type":row["relation_type"],
+                    "relation_weight":row["relation_weight"], "mapping_relevance":row["mapping_relevance"],
+                    "link_confidence":row["link_confidence"], "theme":row["theme"],
+                    "theme_materiality_score":row["theme_materiality_score"], "material_score":row["material_score"],
+                    "material_status":row["material_status"], "ticker_material_score":row["ticker_material_score"],
+                    "positive_negative":row["positive_negative"], "novelty_status":row["novelty_status"],
+                    "event_type":row["event_type"], "event_stage":row["event_stage"],
                     "companies":"|".join(self._json_list(row["companies_json"])),
                     "direct_stock_codes":"|".join(self._json_list(row["stock_codes_json"])),
                     "event_title":row["event_title"], "event_summary":row["event_summary"],
