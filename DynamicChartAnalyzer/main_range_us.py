@@ -73,11 +73,15 @@ def main() -> int:
     forward_end = (end + pd.Timedelta(days=max(120, args.forward_bars * 3))).strftime("%Y-%m-%d")
 
     print("=" * 78)
-    print("DynamicChartAnalyzer US Range Backtest - fixed 1:2:7")
+    print("DynamicChartAnalyzer US Range Backtest - 2:6:2 allocation experiment")
     print("=" * 78)
     print(f"Date range   : {start:%Y%m%d}~{end:%Y%m%d}")
     print(f"Universe     : CURRENT US market-cap TOP {len(universe_info)}")
     print(f"Forward bars : {args.forward_bars}")
+    print(
+        "Allocation   : "
+        f"{cfg.stage1_ratio:.0%}:{cfg.stage2_ratio:.0%}:{cfg.stage3_ratio:.0%}"
+    )
     print("CONFIRMED    : LONG_ENTRY_STAGE_3 only")
     print("[WARNING] Current TOP N snapshot is reused historically; not PIT membership.")
     print()
