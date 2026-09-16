@@ -59,13 +59,15 @@ echo [INFO] Top N: %TOP_N%
 echo [INFO] Sort by: %SORT_BY%
 echo [INFO] Runner: %RANGE_RUNNER%
 echo [INFO] Lecture timing: RSI -^> MACD -^> Ichimoku
-echo [INFO] Quality weights: RS25 / Trend20 / Structure15 / Volume15 / Market Context10 / Risk15
-echo [INFO] Market context only: REVERSAL_ENV / NEUTRAL_ENV / TREND_ENV ^(no reverse scoring^)
+echo [INFO] V2.3 Stage1 quality: RS30 / Trend20 / Structure25 / Volume15 / Reversal10
+echo [INFO] V2.3 Stage2 quality: RS25 / Momentum25 / Trend20 / Volume15 / Structure15
+echo [INFO] V2.3 Stage3 quality: RS30 / Breakout25 / Trend20 / Volume15 / Extension10
+echo [INFO] Market / Risk: separate context/profile; excluded from alpha quality
 echo [INFO] Market universe: KOSPI + KOSDAQ
 echo [INFO] Market proxy: KOSPI index 1001 / KOSDAQ index 2001
-echo [INFO] Entry split: Stage1 10%% / Stage2 20%% / Stage3 70%% = 1:2:7
+echo [INFO] Entry split experiment: Stage1 20%% / Stage2 60%% / Stage3 20%% = 2:6:2
 echo [INFO] Quality labels: CONFIRMED ^>= 70 / WATCH ^>= 55 / else REJECT
-echo [INFO] Daily LONG rank: quality_score first, lecture_score tie-breaker
+echo [INFO] Daily LONG rank: stage_quality_score first, lecture_score tie-breaker
 echo [INFO] Forward performance: D+1 ~ D+60 trading bars
 if defined LIQUIDITY_UNIVERSE_XLSX echo [INFO] Shared union: %LIQUIDITY_UNIVERSE_XLSX%
 if defined LIQUIDITY_MEMBERSHIP_CSV echo [INFO] Membership: %LIQUIDITY_MEMBERSHIP_CSV%
@@ -91,7 +93,7 @@ echo.
 echo [DONE] Dynamic range backtest finished.
 echo [DONE] Workbook: results\range_YYYYMMDD_YYYYMMDD\dynamic_range_backtest.xlsx
 echo [DONE] Events: results\range_YYYYMMDD_YYYYMMDD\dynamic_range_events.csv
-echo [DONE] LONG summary: results\range_YYYYMMDD_YYYYMMDD\dynamic_long_v2_summary.csv
-echo [DONE] LONG candidates: results\range_YYYYMMDD_YYYYMMDD\dynamic_long_v2_candidates.csv
+echo [DONE] LONG summary: results\range_YYYYMMDD_YYYYMMDD\dynamic_long_v23_summary.csv
+echo [DONE] LONG candidates: results\range_YYYYMMDD_YYYYMMDD\dynamic_long_v23_candidates.csv
 if /I not "%NO_PAUSE%"=="1" pause
 exit /b 0
