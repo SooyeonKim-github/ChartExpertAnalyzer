@@ -35,6 +35,7 @@ class EventView:
     event_title: str
     event_summary: str
     positive_negative: str
+    canonical_event_key: str = ""
     companies: Tuple[str, ...] = field(default_factory=tuple)
     stock_codes: Tuple[str, ...] = field(default_factory=tuple)
     numbers: Tuple[str, ...] = field(default_factory=tuple)
@@ -49,6 +50,11 @@ class EventView:
     market_date: str | None = None
     updated_at: str | None = None
     material_candidate: bool = True
+    disclosure_parent_event_id: str | None = None
+    disclosure_is_revision: bool = False
+    disclosure_delta_type: str = ""
+    disclosure_effective_sentiment: str = ""
+    disclosure_delta_updated_at: str | None = None
 
     @classmethod
     def from_row(cls, row) -> "EventView":
@@ -60,6 +66,7 @@ class EventView:
             event_title=_row_value(row, "event_title", ""),
             event_summary=_row_value(row, "event_summary", ""),
             positive_negative=_row_value(row, "positive_negative", "NEUTRAL") or "NEUTRAL",
+            canonical_event_key=_row_value(row, "canonical_event_key", ""),
             companies=_json_tuple(_row_value(row, "companies_json", None)),
             stock_codes=_json_tuple(_row_value(row, "stock_codes_json", None)),
             numbers=_json_tuple(_row_value(row, "numbers_json", None)),
@@ -74,6 +81,11 @@ class EventView:
             market_date=_row_value(row, "market_date", None),
             updated_at=_row_value(row, "updated_at", None),
             material_candidate=bool(int(_row_value(row, "material_candidate", 0) or 0)),
+            disclosure_parent_event_id=_row_value(row, "disclosure_parent_event_id", None),
+            disclosure_is_revision=bool(int(_row_value(row, "disclosure_is_revision", 0) or 0)),
+            disclosure_delta_type=_row_value(row, "disclosure_delta_type", ""),
+            disclosure_effective_sentiment=_row_value(row, "disclosure_effective_sentiment", ""),
+            disclosure_delta_updated_at=_row_value(row, "disclosure_delta_updated_at", None),
         )
 
 
@@ -137,6 +149,7 @@ class NoveltyRecord:
     novelty_reason: str
     analysis_version: str
     event_updated_at: str | None
+    disclosure_delta_updated_at: str | None = None
 
 
 @dataclass
@@ -151,3 +164,5 @@ class NoveltyRunResult:
     confirmation: int = 0
     rehash: int = 0
     market_reaction: int = 0
+    existing_event_revision: int = 0
+    revision_unresolved: int = 0
