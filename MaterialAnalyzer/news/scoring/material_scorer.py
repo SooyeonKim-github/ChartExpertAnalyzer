@@ -23,7 +23,7 @@ ROUTINE_GOVERNANCE_RE = re.compile(
 
 
 class MaterialScorer:
-    VERSION = "RULE_MATERIAL_SCORE_V2_0"
+    VERSION = "RULE_MATERIAL_SCORE_V2_1"
 
     def __init__(self, repository):
         self.repository = repository
@@ -45,7 +45,9 @@ class MaterialScorer:
         source, source_reason = source_reliability_score(event)
         multi, multi_reason = multi_source_score(event)
 
-        total = round(direct + certainty + importance + quant + novelty + source + multi, 2)
+        base_total = direct + certainty + importance + quant + novelty + source + multi
+        disclosure_adjustment = event.disclosure_score_adjustment if event.disclosure_is_revision else 0.0
+        total = round(max(0.0, min(100.0, base_total + disclosure_adjustment)), 2)
         status = status_from_score(total)
         reasons = [
             f"direct={direct:g}({direct_reason})",
@@ -56,6 +58,11 @@ class MaterialScorer:
             f"source={source:g}({source_reason})",
             f"multi={multi:g}({multi_reason})",
         ]
+        if event.disclosure_is_revision:
+            reasons.append(
+                f"disclosure_delta={disclosure_adjustment:+g}("
+                f"{event.disclosure_delta_type or 'REVISION'};effective_sentiment={event.effective_sentiment})"
+            )
 
         return MaterialScoreRecord(
             event_id=event.event_id,
