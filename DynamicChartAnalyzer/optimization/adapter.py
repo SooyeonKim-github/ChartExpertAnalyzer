@@ -52,10 +52,10 @@ class DynamicThresholdAdapter(BaseThresholdAdapter):
         return {"confirmed_score": float(current)}
 
     def required_columns(self) -> set[str]:
-        return {"signal_date", "side", "stage", "quality_score"}
+        return {"signal_date", "side", "stage", "stage_quality_score"}
 
     def select_mask(self, df: pd.DataFrame, params: dict[str, Any]) -> pd.Series:
-        quality = pd.to_numeric(df["quality_score"], errors="coerce")
+        quality = pd.to_numeric(df["stage_quality_score"], errors="coerce")
         stage = pd.to_numeric(df["stage"], errors="coerce")
         return (
             df["side"].astype(str).eq("LONG")
