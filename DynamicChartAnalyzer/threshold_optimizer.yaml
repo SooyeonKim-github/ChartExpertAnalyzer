@@ -38,5 +38,14 @@ optimizer:
     sample_size: 0.15
 
 search_space:
+  # V2.3 scores are stage-specific. Optimize one stage per run.
+  stage1:
+    confirmed_score: [60, 65, 70, 75, 80]
+  stage2:
+    confirmed_score: [60, 65, 70, 75, 80]
+  stage3:
+    confirmed_score: [60, 65, 70, 75, 80]
+
+  # Backward-compatible fallback for older callers.
   confirmed:
     confirmed_score: [60, 65, 70, 75, 80]
