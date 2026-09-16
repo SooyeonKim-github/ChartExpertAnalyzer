@@ -53,6 +53,24 @@ def test_2_6_2_entry_keeps_original_1_2_7_exit_policy():
     assert state.realized_pnl_krw > 0
 
 
+def test_stage3_terminal_exit_closes_all_remaining_quantity_without_prior_partial_exits():
+    cfg = StrategyConfig(total_capital=10_000_000)
+    plan = build_entry_plan(cfg)
+    state = PositionState()
+    state.enter_stage("LONG", 1, "d1", 100, plan)
+    state.enter_stage("LONG", 2, "d2", 100, plan)
+    state.enter_stage("LONG", 3, "d3", 100, plan)
+    full_quantity = state.total_quantity
+
+    event = state.exit_part(3, "e3", 110)
+
+    assert event is not None
+    assert round(event["quantity"], 10) == round(full_quantity, 10)
+    assert round(event["remaining_ratio"], 10) == 0.0
+    assert state.side is None
+    assert state.total_quantity == 0.0
+
+
 def test_entry_stage_ratios_are_fixed_to_2_6_2():
     cfg = StrategyConfig(total_capital=10_000_000)
     assert (cfg.stage1_ratio, cfg.stage2_ratio, cfg.stage3_ratio) == (0.20, 0.60, 0.20)
