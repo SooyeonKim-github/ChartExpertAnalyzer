@@ -341,6 +341,15 @@ def main() -> int:
     qualified = result[result["Status"].isin({"CONFIRMED", "WATCH"})].copy()
     new_candidates = qualified[qualified["Signal_Type"].eq("NEW")].copy()
     confirmed = new_candidates[new_candidates["Status"].eq("CONFIRMED")].copy()
+    stage2_confirmed = confirmed[confirmed["Position_Stage"].eq(2)].copy()
+    stage3_confirmed = confirmed[confirmed["Position_Stage"].eq(3)].copy()
+    final_confirmed = confirmed[confirmed["Position_Stage"].isin([2, 3])].copy()
+    if not final_confirmed.empty:
+        final_confirmed = final_confirmed.sort_values(
+            ["Position_Stage", "Score", "Timing_Score", "Source_Rank"],
+            ascending=[False, False, False, True],
+            na_position="last",
+        )
     active_positions = result[result["Signal_Type"].eq("ACTIVE") & result["side"].eq("LONG")].copy()
 
     latest_date = pd.to_datetime(result["Actual_Date"], errors="coerce").max()
@@ -353,6 +362,9 @@ def main() -> int:
     new_candidates.to_csv(out_dir / "candidates.csv", index=False, encoding="utf-8-sig")
     new_candidates.to_csv(out_dir / "new_candidates.csv", index=False, encoding="utf-8-sig")
     confirmed.to_csv(out_dir / "confirmed_candidates.csv", index=False, encoding="utf-8-sig")
+    final_confirmed.to_csv(out_dir / "final_confirmed_candidates.csv", index=False, encoding="utf-8-sig")
+    stage2_confirmed.to_csv(out_dir / "stage2_confirmed_candidates.csv", index=False, encoding="utf-8-sig")
+    stage3_confirmed.to_csv(out_dir / "stage3_confirmed_candidates.csv", index=False, encoding="utf-8-sig")
     active_positions.to_csv(out_dir / "active_positions.csv", index=False, encoding="utf-8-sig")
     qualified.to_csv(out_dir / "all_qualified.csv", index=False, encoding="utf-8-sig")
     pd.DataFrame(errors, columns=["Ticker", "Name", "Error"]).to_csv(
@@ -363,6 +375,9 @@ def main() -> int:
         result.to_excel(writer, sheet_name="AllResults", index=False)
         new_candidates.to_excel(writer, sheet_name="NewCandidates", index=False)
         confirmed.to_excel(writer, sheet_name="Confirmed", index=False)
+        final_confirmed.to_excel(writer, sheet_name="FinalConfirmed", index=False)
+        stage2_confirmed.to_excel(writer, sheet_name="Stage2Confirmed", index=False)
+        stage3_confirmed.to_excel(writer, sheet_name="Stage3Confirmed", index=False)
         active_positions.to_excel(writer, sheet_name="ActivePositions", index=False)
         qualified.to_excel(writer, sheet_name="AllQualified", index=False)
         pd.DataFrame(errors, columns=["Ticker", "Name", "Error"]).to_excel(
@@ -379,17 +394,21 @@ def main() -> int:
         f"ACTIVE={len(active_positions)}"
     )
     print(
+        f"[INFO] FINAL CONFIRMED Stage2={len(stage2_confirmed)} "
+        f"Stage3={len(stage3_confirmed)} Total={len(final_confirmed)}"
+    )
+    print(
         f"[INFO] ACTIVE quality: CONFIRMED={int(active_counts.get('CONFIRMED', 0))} "
         f"WATCH={int(active_counts.get('WATCH', 0))} "
         f"REJECTED={int(active_counts.get('REJECTED', 0))}"
     )
-    if not confirmed.empty:
+    if not final_confirmed.empty:
         cols = [
-            "Ticker", "Name", "Signal_Type", "Status", "Quality_Score", "Lecture_Score",
+            "Ticker", "Name", "Position_Stage", "Signal_Type", "Status", "Quality_Score", "Lecture_Score",
             "Position_Status", "Primary_Signal", "setup_id", "Stage_Entry_Date", "days_in_stage", "Close",
         ]
-        print("\n[NEW CONFIRMED]")
-        print(confirmed[cols].head(30).to_string(index=False))
+        print("\n[FINAL CONFIRMED - STAGE 2 + STAGE 3]")
+        print(final_confirmed[cols].head(30).to_string(index=False))
     if not active_positions.empty:
         cols = [
             "Ticker", "Name", "Status", "Quality_Score", "Position_Status",
