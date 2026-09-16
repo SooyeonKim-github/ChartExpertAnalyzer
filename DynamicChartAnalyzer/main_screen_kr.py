@@ -222,7 +222,10 @@ def main() -> int:
     print(f"WATCH    : V2.3 stage_quality_score >= {args.watch_score:g}")
     print("NEW      : a LONG_ENTRY_STAGE_n event occurred on the latest bar")
     print("ACTIVE   : an earlier LONG setup is still open; monitoring only, not a fresh recommendation")
-    print("Stage remains lecture timing state: RSI -> MACD -> Ichimoku, fixed 1:2:7")
+    print(
+        "Stage timing/allocation: RSI -> MACD -> Ichimoku, "
+        f"{cfg.stage1_ratio:.0%}:{cfg.stage2_ratio:.0%}:{cfg.stage3_ratio:.0%} (2:6:2 experiment)"
+    )
     print()
 
     rows: list[dict] = []
