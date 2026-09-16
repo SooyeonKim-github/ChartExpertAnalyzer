@@ -4,6 +4,7 @@ import argparse
 import sys
 from pathlib import Path
 
+import numpy as np
 import pandas as pd
 import yaml
 
@@ -15,6 +16,11 @@ for p in (REPO_ROOT, BASE_DIR):
 
 from ThresholdOptimization import ThresholdOptimizer  # noqa: E402
 from optimization import DynamicThresholdAdapter  # noqa: E402
+
+
+CLOSE_MFE_D20 = "close_MFE_D20"
+CLOSE_MAE_D20 = "close_MAE_D20"
+CLOSE_EXCURSION_RATIO_D20 = "close_excursion_ratio_D20"
 
 
 def _latest_range_file() -> Path:
@@ -31,6 +37,49 @@ def _resolve(value: str | None, default: Path) -> Path:
     return p if p.is_absolute() else BASE_DIR / p
 
 
+def add_close_path_excursions(df: pd.DataFrame, horizon: int = 20) -> pd.DataFrame:
+    """Add reproducible D+N close-path excursion metrics.
+
+    Dynamic range files already contain direction-adjusted D+1..D+N close returns.
+    We intentionally call these *close* MFE/MAE so they are not confused with true
+    intraday high/low MFE/MAE. They are useful for threshold optimization without
+    re-fetching market data and remain point-in-time reproducible from the range CSV.
+
+    - close_MFE_D20: best direction-adjusted close return from D+1..D+20, floored at 0.
+    - close_MAE_D20: worst direction-adjusted close return from D+1..D+20, capped at 0.
+    - close_excursion_ratio_D20: MFE / max(|MAE|, 0.5%), clipped to [0, 10].
+
+    The 0.5% denominator floor and ratio cap prevent nearly-zero MAE observations
+    from dominating fold z-scores.
+    """
+    out = df.copy()
+    cols = [f"D+{h}" for h in range(1, int(horizon) + 1)]
+    missing = [c for c in cols if c not in out.columns]
+    if missing:
+        raise ValueError(
+            "Dynamic optimizer requires D+1..D+20 path columns; missing: "
+            + ", ".join(missing[:5])
+            + (" ..." if len(missing) > 5 else "")
+        )
+
+    path = out[cols].apply(pd.to_numeric, errors="coerce")
+    available = path.notna().any(axis=1)
+    mfe = path.max(axis=1, skipna=True).clip(lower=0.0)
+    mae = path.min(axis=1, skipna=True).clip(upper=0.0)
+    mfe = mfe.where(available)
+    mae = mae.where(available)
+
+    denominator = mae.abs().clip(lower=0.005)
+    ratio = (mfe / denominator).clip(lower=0.0, upper=10.0)
+    ratio = ratio.where(available)
+
+    suffix = int(horizon)
+    out[f"close_MFE_D{suffix}"] = mfe
+    out[f"close_MAE_D{suffix}"] = mae
+    out[f"close_excursion_ratio_D{suffix}"] = ratio
+    return out
+
+
 def main() -> None:
     p = argparse.ArgumentParser(description="Dynamic V2.3 stage-aware purged walk-forward threshold optimizer")
     p.add_argument("--range-file")
@@ -45,8 +94,16 @@ def main() -> None:
         _resolve(args.optimizer_config, BASE_DIR / "threshold_optimizer.yaml").read_text(encoding="utf-8")
     ) or {}
     df = pd.read_csv(range_file, encoding="utf-8-sig", dtype={"ticker": str}, low_memory=False)
+    df = add_close_path_excursions(df, horizon=20)
+
     print(f"[INFO] optimizer input: {range_file}")
     print(f"[INFO] Dynamic V2.3 target stage: {args.stage}")
+    print(
+        "[INFO] D+20 risk metrics: "
+        f"{CLOSE_MAE_D20} / {CLOSE_MFE_D20} / {CLOSE_EXCURSION_RATIO_D20}"
+    )
+    print("[INFO] Excursions use D+1..D+20 direction-adjusted closes, not intraday high/low.")
+
     out_dir = _resolve(args.out, range_file.parent / "optimizer")
     stage_dir = out_dir / f"stage{args.stage}"
 
