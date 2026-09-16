@@ -4,7 +4,7 @@ from __future__ import annotations
 
 This file is the current Korean-market range runner. It preserves the lecture timing
 logic (RSI -> MACD -> Ichimoku, Stage1 -> Stage2 -> Stage3, fixed 1:2:7 entry plan)
-and applies the current V2.2 secondary LONG quality overlay.
+and applies the current V2.3 stage-aware LONG quality overlay.
 
 There are no versioned main_range runners anymore. Keep this file as the single
 source of truth for Korean Dynamic range backtests.
@@ -28,7 +28,7 @@ from dynamic_chart_analyzer.long_v2 import (
     add_rs_percentiles,
     prepare_market_features,
 )
-from dynamic_chart_analyzer.long_v22 import score_long_events
+from dynamic_chart_analyzer.long_v23 import score_long_events
 from dynamic_chart_analyzer.providers import load_pykrx
 
 ROOT = Path(__file__).resolve().parent
@@ -372,7 +372,7 @@ def run_range(args) -> int:
     analyzer = DynamicChartAnalyzer(cfg, include_dynamic_rsi=params.include_dynamic_rsi)
 
     print("=" * 78)
-    print("DynamicChartAnalyzer Range Backtest - CURRENT")
+    print("DynamicChartAnalyzer Range Backtest - V2.3 Stage-aware Quality")
     print("=" * 78)
     print(f"Date range       : {start:%Y%m%d}~{end:%Y%m%d}")
     print(f"Universe snapshot: {snapshot}")
@@ -380,14 +380,17 @@ def run_range(args) -> int:
     print(f"Sort by          : {params.sort_by}")
     print(f"Forward bars     : {params.forward_bars}")
     print(f"Capital          : {params.capital:,.0f} KRW (Stage 1/2/3 = 1:2:7)")
-    print("Lecture timing   : RSI -> MACD -> Ichimoku")
-    print("Quality weights  : RS25 / Trend20 / Structure15 / Volume15 / Market10 / Risk15")
-    print("Market context   : REVERSAL / NEUTRAL / TREND; no directional reverse scoring")
+    print("Lecture timing   : RSI -> MACD -> Ichimoku (unchanged)")
+    print("Stage1 quality   : RS30 / Trend20 / Structure25 / Volume15 / Reversal10")
+    print("Stage2 quality   : RS25 / Momentum25 / Trend20 / Volume15 / Structure15")
+    print("Stage3 quality   : RS30 / Breakout25 / Trend20 / Volume15 / Extension10")
+    print("Market / Risk    : separate context/profile; excluded from alpha quality")
     print(
-        f"Quality labels   : CONFIRMED >= {args.confirmed_score:g}, "
-        f"WATCH >= {args.watch_score:g}"
+        f"Initial labels   : CONFIRMED >= {args.confirmed_score:g}, "
+        f"WATCH >= {args.watch_score:g} (same cut by stage until WFO calibration)"
     )
-    print("Daily LONG rank  : quality_score first, lecture_score tie-breaker")
+    print("Daily LONG rank  : within signal_date + stage only")
+    print("Stage3 deployable: research-only; does NOT alter the fixed 1:2:7 state machine")
     print("Benchmark proxy  : KOSPI=069500 / KOSDAQ=229200")
     print()
 
@@ -512,15 +515,17 @@ def run_range(args) -> int:
     long_candidates_df = events_df[long_mask & quality_mask].copy()
     if not long_candidates_df.empty:
         long_candidates_df = long_candidates_df.sort_values(
-            ["signal_date", "daily_long_rank", "stage"], ascending=[True, True, False]
+            ["signal_date", "stage", "daily_long_rank"], ascending=[True, True, True]
         )
 
     out_dir = Path(args.output_root) / f"range_{start:%Y%m%d}_{end:%Y%m%d}"
     out_dir.mkdir(parents=True, exist_ok=True)
     events_path = out_dir / "dynamic_range_events.csv"
     summary_path = out_dir / "dynamic_range_summary.csv"
-    long_summary_path = out_dir / "dynamic_long_v2_summary.csv"
-    candidates_path = out_dir / "dynamic_long_v2_candidates.csv"
+    long_summary_path = out_dir / "dynamic_long_v23_summary.csv"
+    candidates_path = out_dir / "dynamic_long_v23_candidates.csv"
+    legacy_long_summary_path = out_dir / "dynamic_long_v2_summary.csv"
+    legacy_candidates_path = out_dir / "dynamic_long_v2_candidates.csv"
     universe_path = out_dir / "universe.csv"
     errors_path = out_dir / "errors.csv"
     excel_path = out_dir / "dynamic_range_backtest.xlsx"
@@ -529,6 +534,9 @@ def run_range(args) -> int:
     summary_df.to_csv(summary_path, index=False, encoding="utf-8-sig")
     long_summary_df.to_csv(long_summary_path, index=False, encoding="utf-8-sig")
     long_candidates_df.to_csv(candidates_path, index=False, encoding="utf-8-sig")
+    # Backward-compatible aliases for existing local scripts and notebooks.
+    long_summary_df.to_csv(legacy_long_summary_path, index=False, encoding="utf-8-sig")
+    long_candidates_df.to_csv(legacy_candidates_path, index=False, encoding="utf-8-sig")
     universe.to_csv(universe_path, index=False, encoding="utf-8-sig")
     errors_df.to_csv(errors_path, index=False, encoding="utf-8-sig")
     _write_excel(
@@ -557,6 +565,15 @@ def run_range(args) -> int:
                 f"{k}={int(labels.get(k, 0))}" for k in ["CONFIRMED", "WATCH", "REJECT"]
             )
         )
+        if "stage3_deployable" in events_df.columns:
+            deployable = int(
+                (
+                    events_df["side"].eq("LONG")
+                    & events_df["stage"].eq(3)
+                    & events_df["stage3_deployable"].fillna(False)
+                ).sum()
+            )
+            print(f"Stage3 deployable (research only): {deployable:,}")
     print(f"Errors       : {len(errors_df):,}")
     print(f"Saved        : {excel_path}")
     print(f"Saved        : {events_path}")
@@ -567,7 +584,7 @@ def run_range(args) -> int:
 
 def build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(
-        description="DynamicChartAnalyzer TOP-N range backtest (current V2.2 logic)"
+        description="DynamicChartAnalyzer TOP-N range backtest (current V2.3 stage-aware quality)"
     )
     p.add_argument("--date-range", required=True, help="YYYYMMDD~YYYYMMDD")
     p.add_argument("--top-n", type=int, default=100, help="Universe size; default 100")
@@ -586,19 +603,21 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--output-root", default=str(ROOT / "results"))
     p.add_argument(
         "--confirmed-score",
+        "--v23-confirmed-score",
         "--v2-confirmed-score",
         dest="confirmed_score",
         type=float,
         default=70.0,
-        help="LONG CONFIRMED quality threshold; default 70",
+        help="Initial per-stage LONG CONFIRMED quality threshold; default 70",
     )
     p.add_argument(
         "--watch-score",
+        "--v23-watch-score",
         "--v2-watch-score",
         dest="watch_score",
         type=float,
         default=55.0,
-        help="LONG WATCH quality threshold; default 55",
+        help="Initial per-stage LONG WATCH quality threshold; default 55",
     )
     return p
 
