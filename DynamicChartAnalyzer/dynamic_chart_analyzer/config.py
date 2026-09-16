@@ -5,19 +5,18 @@ from dataclasses import dataclass, field
 class StrategyConfig:
     """Configuration for the staged RSI -> MACD -> Ichimoku strategy.
 
-    Values explicitly stated in the lecture use the lecture defaults.  Values marked
+    Values explicitly stated in the lecture use the lecture defaults. Values marked
     as mechanical rules are implementation choices needed to make qualitative chart
     language deterministic and backtestable.
     """
 
-    # Capital / staged entry (lecture: 1 : 2 : 7)
+    # Capital / staged entry experiment: Stage1 20% / Stage2 60% / Stage3 20%.
     total_capital: float = 10_000_000.0
-    # Project decision: the staged allocation is fixed at 1:2:7.
-    # These fields are intentionally not constructor arguments so supporting
-    # lecture variants such as 1:2:6 cannot silently change this analyzer.
-    stage1_ratio: float = field(default=0.10, init=False)
-    stage2_ratio: float = field(default=0.20, init=False)
-    stage3_ratio: float = field(default=0.70, init=False)
+    # Project decision: keep the 2:6:2 experiment fixed so range/screen/live runs
+    # cannot silently drift to different allocations.
+    stage1_ratio: float = field(default=0.20, init=False)
+    stage2_ratio: float = field(default=0.60, init=False)
+    stage3_ratio: float = field(default=0.20, init=False)
 
     # RSI (lecture defaults)
     rsi_period: int = 14
@@ -62,19 +61,21 @@ class StrategyConfig:
     use_protective_stop: bool = True
 
     # Reference R-multiples shown in the lecture examples. They are reported, not used
-    # as the main staged exit because the main strategy exits 1:2:7 on indicator reversal.
+    # as the main staged exit because the main strategy exits on indicator reversal.
     long_reference_rr: float = 1.0
     short_reference_rr: float = 2.0
 
     # Optional account-risk cap from the lecture's later 2% rule.
-    # OFF by default so 10,000,000 KRW becomes exactly 1m / 2m / 7m.
+    # OFF by default. When enabled, the capped notional is split 2:6:2.
     use_two_percent_risk_cap: bool = False
     max_account_risk_ratio: float = 0.02
 
     def validate(self) -> None:
         ratios = (self.stage1_ratio, self.stage2_ratio, self.stage3_ratio)
-        if ratios != (0.10, 0.20, 0.70):
-            raise ValueError(f"DynamicChartAnalyzer allocation is fixed at 1:2:7, got {ratios}")
+        if ratios != (0.20, 0.60, 0.20):
+            raise ValueError(f"DynamicChartAnalyzer allocation is fixed at 2:6:2, got {ratios}")
+        if abs(sum(ratios) - 1.0) > 1e-12:
+            raise ValueError(f"stage allocation must sum to 1.0, got {ratios}")
         if self.total_capital <= 0:
             raise ValueError("total_capital must be positive")
         if not (0 < self.max_account_risk_ratio < 1):
