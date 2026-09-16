@@ -30,8 +30,9 @@ def build_entry_plan(cfg: StrategyConfig, entry_price: float | None = None, stop
     account_risk / stop_distance, then splits that capped notional with the same
     Stage1/Stage2/Stage3 entry ratios.
 
-    The staged exit policy remains the original 1:2:7 (10% / 20% / 70%) so this
-    experiment changes only entry allocation and keeps the comparison attributable.
+    The staged exit policy remains the original 1:2:7 (10% / 20% / final remainder)
+    so this experiment changes only entry allocation and keeps the comparison
+    attributable.
     """
     cfg.validate()
     capital_base = cfg.total_capital
@@ -183,19 +184,24 @@ class PositionState:
         if self.side is None or self.stage == 0 or self.total_quantity <= 0:
             return None
 
-        # Keep the original staged exit policy fixed at 1:2:7 while testing a
-        # different entry allocation. This isolates the entry-allocation variable.
+        # Keep the original staged exit policy fixed while testing only entry
+        # allocation. Stage 3 is the terminal exit and therefore must liquidate all
+        # remaining quantity even when Stage 1/2 exit signals never fired.
         target_ratio = {1: 0.10, 2: 0.20, 3: 0.70}[exit_stage]
         cumulative_target = {1: 0.10, 2: 0.30, 3: 1.00}[exit_stage]
         if self.exited_ratio >= cumulative_target - 1e-12:
             return None
 
-        # Exit ratios refer to the original fully-entered position. If a position is
-        # aborted before Stage 3, use exit_all() instead of this staged exit method.
-        original_quantity = self.total_quantity / max(1e-12, 1.0 - self.exited_ratio)
-        qty = min(self.total_quantity, original_quantity * target_ratio)
+        if exit_stage == 3:
+            qty = self.total_quantity
+            effective_exit_ratio = max(0.0, 1.0 - self.exited_ratio)
+        else:
+            original_quantity = self.total_quantity / max(1e-12, 1.0 - self.exited_ratio)
+            qty = min(self.total_quantity, original_quantity * target_ratio)
+            effective_exit_ratio = target_ratio
+
         pnl = self._reduce_quantity(qty, price)
-        self.exited_ratio += target_ratio
+        self.exited_ratio = min(1.0, self.exited_ratio + effective_exit_ratio)
 
         event = {
             "date": date,
