@@ -2,7 +2,7 @@ from dynamic_chart_analyzer import StrategyConfig, build_entry_plan
 from dynamic_chart_analyzer.position_manager import PositionState
 
 
-def test_10m_split_is_2_6_2():
+def test_10m_entry_split_is_2_6_2():
     cfg = StrategyConfig(total_capital=10_000_000)
     plan = build_entry_plan(cfg)
     assert plan.stage1_amount == 2_000_000
@@ -12,7 +12,7 @@ def test_10m_split_is_2_6_2():
     assert not plan.risk_capped
 
 
-def test_optional_two_percent_risk_cap():
+def test_optional_two_percent_risk_cap_keeps_2_6_2_entry_split():
     cfg = StrategyConfig(total_capital=10_000_000, use_two_percent_risk_cap=True)
     plan = build_entry_plan(cfg, entry_price=100_000, stop_price=96_000)
     assert round(plan.capital_base) == 5_000_000
@@ -34,7 +34,7 @@ def test_stage_progression_must_be_sequential():
     assert round(state.invested_amount) == 10_000_000
 
 
-def test_full_entry_then_2_6_2_exit_realizes_profit():
+def test_2_6_2_entry_keeps_original_1_2_7_exit_policy():
     cfg = StrategyConfig(total_capital=10_000_000)
     plan = build_entry_plan(cfg)
     state = PositionState()
@@ -46,14 +46,14 @@ def test_full_entry_then_2_6_2_exit_realizes_profit():
     event2 = state.exit_part(2, "e2", 120)
     event3 = state.exit_part(3, "e3", 130)
 
-    assert event1 is not None and round(event1["remaining_ratio"], 10) == 0.8
-    assert event2 is not None and round(event2["remaining_ratio"], 10) == 0.2
+    assert event1 is not None and round(event1["remaining_ratio"], 10) == 0.9
+    assert event2 is not None and round(event2["remaining_ratio"], 10) == 0.7
     assert event3 is not None and round(event3["remaining_ratio"], 10) == 0.0
     assert state.side is None
     assert state.realized_pnl_krw > 0
 
 
-def test_stage_ratios_are_fixed_to_2_6_2():
+def test_entry_stage_ratios_are_fixed_to_2_6_2():
     cfg = StrategyConfig(total_capital=10_000_000)
     assert (cfg.stage1_ratio, cfg.stage2_ratio, cfg.stage3_ratio) == (0.20, 0.60, 0.20)
 
@@ -62,4 +62,4 @@ def test_stage_ratios_are_fixed_to_2_6_2():
     except TypeError:
         pass
     else:
-        raise AssertionError("Stage ratios must not be configurable; this analyzer is fixed at 2:6:2")
+        raise AssertionError("Entry stage ratios must not be configurable; this experiment is fixed at 2:6:2")
