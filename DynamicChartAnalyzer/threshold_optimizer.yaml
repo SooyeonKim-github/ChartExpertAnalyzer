@@ -1,18 +1,19 @@
 optimizer:
   target_column: D+20
-  mae_column: __unused_mae_d20__
-  excursion_column: __unused_excursion_d20__
+  mae_column: close_MAE_D20
+  excursion_column: close_excursion_ratio_D20
 
-  min_train_trading_days: 80
-  validation_trading_days: 40
-  step_trading_days: 40
+  # Common defaults. Stage-specific density overrides are applied below.
+  min_train_trading_days: 252
+  validation_trading_days: 126
+  step_trading_days: 63
   purge_trading_days: 20
   min_validation_fraction: 0.75
 
-  min_train_samples: 30
+  min_train_samples: 25
   min_train_unique_dates: 15
-  min_samples: 20
-  min_unique_dates: 10
+  min_samples: 10
+  min_unique_dates: 7
   min_valid_folds: 2
   train_top_k: 5
   top_n: 10
@@ -29,22 +30,54 @@ optimizer:
   distance_penalty: 0.10
   coverage_penalty: 0.50
 
+  # Return quality + downside control + path efficiency.
   objective_weights:
-    median_return: 0.40
-    win_rate: 0.25
-    p25_return: 0.20
-    mae_quality: 0.00
-    excursion_ratio: 0.00
-    sample_size: 0.15
+    median_return: 0.30
+    win_rate: 0.20
+    p25_return: 0.15
+    mae_quality: 0.15
+    excursion_ratio: 0.10
+    sample_size: 0.10
+
+# Signal density differs materially by Stage. Longer OOS windows and smaller
+# minimum validation samples are used only where the underlying Stage is sparse.
+stage_overrides:
+  stage1:
+    min_train_trading_days: 252
+    validation_trading_days: 126
+    step_trading_days: 63
+    min_train_samples: 30
+    min_train_unique_dates: 15
+    min_samples: 12
+    min_unique_dates: 8
+
+  stage2:
+    min_train_trading_days: 252
+    validation_trading_days: 126
+    step_trading_days: 63
+    min_train_samples: 25
+    min_train_unique_dates: 15
+    min_samples: 10
+    min_unique_dates: 7
+
+  stage3:
+    min_train_trading_days: 504
+    validation_trading_days: 252
+    step_trading_days: 126
+    min_train_samples: 12
+    min_train_unique_dates: 8
+    min_samples: 4
+    min_unique_dates: 4
 
 search_space:
-  # V2.3 scores are stage-specific. Optimize one stage per run.
+  # V2.3 scores are stage-specific. First pass is intentionally broad but
+  # concentrated around the regions suggested by the 2020~2026 backtest.
   stage1:
-    confirmed_score: [60, 65, 70, 75, 80]
+    confirmed_score: [55, 57.5, 60, 62.5, 65, 67.5, 70]
   stage2:
-    confirmed_score: [60, 65, 70, 75, 80]
+    confirmed_score: [60, 62.5, 65, 67.5, 70, 72.5, 75]
   stage3:
-    confirmed_score: [60, 65, 70, 75, 80]
+    confirmed_score: [60, 65, 70, 72.5, 75, 77.5, 80]
 
   # Backward-compatible fallback for older callers.
   confirmed:
