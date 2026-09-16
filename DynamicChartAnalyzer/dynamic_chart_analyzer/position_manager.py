@@ -21,27 +21,17 @@ class EntryPlan:
     def total_amount(self) -> float:
         return self.stage1_amount + self.stage2_amount + self.stage3_amount
 
-    def ratio_for_stage(self, stage: int) -> float:
-        total = self.total_amount
-        if total <= 0:
-            raise ValueError("entry plan total_amount must be positive")
-        amount = {
-            1: self.stage1_amount,
-            2: self.stage2_amount,
-            3: self.stage3_amount,
-        }.get(stage)
-        if amount is None:
-            raise ValueError(f"unsupported stage: {stage}")
-        return float(amount) / float(total)
-
 
 def build_entry_plan(cfg: StrategyConfig, entry_price: float | None = None, stop_price: float | None = None) -> EntryPlan:
-    """Return the configured staged allocation.
+    """Return the configured staged entry allocation.
 
-    Current experiment: 10,000,000 KRW -> 2,000,000 / 6,000,000 / 2,000,000.
+    Current entry experiment: 10,000,000 KRW -> 2,000,000 / 6,000,000 / 2,000,000.
     Optional 2% risk mode first caps the maximum trade notional by
     account_risk / stop_distance, then splits that capped notional with the same
-    Stage1/Stage2/Stage3 ratios.
+    Stage1/Stage2/Stage3 entry ratios.
+
+    The staged exit policy remains the original 1:2:7 (10% / 20% / 70%) so this
+    experiment changes only entry allocation and keeps the comparison attributable.
     """
     cfg.validate()
     capital_base = cfg.total_capital
@@ -192,22 +182,15 @@ class PositionState:
     def exit_part(self, exit_stage: int, date, price: float, reason: str | None = None) -> dict | None:
         if self.side is None or self.stage == 0 or self.total_quantity <= 0:
             return None
-        if self.entry_plan is None:
-            raise RuntimeError("entry_plan is not initialized")
 
-        # Staged exits follow the same ratios as the entry plan. This removes the
-        # previous hard-coded 1:2:7 exit assumption and keeps allocation experiments
-        # internally consistent.
-        stage_ratios = {
-            stage: self.entry_plan.ratio_for_stage(stage)
-            for stage in (1, 2, 3)
-        }
-        target_ratio = stage_ratios[exit_stage]
-        cumulative_target = sum(stage_ratios[s] for s in range(1, exit_stage + 1))
+        # Keep the original staged exit policy fixed at 1:2:7 while testing a
+        # different entry allocation. This isolates the entry-allocation variable.
+        target_ratio = {1: 0.10, 2: 0.20, 3: 0.70}[exit_stage]
+        cumulative_target = {1: 0.10, 2: 0.30, 3: 1.00}[exit_stage]
         if self.exited_ratio >= cumulative_target - 1e-12:
             return None
 
-        # Ratios refer to the original fully-entered position. If a position is being
+        # Exit ratios refer to the original fully-entered position. If a position is
         # aborted before Stage 3, use exit_all() instead of this staged exit method.
         original_quantity = self.total_quantity / max(1e-12, 1.0 - self.exited_ratio)
         qty = min(self.total_quantity, original_quantity * target_ratio)
