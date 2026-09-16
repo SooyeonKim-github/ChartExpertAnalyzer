@@ -64,7 +64,9 @@ def main():
     assert decrease.delta_direction == "DECREASE"
     assert decrease.effective_sentiment == "NEGATIVE"
     assert decrease.numeric_change_pct == -40.0
-    assert decrease.score_adjustment == -15.0
+    # Material score measures importance, not bullishness. A verified large decrease
+    # remains material while the direction is carried by effective_sentiment.
+    assert decrease.score_adjustment == 5.0
 
     increase_correction = _event(
         "EV_INCREASE",
@@ -118,19 +120,41 @@ def main():
         disclosure_is_revision=True,
         disclosure_delta_type="CONTRACT_DECREASE",
         effective_sentiment="NEGATIVE",
-        disclosure_score_adjustment=-15.0,
+        disclosure_score_adjustment=5.0,
     )
     scored = MaterialScorer.score_event(score_input)
-    assert "disclosure_delta=-15" in scored.scoring_reason
-    assert scored.material_score < 85.0
+    assert "disclosure_delta=+5" in scored.scoring_reason
+    assert scored.material_score >= 85.0
+
+    unresolved_score_input = ScoreInput(
+        event_id="EV_UNRESOLVED",
+        event_type="ORDER_CONTRACT",
+        event_stage="CONFIRMED",
+        event_title="[기재정정] 단일판매ㆍ공급계약체결",
+        positive_negative="POSITIVE",
+        companies=("테스트기업",),
+        stock_codes=("123456",),
+        numbers=(),
+        original_source_id="DART",
+        source_grade="S",
+        source_type="OFFICIAL",
+        novelty_status="REVISION_UNRESOLVED",
+        disclosure_is_revision=True,
+        disclosure_delta_type="REVISION_UNRESOLVED",
+        effective_sentiment="NEUTRAL",
+        disclosure_score_adjustment=-25.0,
+    )
+    unresolved_score = MaterialScorer.score_event(unresolved_score_input)
+    assert unresolved_score.material_score < 55.0
 
     print("[OK] DisclosureDeltaAnalyzer V1 smoke test")
     print("     revision prefix detection -> OK")
     print("     500억원 -> 300억원 = CONTRACT_DECREASE / NEGATIVE -> OK")
     print("     500억원 -> 600억원 = CONTRACT_INCREASE / POSITIVE -> OK")
+    print("     materiality score is direction-neutral for verified large deltas -> OK")
     print("     ambiguous parent = REVISION_UNRESOLVED / NEUTRAL -> OK")
     print("     novelty revision != NEW_EVENT -> OK")
-    print("     material score applies disclosure delta adjustment -> OK")
+    print("     unresolved revision score is capped down -> OK")
 
 
 if __name__ == "__main__":
