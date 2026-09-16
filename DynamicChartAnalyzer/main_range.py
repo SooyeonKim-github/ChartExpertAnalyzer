@@ -4,7 +4,7 @@ from __future__ import annotations
 
 This file is the current Korean-market range runner. It preserves the lecture timing
 logic (RSI -> MACD -> Ichimoku, Stage1 -> Stage2 -> Stage3) while testing the
-current fixed 2:6:2 staged allocation and applying the V2.3 stage-aware LONG
+current fixed 2:6:2 staged entry allocation and applying the V2.3 stage-aware LONG
 quality overlay.
 
 There are no versioned main_range runners anymore. Keep this file as the single
@@ -205,6 +205,190 @@ def _add_forward_metrics(event: dict, price_df: pd.DataFrame, forward_bars: int)
     return out
 
 
+def _build_position_results(
+    raw_events: pd.DataFrame,
+    ticker: str,
+    name: str,
+    market: str,
+    source_rank: int,
+    start: pd.Timestamp,
+    end: pd.Timestamp,
+) -> list[dict]:
+    """Aggregate analyzer entry/exit events into allocation-aware position results.
+
+    Forward D+N metrics measure signal quality and are intentionally independent of
+    capital allocation. This position table measures the actual staged strategy:
+    entry amounts come from StrategyConfig (currently 2:6:2), while realized PnL
+    comes from the analyzer's fixed staged exit policy.
+
+    A position is included when its Stage-1 entry date is inside the requested range.
+    Exits may occur after ``end`` because the range runner intentionally downloads a
+    forward window for outcome measurement.
+    """
+    if raw_events is None or raw_events.empty:
+        return []
+
+    e = raw_events.copy()
+    if "date" not in e.columns or "action" not in e.columns:
+        return []
+    e["date"] = pd.to_datetime(e["date"], errors="coerce")
+    e = e[e["date"].notna()].sort_values("date", kind="stable")
+
+    rows: list[dict] = []
+    current: dict | None = None
+
+    def _in_requested_range(entry_date: pd.Timestamp) -> bool:
+        d = pd.Timestamp(entry_date).normalize()
+        return start.normalize() <= d <= end.normalize()
+
+    def _finish(closed: bool, exit_date=pd.NaT, exit_price=np.nan) -> None:
+        nonlocal current
+        if current is None:
+            return
+        invested = float(current["total_invested_krw"])
+        pnl = float(current["realized_pnl_krw"])
+        current["is_closed"] = bool(closed)
+        current["exit_date"] = exit_date
+        current["exit_price"] = exit_price
+        current["realized_return"] = pnl / invested if invested > 0 else np.nan
+        current["realized_return_pct"] = (
+            current["realized_return"] * 100.0
+            if pd.notna(current["realized_return"])
+            else np.nan
+        )
+        current["exit_reasons"] = " | ".join(current.pop("_exit_reasons"))
+        if closed and pd.notna(exit_date):
+            current["holding_calendar_days"] = int(
+                (pd.Timestamp(exit_date).normalize() - pd.Timestamp(current["entry_date"]).normalize()).days
+            )
+        else:
+            current["holding_calendar_days"] = np.nan
+        if _in_requested_range(pd.Timestamp(current["entry_date"])):
+            rows.append(current)
+        current = None
+
+    for _, row in e.iterrows():
+        action = str(row.get("action", ""))
+        dt = pd.Timestamp(row["date"])
+
+        if action.endswith("_ENTRY_STAGE_1"):
+            # Sequential state logic should not overlap positions, but if malformed
+            # event data does, preserve the previous one as incomplete instead of
+            # silently merging two setups.
+            if current is not None:
+                _finish(False)
+            side = "SHORT" if action.startswith("SHORT_") else "LONG"
+            amount = float(pd.to_numeric(pd.Series([row.get("amount_krw")]), errors="coerce").fillna(0.0).iloc[0])
+            current = {
+                "ticker": ticker,
+                "name": name,
+                "market": market,
+                "source_rank": int(source_rank),
+                "side": side,
+                "entry_date": dt,
+                "stage1_entry_date": dt,
+                "stage2_entry_date": pd.NaT,
+                "stage3_entry_date": pd.NaT,
+                "max_stage_reached": 1,
+                "stage1_amount_krw": amount,
+                "stage2_amount_krw": 0.0,
+                "stage3_amount_krw": 0.0,
+                "total_invested_krw": amount,
+                "realized_pnl_krw": 0.0,
+                "exit_event_count": 0,
+                "risk_capped": bool(row.get("risk_capped", False)),
+                "_exit_reasons": [],
+            }
+            continue
+
+        if current is None:
+            continue
+
+        expected_prefix = f"{current['side']}_"
+        if not action.startswith(expected_prefix):
+            continue
+
+        if "_ENTRY_STAGE_" in action:
+            stage_value = pd.to_numeric(pd.Series([row.get("stage")]), errors="coerce").iloc[0]
+            if pd.isna(stage_value):
+                try:
+                    stage_value = int(action.rsplit("_", 1)[-1])
+                except ValueError:
+                    continue
+            stage = int(stage_value)
+            amount = float(pd.to_numeric(pd.Series([row.get("amount_krw")]), errors="coerce").fillna(0.0).iloc[0])
+            current["max_stage_reached"] = max(int(current["max_stage_reached"]), stage)
+            current[f"stage{stage}_amount_krw"] = amount
+            current[f"stage{stage}_entry_date"] = dt
+            current["total_invested_krw"] = float(current["total_invested_krw"]) + amount
+            continue
+
+        if "_EXIT_" in action:
+            pnl_value = pd.to_numeric(pd.Series([row.get("realized_pnl_krw")]), errors="coerce").iloc[0]
+            pnl = float(pnl_value) if pd.notna(pnl_value) else 0.0
+            current["realized_pnl_krw"] = float(current["realized_pnl_krw"]) + pnl
+            current["exit_event_count"] = int(current["exit_event_count"]) + 1
+            reason = str(row.get("reason", "") or action)
+            current["_exit_reasons"].append(reason)
+
+            remaining_value = pd.to_numeric(pd.Series([row.get("remaining_ratio")]), errors="coerce").iloc[0]
+            closed = (
+                action.endswith("_EXIT_ALL")
+                or action.endswith("_EXIT_STAGE_3")
+                or (pd.notna(remaining_value) and float(remaining_value) <= 1e-9)
+            )
+            if closed:
+                price_value = pd.to_numeric(pd.Series([row.get("price")]), errors="coerce").iloc[0]
+                exit_price = float(price_value) if pd.notna(price_value) else np.nan
+                _finish(True, dt, exit_price)
+
+    if current is not None:
+        _finish(False)
+    return rows
+
+
+def _build_position_summary(position_results: pd.DataFrame) -> pd.DataFrame:
+    columns = [
+        "side",
+        "max_stage_reached",
+        "closed_count",
+        "win_rate",
+        "avg_realized_return",
+        "median_realized_return",
+        "avg_realized_pnl_krw",
+        "total_realized_pnl_krw",
+        "avg_invested_krw",
+    ]
+    if position_results.empty:
+        return pd.DataFrame(columns=columns)
+
+    closed = position_results[position_results["is_closed"].fillna(False)].copy()
+    if closed.empty:
+        return pd.DataFrame(columns=columns)
+
+    rows: list[dict] = []
+    for (side, max_stage), g in closed.groupby(["side", "max_stage_reached"], dropna=False):
+        returns = pd.to_numeric(g["realized_return"], errors="coerce").dropna()
+        pnl = pd.to_numeric(g["realized_pnl_krw"], errors="coerce").dropna()
+        invested = pd.to_numeric(g["total_invested_krw"], errors="coerce").dropna()
+        rows.append(
+            {
+                "side": side,
+                "max_stage_reached": int(max_stage),
+                "closed_count": int(len(g)),
+                "win_rate": float((returns > 0).mean()) if len(returns) else np.nan,
+                "avg_realized_return": float(returns.mean()) if len(returns) else np.nan,
+                "median_realized_return": float(returns.median()) if len(returns) else np.nan,
+                "avg_realized_pnl_krw": float(pnl.mean()) if len(pnl) else np.nan,
+                "total_realized_pnl_krw": float(pnl.sum()) if len(pnl) else np.nan,
+                "avg_invested_krw": float(invested.mean()) if len(invested) else np.nan,
+            }
+        )
+    return pd.DataFrame(rows, columns=columns).sort_values(
+        ["side", "max_stage_reached"]
+    ).reset_index(drop=True)
+
+
 def _build_summary(events: pd.DataFrame, forward_bars: int) -> pd.DataFrame:
     if events.empty:
         return pd.DataFrame(columns=["side", "stage", "count"])
@@ -291,6 +475,10 @@ def _write_excel(
     summary: pd.DataFrame,
     long_summary: pd.DataFrame,
     long_candidates: pd.DataFrame,
+    stage2_confirmed: pd.DataFrame,
+    stage3_confirmed: pd.DataFrame,
+    position_results: pd.DataFrame,
+    position_summary: pd.DataFrame,
     universe: pd.DataFrame,
     errors: pd.DataFrame,
 ) -> None:
@@ -298,6 +486,10 @@ def _write_excel(
         summary.to_excel(writer, sheet_name="Summary", index=False)
         long_summary.to_excel(writer, sheet_name="LongSummary", index=False)
         long_candidates.to_excel(writer, sheet_name="LongCandidates", index=False)
+        stage2_confirmed.to_excel(writer, sheet_name="Stage2Confirmed", index=False)
+        stage3_confirmed.to_excel(writer, sheet_name="Stage3Confirmed", index=False)
+        position_summary.to_excel(writer, sheet_name="PositionSummary", index=False)
+        position_results.to_excel(writer, sheet_name="PositionResults", index=False)
         events.to_excel(writer, sheet_name="Events", index=False)
         universe.to_excel(writer, sheet_name="Universe", index=False)
         errors.to_excel(writer, sheet_name="Errors", index=False)
@@ -380,7 +572,8 @@ def run_range(args) -> int:
     print(f"Universe TOP N   : {len(universe)}")
     print(f"Sort by          : {params.sort_by}")
     print(f"Forward bars     : {params.forward_bars}")
-    print(f"Capital          : {params.capital:,.0f} KRW (Stage 1/2/3 = 2:6:2)")
+    print(f"Capital          : {params.capital:,.0f} KRW (entry Stage 1/2/3 = 2:6:2)")
+    print("Exit policy      : original staged 1:2:7; Stage3 terminal signal closes remainder")
     print("Lecture timing   : RSI -> MACD -> Ichimoku (unchanged)")
     print("Stage1 quality   : RS30 / Trend20 / Structure25 / Volume15 / Reversal10")
     print("Stage2 quality   : RS25 / Momentum25 / Trend20 / Volume15 / Structure15")
@@ -391,11 +584,11 @@ def run_range(args) -> int:
         f"WATCH >= {args.watch_score:g} (same cut by stage until WFO calibration)"
     )
     print("Daily LONG rank  : within signal_date + stage only")
-    print("Stage3 deployable: research-only; does NOT alter the fixed 2:6:2 state machine")
     print("Benchmark proxy  : KOSPI=069500 / KOSDAQ=229200")
     print()
 
     event_rows: list[dict] = []
+    position_rows: list[dict] = []
     error_rows: list[dict] = list(benchmark_errors)
     rs_panel_rows: list[pd.DataFrame] = []
 
@@ -408,6 +601,18 @@ def run_range(args) -> int:
             raw = _normalize_ohlcv(load_pykrx(ticker, history_start, forward_end))
             analyzed, events = analyzer.analyze(raw)
             enriched = add_long_v2_features(analyzed, market_feature_map.get(market))
+
+            position_rows.extend(
+                _build_position_results(
+                    events,
+                    ticker=ticker,
+                    name=name,
+                    market=market,
+                    source_rank=int(rec.source_rank),
+                    start=start,
+                    end=end,
+                )
+            )
 
             panel_slice = enriched.loc[
                 (enriched.index >= start) & (enriched.index <= end), ["rs_20", "rs_60"]
@@ -463,6 +668,7 @@ def run_range(args) -> int:
         time.sleep(max(0.0, float(args.request_delay)))
 
     events_df = pd.DataFrame(event_rows)
+    position_results_df = pd.DataFrame(position_rows)
 
     if rs_panel_rows:
         rs_panel = add_rs_percentiles(pd.concat(rs_panel_rows, ignore_index=True))
@@ -501,6 +707,7 @@ def run_range(args) -> int:
 
     summary_df = _build_summary(events_df, params.forward_bars)
     long_summary_df = _build_long_summary(events_df, params.forward_bars)
+    position_summary_df = _build_position_summary(position_results_df)
     errors_df = pd.DataFrame(error_rows, columns=["ticker", "name", "error"])
 
     long_mask = (
@@ -513,11 +720,28 @@ def run_range(args) -> int:
         if "long_quality_label" in events_df.columns
         else pd.Series(False, index=events_df.index)
     )
+    confirmed_mask = (
+        events_df["long_quality_label"].eq("CONFIRMED")
+        if "long_quality_label" in events_df.columns
+        else pd.Series(False, index=events_df.index)
+    )
     long_candidates_df = events_df[long_mask & quality_mask].copy()
+    stage2_confirmed_df = events_df[
+        long_mask & confirmed_mask & events_df.get("stage", pd.Series(index=events_df.index, dtype=float)).eq(2)
+    ].copy()
+    stage3_confirmed_df = events_df[
+        long_mask & confirmed_mask & events_df.get("stage", pd.Series(index=events_df.index, dtype=float)).eq(3)
+    ].copy()
+
     if not long_candidates_df.empty:
         long_candidates_df = long_candidates_df.sort_values(
             ["signal_date", "stage", "daily_long_rank"], ascending=[True, True, True]
         )
+    for confirmed_df in (stage2_confirmed_df, stage3_confirmed_df):
+        if not confirmed_df.empty:
+            confirmed_df.sort_values(
+                ["signal_date", "daily_long_rank"], ascending=[True, True], inplace=True
+            )
 
     out_dir = Path(args.output_root) / f"range_{start:%Y%m%d}_{end:%Y%m%d}"
     out_dir.mkdir(parents=True, exist_ok=True)
@@ -525,6 +749,10 @@ def run_range(args) -> int:
     summary_path = out_dir / "dynamic_range_summary.csv"
     long_summary_path = out_dir / "dynamic_long_v23_summary.csv"
     candidates_path = out_dir / "dynamic_long_v23_candidates.csv"
+    stage2_confirmed_path = out_dir / "dynamic_stage2_confirmed.csv"
+    stage3_confirmed_path = out_dir / "dynamic_stage3_confirmed.csv"
+    position_results_path = out_dir / "dynamic_position_results.csv"
+    position_summary_path = out_dir / "dynamic_position_summary.csv"
     legacy_long_summary_path = out_dir / "dynamic_long_v2_summary.csv"
     legacy_candidates_path = out_dir / "dynamic_long_v2_candidates.csv"
     universe_path = out_dir / "universe.csv"
@@ -535,6 +763,10 @@ def run_range(args) -> int:
     summary_df.to_csv(summary_path, index=False, encoding="utf-8-sig")
     long_summary_df.to_csv(long_summary_path, index=False, encoding="utf-8-sig")
     long_candidates_df.to_csv(candidates_path, index=False, encoding="utf-8-sig")
+    stage2_confirmed_df.to_csv(stage2_confirmed_path, index=False, encoding="utf-8-sig")
+    stage3_confirmed_df.to_csv(stage3_confirmed_path, index=False, encoding="utf-8-sig")
+    position_results_df.to_csv(position_results_path, index=False, encoding="utf-8-sig")
+    position_summary_df.to_csv(position_summary_path, index=False, encoding="utf-8-sig")
     # Backward-compatible aliases for existing local scripts and notebooks.
     long_summary_df.to_csv(legacy_long_summary_path, index=False, encoding="utf-8-sig")
     long_candidates_df.to_csv(legacy_candidates_path, index=False, encoding="utf-8-sig")
@@ -546,6 +778,10 @@ def run_range(args) -> int:
         summary_df,
         long_summary_df,
         long_candidates_df,
+        stage2_confirmed_df,
+        stage3_confirmed_df,
+        position_results_df,
+        position_summary_df,
         universe,
         errors_df,
     )
@@ -566,20 +802,27 @@ def run_range(args) -> int:
                 f"{k}={int(labels.get(k, 0))}" for k in ["CONFIRMED", "WATCH", "REJECT"]
             )
         )
-        if "stage3_deployable" in events_df.columns:
-            deployable = int(
-                (
-                    events_df["side"].eq("LONG")
-                    & events_df["stage"].eq(3)
-                    & events_df["stage3_deployable"].fillna(False)
-                ).sum()
-            )
-            print(f"Stage3 deployable (research only): {deployable:,}")
+    print(
+        f"Stage confirmed: Stage2={len(stage2_confirmed_df):,} / "
+        f"Stage3={len(stage3_confirmed_df):,}"
+    )
+    closed_positions = (
+        int(position_results_df["is_closed"].fillna(False).sum())
+        if not position_results_df.empty and "is_closed" in position_results_df.columns
+        else 0
+    )
+    print(
+        f"Positions    : total={len(position_results_df):,} / closed={closed_positions:,} "
+        "(allocation-aware PnL)"
+    )
     print(f"Errors       : {len(errors_df):,}")
     print(f"Saved        : {excel_path}")
     print(f"Saved        : {events_path}")
     print(f"Saved        : {long_summary_path}")
     print(f"Saved        : {candidates_path}")
+    print(f"Saved        : {stage2_confirmed_path}")
+    print(f"Saved        : {position_results_path}")
+    print(f"Saved        : {position_summary_path}")
     return 0
 
 
@@ -596,7 +839,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
     p.add_argument("--forward-bars", type=int, default=60, help="Forward performance trading bars")
     p.add_argument("--history-days", type=int, default=450, help="Calendar history before start")
-    p.add_argument("--capital", type=float, default=10_000_000, help="Capital in KRW; fixed 2:6:2 split")
+    p.add_argument("--capital", type=float, default=10_000_000, help="Capital in KRW; fixed 2:6:2 entry split")
     p.add_argument("--risk-cap", action="store_true", help="Enable optional 2%% account-risk cap")
     p.add_argument("--no-stop", action="store_true", help="Disable protective swing stop")
     p.add_argument("--dynamic-rsi", action="store_true", help="Include experimental Dynamic RSI")
