@@ -89,6 +89,161 @@ def _apply_stage_overrides(config: dict, stage: int) -> dict:
     return out
 
 
+def _performance_gate(row: pd.Series, gate_cfg: dict) -> tuple[bool, list[str]]:
+    """Check absolute OOS performance floors after statistical stability grading.
+
+    The ThresholdOptimization engine grades statistical evidence (fold coverage,
+    plateau and dispersion). DynamicChartAnalyzer additionally requires absolute
+    return quality before a threshold may be applied. This prevents a stable but
+    consistently weak threshold from being marked deployable.
+    """
+    if not bool((gate_cfg or {}).get("enabled", False)):
+        return True, []
+
+    checks = (
+        ("mean_median_return", "min_mean_median_return", "median_return"),
+        ("mean_win_rate", "min_mean_win_rate", "win_rate"),
+        ("mean_p25_return", "min_mean_p25_return", "p25_return"),
+    )
+    failures: list[str] = []
+    for column, config_key, label in checks:
+        if config_key not in gate_cfg:
+            continue
+        minimum = float(gate_cfg[config_key])
+        value = pd.to_numeric(pd.Series([row.get(column)]), errors="coerce").iloc[0]
+        if pd.isna(value):
+            failures.append(f"{label}=missing (required>={minimum:g})")
+        elif float(value) < minimum:
+            failures.append(f"{label}={float(value):.6g} < {minimum:g}")
+    return len(failures) == 0, failures
+
+
+def _apply_performance_gate(result, optimizer: ThresholdOptimizer, df: pd.DataFrame, active_cfg: dict):
+    """Apply Dynamic-only absolute performance gate and reselect the candidate.
+
+    Statistical recommendation_quality is preserved. Application eligibility is
+    stricter: ACCEPTABLE/ROBUST *and* the absolute performance gate must pass.
+    If no candidate passes both, the highest-ranked statistical candidate remains
+    visible as a provisional recommendation but cannot be applied automatically.
+    """
+    gate_cfg = dict((active_cfg or {}).get("application_performance_gate", {}) or {})
+    if not bool(gate_cfg.get("enabled", False)):
+        return result
+
+    trials = result.all_trials.copy()
+    trials["statistically_eligible"] = (
+        trials["eligible_for_application"].fillna(False).astype(bool)
+    )
+
+    gate_results = trials.apply(lambda row: _performance_gate(row, gate_cfg), axis=1)
+    trials["performance_gate_pass"] = [bool(x[0]) for x in gate_results]
+    trials["performance_gate_failures"] = ["; ".join(x[1]) for x in gate_results]
+    trials["eligible_for_application"] = (
+        trials["statistically_eligible"] & trials["performance_gate_pass"]
+    )
+
+    strict = trials[
+        trials["final_score"].notna()
+        & (trials["valid_folds"] >= optimizer.min_valid_folds)
+        & trials["eligible_for_application"].fillna(False).astype(bool)
+    ].copy()
+
+    used_performance_gate_fallback = strict.empty
+    if used_performance_gate_fallback:
+        candidate_pool = trials[
+            trials["final_score"].notna() & (trials["valid_folds"] >= 1)
+        ].copy()
+        if candidate_pool.empty:
+            raise ValueError("Performance gate left no evaluable Dynamic threshold candidate.")
+    else:
+        candidate_pool = strict
+
+    candidate_pool = candidate_pool.sort_values(
+        "final_score", ascending=False, na_position="last"
+    ).reset_index(drop=True)
+    best = candidate_pool.iloc[0]
+    space = optimizer.adapter.parameter_space(optimizer.config)
+    recommended = {name: best[name].item() if hasattr(best[name], "item") else best[name] for name in space}
+    quality = str(best.get("recommendation_quality", "PROVISIONAL"))
+    gate_pass = bool(best.get("performance_gate_pass", False))
+    eligible = (
+        bool(best.get("statistically_eligible", False))
+        and gate_pass
+        and not used_performance_gate_fallback
+    )
+
+    prepared = optimizer._prepare(df)
+    folds = optimizer.splitter.split(prepared[optimizer.adapter.date_column])
+    comparison = optimizer._comparison(
+        prepared,
+        folds,
+        recommended,
+        quality=quality,
+        eligible=eligible,
+    )
+
+    result.recommended_params = recommended
+    result.recommended_config = optimizer.adapter.export_config(recommended)
+    result.recommendation_quality = quality
+    result.eligible_for_application = eligible
+    result.all_trials = trials.sort_values(
+        "final_score", ascending=False, na_position="last"
+    ).reset_index(drop=True)
+    result.current_vs_optimized = comparison
+    result.top_configs = candidate_pool.head(optimizer.top_n).copy()
+
+    stability_cols = list(space) + [
+        "valid_folds",
+        "total_folds",
+        "fold_coverage",
+        "mean_validation_objective",
+        "std_validation_objective",
+        "robust_score",
+        "mean_median_return",
+        "mean_win_rate",
+        "mean_p25_return",
+        "plateau_neighbor_count",
+        "plateau_neighbor_mean",
+        "plateau_drop",
+        "current_distance",
+        "final_score",
+        "recommendation_quality",
+        "statistically_eligible",
+        "performance_gate_pass",
+        "performance_gate_failures",
+        "eligible_for_application",
+    ]
+    result.stability_report = candidate_pool[
+        [c for c in stability_cols if c in candidate_pool.columns]
+    ].head(min(20, len(candidate_pool))).copy()
+
+    diagnostics = dict(result.recommendation_diagnostics or {})
+    diagnostics.update(
+        {
+            "performance_gate_enabled": True,
+            "performance_gate_thresholds": {
+                "min_mean_median_return": gate_cfg.get("min_mean_median_return"),
+                "min_mean_win_rate": gate_cfg.get("min_mean_win_rate"),
+                "min_mean_p25_return": gate_cfg.get("min_mean_p25_return"),
+            },
+            "best_performance_gate_pass": gate_pass,
+            "best_performance_gate_failures": str(
+                best.get("performance_gate_failures", "") or ""
+            ),
+            "best_mean_median_return": best.get("mean_median_return"),
+            "best_mean_win_rate": best.get("mean_win_rate"),
+            "best_mean_p25_return": best.get("mean_p25_return"),
+            "used_performance_gate_fallback": used_performance_gate_fallback,
+            "used_provisional_fallback": bool(
+                diagnostics.get("used_provisional_fallback", False)
+                or used_performance_gate_fallback
+            ),
+        }
+    )
+    result.recommendation_diagnostics = diagnostics
+    return result
+
+
 def main() -> None:
     p = argparse.ArgumentParser(description="Dynamic V2.3 stage-aware purged walk-forward threshold optimizer")
     p.add_argument("--range-file")
@@ -108,6 +263,7 @@ def main() -> None:
     df = add_close_path_excursions(df, horizon=20)
 
     active_cfg = optimizer_cfg.get("optimizer", {}) or {}
+    gate_cfg = active_cfg.get("application_performance_gate", {}) or {}
     print(f"[INFO] optimizer input: {range_file}")
     print(f"[INFO] Dynamic V2.3 target stage: {args.stage}")
     print(
@@ -123,6 +279,13 @@ def main() -> None:
         f"purge={active_cfg.get('purge_trading_days')}d, "
         f"validation min samples={active_cfg.get('min_samples')}"
     )
+    if bool(gate_cfg.get("enabled", False)):
+        print(
+            "[INFO] Application performance gate: "
+            f"median>={gate_cfg.get('min_mean_median_return')}, "
+            f"win_rate>={gate_cfg.get('min_mean_win_rate')}%, "
+            f"P25>={gate_cfg.get('min_mean_p25_return')}"
+        )
 
     out_dir = _resolve(args.out, range_file.parent / "optimizer")
     stage_dir = out_dir / f"stage{args.stage}"
@@ -131,7 +294,9 @@ def main() -> None:
         phase="confirmed",
         analyzer_config={"confirmed_score": float(args.current_confirmed_score), "target_stage": int(args.stage)},
     )
-    result = ThresholdOptimizer(adapter, optimizer_cfg).run(df)
+    optimizer = ThresholdOptimizer(adapter, optimizer_cfg)
+    result = optimizer.run(df)
+    result = _apply_performance_gate(result, optimizer, df, active_cfg)
     paths = result.write(stage_dir / "confirmed")
     result.current_vs_optimized.to_csv(stage_dir / "current_vs_optimized.csv", index=False, encoding="utf-8-sig")
 
@@ -142,6 +307,7 @@ def main() -> None:
     eligible_path.write_text(yaml.safe_dump(eligible_payload, allow_unicode=True, sort_keys=False), encoding="utf-8")
     provisional_path.write_text(yaml.safe_dump(provisional_payload, allow_unicode=True, sort_keys=False), encoding="utf-8")
 
+    diagnostics = result.recommendation_diagnostics or {}
     print("\n============================================")
     print(" Dynamic V2.3 Stage Threshold Optimizer complete")
     print("============================================")
@@ -150,6 +316,13 @@ def main() -> None:
     print(f"Output       : {stage_dir}")
     print(f"Candidate    : {result.recommended_params}")
     print(f"Quality      : {result.recommendation_quality}")
+    if diagnostics.get("performance_gate_enabled"):
+        print(
+            "Perf Gate    : "
+            + ("PASS" if diagnostics.get("best_performance_gate_pass") else "FAIL")
+        )
+        if diagnostics.get("best_performance_gate_failures"):
+            print(f"Gate reason  : {diagnostics.get('best_performance_gate_failures')}")
     print(f"Application  : {'ELIGIBLE' if result.eligible_for_application else 'NOT ELIGIBLE'}")
     print(f"Summary      : {paths['recommendation_summary']}")
     print(f"Config       : {eligible_path if result.eligible_for_application else provisional_path}")
