@@ -3,6 +3,7 @@ import pytest
 
 from run_threshold_optimizer import (
     _apply_stage_overrides,
+    _performance_gate,
     add_close_path_excursions,
 )
 
@@ -49,3 +50,70 @@ def test_stage3_walk_forward_override_is_applied_without_mutating_base():
     assert stage3["optimizer"]["min_samples"] == 4
     assert base["optimizer"]["validation_trading_days"] == 126
     assert base["optimizer"]["min_samples"] == 10
+
+
+def test_stage2_can_expand_validation_window_without_changing_common_config():
+    base = {
+        "optimizer": {
+            "validation_trading_days": 126,
+            "step_trading_days": 63,
+        },
+        "stage_overrides": {
+            "stage2": {
+                "validation_trading_days": 252,
+                "step_trading_days": 126,
+            }
+        },
+    }
+
+    stage2 = _apply_stage_overrides(base, 2)
+
+    assert stage2["optimizer"]["validation_trading_days"] == 252
+    assert stage2["optimizer"]["step_trading_days"] == 126
+    assert base["optimizer"]["validation_trading_days"] == 126
+    assert base["optimizer"]["step_trading_days"] == 63
+
+
+def test_performance_gate_passes_when_all_absolute_floors_are_met():
+    row = pd.Series(
+        {
+            "mean_median_return": 0.02,
+            "mean_win_rate": 58.0,
+            "mean_p25_return": -0.01,
+        }
+    )
+    gate = {
+        "enabled": True,
+        "min_mean_median_return": 0.0,
+        "min_mean_win_rate": 52.0,
+        "min_mean_p25_return": -0.03,
+    }
+
+    passed, failures = _performance_gate(row, gate)
+
+    assert passed is True
+    assert failures == []
+
+
+def test_performance_gate_rejects_stable_but_weak_candidate():
+    row = pd.Series(
+        {
+            "mean_median_return": -0.005,
+            "mean_win_rate": 47.8,
+            "mean_p25_return": -0.04,
+        }
+    )
+    gate = {
+        "enabled": True,
+        "min_mean_median_return": 0.0,
+        "min_mean_win_rate": 52.0,
+        "min_mean_p25_return": -0.03,
+    }
+
+    passed, failures = _performance_gate(row, gate)
+
+    assert passed is False
+    assert len(failures) == 3
+    assert any("median_return" in item for item in failures)
+    assert any("win_rate" in item for item in failures)
+    assert any("p25_return" in item for item in failures)
