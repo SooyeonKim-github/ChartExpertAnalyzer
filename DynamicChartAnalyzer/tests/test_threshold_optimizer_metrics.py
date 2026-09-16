@@ -1,7 +1,10 @@
+from types import SimpleNamespace
+
 import pandas as pd
 import pytest
 
 from run_threshold_optimizer import (
+    _apply_performance_gate,
     _apply_stage_overrides,
     _performance_gate,
     add_close_path_excursions,
@@ -117,3 +120,104 @@ def test_performance_gate_rejects_stable_but_weak_candidate():
     assert any("median_return" in item for item in failures)
     assert any("win_rate" in item for item in failures)
     assert any("p25_return" in item for item in failures)
+
+
+def test_gate_fallback_prefers_performance_pass_and_refreshes_diagnostics():
+    trials = pd.DataFrame(
+        [
+            {
+                "confirmed_score": 65.0,
+                "valid_folds": 14,
+                "total_folds": 16,
+                "fold_coverage": 0.875,
+                "mean_validation_objective": 0.10,
+                "std_validation_objective": 0.69,
+                "robust_score": -0.30,
+                "plateau_neighbor_count": 2,
+                "plateau_neighbor_mean": -0.45,
+                "plateau_drop": 0.14,
+                "current_distance": 0.25,
+                "final_score": 0.50,
+                "recommendation_quality": "ROBUST",
+                "eligible_for_application": True,
+                "mean_median_return": 0.033,
+                "mean_win_rate": 47.8,
+                "mean_p25_return": -0.023,
+            },
+            {
+                "confirmed_score": 72.5,
+                "valid_folds": 6,
+                "total_folds": 16,
+                "fold_coverage": 0.375,
+                "mean_validation_objective": 0.39,
+                "std_validation_objective": 0.70,
+                "robust_score": -0.27,
+                "plateau_neighbor_count": 1,
+                "plateau_neighbor_mean": -0.58,
+                "plateau_drop": 0.31,
+                "current_distance": 0.125,
+                "final_score": 0.40,
+                "recommendation_quality": "PROVISIONAL",
+                "eligible_for_application": False,
+                "mean_median_return": 0.0548,
+                "mean_win_rate": 75.9,
+                "mean_p25_return": -0.027,
+            },
+        ]
+    )
+
+    class _Adapter:
+        def parameter_space(self, _config):
+            return {"confirmed_score": [65.0, 72.5]}
+
+        def export_config(self, params):
+            return {"stage3_confirmed_score": float(params["confirmed_score"])}
+
+    class _Splitter:
+        def split(self, _dates):
+            return []
+
+    optimizer = SimpleNamespace(
+        min_valid_folds=2,
+        top_n=10,
+        adapter=_Adapter(),
+        config={},
+        splitter=_Splitter(),
+        _prepare=lambda df: df,
+        _comparison=lambda frame, folds, recommended, quality, eligible: pd.DataFrame(
+            [{"confirmed_score": recommended["confirmed_score"], "eligible": eligible}]
+        ),
+    )
+    result = SimpleNamespace(
+        all_trials=trials,
+        recommended_params={"confirmed_score": 65.0},
+        recommended_config={"stage3_confirmed_score": 65.0},
+        recommendation_quality="ROBUST",
+        eligible_for_application=True,
+        recommendation_diagnostics={
+            "best_valid_folds": 14,
+            "best_fold_coverage": 0.875,
+            "used_provisional_fallback": False,
+        },
+        current_vs_optimized=pd.DataFrame(),
+        top_configs=pd.DataFrame(),
+        stability_report=pd.DataFrame(),
+    )
+    frame = pd.DataFrame({"scan_date": pd.to_datetime(["2026-01-02"])})
+    gate_cfg = {
+        "application_performance_gate": {
+            "enabled": True,
+            "min_mean_median_return": 0.0,
+            "min_mean_win_rate": 52.0,
+            "min_mean_p25_return": -0.03,
+        }
+    }
+
+    out = _apply_performance_gate(result, optimizer, frame, gate_cfg)
+
+    assert out.recommended_params["confirmed_score"] == 72.5
+    assert out.eligible_for_application is False
+    assert out.recommendation_diagnostics["best_valid_folds"] == 6
+    assert out.recommendation_diagnostics["best_fold_coverage"] == pytest.approx(0.375)
+    assert out.recommendation_diagnostics["best_performance_gate_pass"] is True
+    assert out.recommendation_diagnostics["used_performance_gate_fallback"] is True
