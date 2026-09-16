@@ -140,6 +140,8 @@ CREATE TABLE IF NOT EXISTS material_events (
     event_id TEXT PRIMARY KEY,
     cluster_id TEXT NOT NULL UNIQUE,
     representative_article_id TEXT NOT NULL,
+    document_signature TEXT,
+    canonical_event_key TEXT,
     event_type TEXT NOT NULL,
     event_stage TEXT NOT NULL,
     event_title TEXT NOT NULL,
@@ -172,6 +174,10 @@ CREATE INDEX IF NOT EXISTS idx_material_events_type
 ON material_events(event_type);
 CREATE INDEX IF NOT EXISTS idx_material_events_cluster
 ON material_events(cluster_id);
+CREATE INDEX IF NOT EXISTS idx_material_events_document_signature
+ON material_events(document_signature);
+CREATE INDEX IF NOT EXISTS idx_material_events_canonical_event_key
+ON material_events(canonical_event_key);
 
 CREATE TABLE IF NOT EXISTS event_families (
     family_id TEXT PRIMARY KEY,
@@ -266,6 +272,8 @@ MATERIAL_EVENT_MIGRATION_COLUMNS = {
     "material_candidate": "INTEGER NOT NULL DEFAULT 0",
     "material_candidate_reason": "TEXT",
     "classification_source": "TEXT DEFAULT 'NONE'",
+    "document_signature": "TEXT",
+    "canonical_event_key": "TEXT",
 }
 
 NOVELTY_MIGRATION_COLUMNS = {
@@ -304,6 +312,8 @@ class Database:
             conn.execute("CREATE INDEX IF NOT EXISTS idx_articles_market_date ON articles(market_date)")
             conn.execute("CREATE INDEX IF NOT EXISTS idx_articles_external_id ON articles(source_id, external_id)")
             conn.execute("CREATE INDEX IF NOT EXISTS idx_material_events_candidate ON material_events(material_candidate)")
+            conn.execute("CREATE INDEX IF NOT EXISTS idx_material_events_document_signature ON material_events(document_signature)")
+            conn.execute("CREATE INDEX IF NOT EXISTS idx_material_events_canonical_event_key ON material_events(canonical_event_key)")
 
     @staticmethod
     def _migrate_columns(conn: sqlite3.Connection):

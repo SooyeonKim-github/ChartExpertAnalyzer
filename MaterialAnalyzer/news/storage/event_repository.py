@@ -64,15 +64,15 @@ class EventRepository:
             ).fetchone() is not None
             conn.execute(
                 "INSERT INTO material_events("
-                "event_id, cluster_id, representative_article_id, event_type, event_stage, "
-                "event_title, event_summary, positive_negative, quantified, material_candidate, "
-                "material_candidate_reason, classification_source, companies_json, stock_codes_json, "
-                "numbers_json, original_source_id, original_source_name, article_count, source_count, "
-                "confirmation_count, first_seen_at, last_seen_at, market_date, extraction_confidence, "
-                "extraction_version, cluster_updated_at"
-                ") VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) "
+                "event_id, cluster_id, representative_article_id, document_signature, canonical_event_key, "
+                "event_type, event_stage, event_title, event_summary, positive_negative, quantified, material_candidate, "
+                "material_candidate_reason, classification_source, companies_json, stock_codes_json, numbers_json, "
+                "original_source_id, original_source_name, article_count, source_count, confirmation_count, first_seen_at, "
+                "last_seen_at, market_date, extraction_confidence, extraction_version, cluster_updated_at"
+                ") VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) "
                 "ON CONFLICT(event_id) DO UPDATE SET "
                 "cluster_id=excluded.cluster_id, representative_article_id=excluded.representative_article_id, "
+                "document_signature=excluded.document_signature, canonical_event_key=excluded.canonical_event_key, "
                 "event_type=excluded.event_type, event_stage=excluded.event_stage, "
                 "event_title=excluded.event_title, event_summary=excluded.event_summary, "
                 "positive_negative=excluded.positive_negative, quantified=excluded.quantified, "
@@ -89,6 +89,7 @@ class EventRepository:
                 "updated_at=CURRENT_TIMESTAMP",
                 (
                     event.event_id, event.cluster_id, event.representative_article_id,
+                    event.document_signature, event.canonical_event_key,
                     event.event_type, event.event_stage, event.event_title, event.event_summary,
                     event.positive_negative, int(event.quantified), int(event.material_candidate),
                     event.material_candidate_reason, event.classification_source,
@@ -135,8 +136,8 @@ class EventRepository:
             ).fetchall()
 
         fieldnames = [
-            "event_id", "cluster_id", "market_date", "event_type", "event_stage",
-            "positive_negative", "material_candidate", "material_candidate_reason",
+            "event_id", "cluster_id", "document_signature", "canonical_event_key", "market_date",
+            "event_type", "event_stage", "positive_negative", "material_candidate", "material_candidate_reason",
             "classification_source", "event_title", "event_summary", "companies", "stock_codes",
             "numbers", "quantified", "original_source_id", "original_source_name",
             "article_count", "source_count", "confirmation_count", "first_seen_at", "last_seen_at",
@@ -149,6 +150,8 @@ class EventRepository:
                 writer.writerow({
                     "event_id": row["event_id"],
                     "cluster_id": row["cluster_id"],
+                    "document_signature": row["document_signature"],
+                    "canonical_event_key": row["canonical_event_key"],
                     "market_date": row["market_date"],
                     "event_type": row["event_type"],
                     "event_stage": row["event_stage"],

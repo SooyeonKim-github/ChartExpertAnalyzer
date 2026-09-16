@@ -4,6 +4,7 @@ import hashlib
 import re
 
 from ..clustering import FeatureExtractor
+from .event_identity import build_canonical_event_key, build_document_signature
 from .models import EventRunResult, MaterialEvent
 from .number_extractor import extract_meaningful_numbers
 from .rules import (
@@ -45,7 +46,7 @@ def _unique_join(values) -> str:
 
 
 class EventExtractor:
-    VERSION = "RULE_EVENT_V1_2"
+    VERSION = "RULE_EVENT_V1_3"
 
     def __init__(self, event_repository, feature_extractor=None):
         self.repository = event_repository
@@ -128,6 +129,7 @@ class EventExtractor:
         )
 
         # Keep only business-meaningful numbers. Raw dates/phone/article ids are excluded.
+        event_title = representative["title"] or cluster["cluster_title"]
         event_summary = (
             _clean_summary(representative["summary"])
             or _first_sentence(representative["body"])
@@ -158,14 +160,27 @@ class EventExtractor:
             confidence += 2
         confidence = round(min(100.0, confidence), 2)
 
+        document_signature = build_document_signature(representative)
+        canonical_event_key = build_canonical_event_key(
+            event_type=event_type,
+            event_title=event_title,
+            event_summary=event_summary,
+            companies=companies,
+            stock_codes=stock_codes,
+            market_date=cluster["market_date"],
+            source_id=representative["source_id"] or "",
+        )
+
         digest = hashlib.sha256(cluster["cluster_id"].encode("utf-8")).hexdigest()[:16]
         return MaterialEvent(
             event_id=f"EV_{digest}",
             cluster_id=cluster["cluster_id"],
             representative_article_id=cluster["representative_article_id"],
+            document_signature=document_signature,
+            canonical_event_key=canonical_event_key,
             event_type=event_type,
             event_stage=event_stage,
-            event_title=representative["title"] or cluster["cluster_title"],
+            event_title=event_title,
             event_summary=event_summary,
             positive_negative=positive_negative,
             quantified=bool(numbers),
