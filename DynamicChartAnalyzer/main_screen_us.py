@@ -70,10 +70,14 @@ def main() -> int:
     analyzer = DynamicChartAnalyzer(cfg, include_dynamic_rsi=args.dynamic_rsi)
 
     print("=" * 78)
-    print("DynamicChartAnalyzer US Screening - fixed 1:2:7")
+    print("DynamicChartAnalyzer US Screening - 2:6:2 allocation experiment")
     print("=" * 78)
     print(f"Universe : current US market-cap TOP {len(universe)}")
     print(f"Period   : {args.period}")
+    print(
+        "Allocation: "
+        f"{cfg.stage1_ratio:.0%}:{cfg.stage2_ratio:.0%}:{cfg.stage3_ratio:.0%}"
+    )
     print("CONFIRMED: latest state == LONG_CONFIRMED (Stage 3 reached and still active)")
     print()
 
