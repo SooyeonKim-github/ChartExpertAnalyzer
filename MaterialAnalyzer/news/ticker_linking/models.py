@@ -45,13 +45,15 @@ class LinkInput:
 
     @classmethod
     def from_row(cls, row) -> "LinkInput":
+        original_sentiment = _row_value(row, "positive_negative", "NEUTRAL") or "NEUTRAL"
+        effective_sentiment = _row_value(row, "effective_sentiment", "") or original_sentiment
         return cls(
             event_id=row["event_id"],
             event_type=_row_value(row, "event_type", "UNKNOWN") or "UNKNOWN",
             event_stage=_row_value(row, "event_stage", "UNKNOWN") or "UNKNOWN",
             event_title=_row_value(row, "event_title", ""),
             event_summary=_row_value(row, "event_summary", ""),
-            positive_negative=_row_value(row, "positive_negative", "NEUTRAL") or "NEUTRAL",
+            positive_negative=effective_sentiment,
             material_score=float(_row_value(row, "material_score", 0) or 0),
             material_status=_row_value(row, "material_status", "REJECT") or "REJECT",
             companies=_json_tuple(_row_value(row, "companies_json", None)),

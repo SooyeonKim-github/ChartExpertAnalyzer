@@ -19,7 +19,7 @@ MARKET_REACTION_RE = re.compile(
 
 
 class NoveltyAnalyzer:
-    VERSION = "RULE_NOVELTY_V1_1"
+    VERSION = "RULE_NOVELTY_V1_2"
 
     def __init__(
         self,
@@ -72,6 +72,8 @@ class NoveltyAnalyzer:
                 is_market_reaction=is_market_reaction,
                 delta=delta,
                 relation=relation,
+                is_revision=event.disclosure_is_revision,
+                disclosure_delta_type=event.disclosure_delta_type,
             )
 
             family_id = choose_family_id(event, parent_family_id)
@@ -106,6 +108,7 @@ class NoveltyAnalyzer:
                 novelty_reason=decision.reason,
                 analysis_version=self.VERSION,
                 event_updated_at=event.updated_at,
+                disclosure_delta_updated_at=event.disclosure_delta_updated_at,
             )
 
             action, previous_family_id = self.repository.upsert_novelty(record)
@@ -127,4 +130,6 @@ class NoveltyAnalyzer:
         result.confirmation = counts.get("CONFIRMATION", 0)
         result.rehash = counts.get("REHASH", 0)
         result.market_reaction = counts.get("MARKET_REACTION", 0)
+        result.existing_event_revision = counts.get("EXISTING_EVENT_REVISION", 0)
+        result.revision_unresolved = counts.get("REVISION_UNRESOLVED", 0)
         return result

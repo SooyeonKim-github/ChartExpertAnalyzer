@@ -11,12 +11,28 @@ class NoveltyClassifier:
         is_market_reaction: bool,
         delta: DeltaResult | None,
         relation: RelationResult | None,
+        is_revision: bool = False,
+        disclosure_delta_type: str = "",
     ) -> NoveltyDecision:
         if is_market_reaction:
             return NoveltyDecision(
                 novelty_status="MARKET_REACTION",
                 novelty_score=5.0,
                 reason="market reaction article, not new catalyst information",
+            )
+
+        if is_revision:
+            if not has_parent:
+                return NoveltyDecision(
+                    novelty_status="REVISION_UNRESOLVED",
+                    novelty_score=20.0,
+                    reason=f"revision without reliable parent ({disclosure_delta_type or 'UNKNOWN_DELTA'})",
+                )
+            material_delta = disclosure_delta_type not in {"", "MINOR_REVISION", "SCHEDULE_CHANGE", "REVISION_UNRESOLVED"}
+            return NoveltyDecision(
+                novelty_status="EXISTING_EVENT_REVISION",
+                novelty_score=75.0 if material_delta else 35.0,
+                reason=f"revision of existing disclosure ({disclosure_delta_type or 'UNKNOWN_DELTA'})",
             )
 
         if not has_parent or delta is None:

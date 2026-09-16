@@ -226,6 +226,7 @@ CREATE TABLE IF NOT EXISTS event_novelty (
     novelty_reason TEXT,
     analysis_version TEXT NOT NULL,
     event_updated_at TEXT,
+    disclosure_delta_updated_at TEXT,
     created_at TEXT DEFAULT CURRENT_TIMESTAMP,
     updated_at TEXT DEFAULT CURRENT_TIMESTAMP
 );
@@ -279,6 +280,7 @@ MATERIAL_EVENT_MIGRATION_COLUMNS = {
 NOVELTY_MIGRATION_COLUMNS = {
     "litigation_procedure_changed": "INTEGER NOT NULL DEFAULT 0",
     "litigation_procedure_progressed": "INTEGER NOT NULL DEFAULT 0",
+    "disclosure_delta_updated_at": "TEXT",
 }
 
 
