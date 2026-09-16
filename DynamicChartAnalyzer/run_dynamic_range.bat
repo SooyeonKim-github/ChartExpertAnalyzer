@@ -21,7 +21,7 @@ if "%DATE_RANGE%"=="" (
 if "%TOP_N%"=="" set "TOP_N=100"
 if "%SORT_BY%"=="" set "SORT_BY=market_cap"
 
-REM Dynamic KR range uses only KOSPI/KOSDAQ stock and index endpoints.
+REM Dynamic KR range uses only KOSPI/KOSDAQ stock and ETF proxy endpoints.
 REM Disable pykrx import-time KRX login inside this child process so a malformed
 REM login response cannot abort the backtest before unauthenticated stock calls run.
 set "KRX_ID="
@@ -64,7 +64,7 @@ echo [INFO] V2.3 Stage2 quality: RS25 / Momentum25 / Trend20 / Volume15 / Struct
 echo [INFO] V2.3 Stage3 quality: RS30 / Breakout25 / Trend20 / Volume15 / Extension10
 echo [INFO] Market / Risk: separate context/profile; excluded from alpha quality
 echo [INFO] Market universe: KOSPI + KOSDAQ
-echo [INFO] Market proxy: KOSPI index 1001 / KOSDAQ index 2001
+echo [INFO] Range benchmark proxy: KOSPI=069500 ^(KODEX 200^) / KOSDAQ=229200 ^(KODEX KOSDAQ 150^)
 echo [INFO] Entry split experiment: Stage1 20%% / Stage2 60%% / Stage3 20%% = 2:6:2
 echo [INFO] Quality labels: CONFIRMED ^>= 70 / WATCH ^>= 55 / else REJECT
 echo [INFO] Daily LONG rank: stage_quality_score first, lecture_score tie-breaker
