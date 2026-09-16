@@ -46,9 +46,9 @@ def test_full_entry_then_2_6_2_exit_realizes_profit():
     event2 = state.exit_part(2, "e2", 120)
     event3 = state.exit_part(3, "e3", 130)
 
-    assert event1 is not None and event1["remaining_ratio"] == 0.8
-    assert event2 is not None and event2["remaining_ratio"] == 0.2
-    assert event3 is not None and event3["remaining_ratio"] == 0.0
+    assert event1 is not None and round(event1["remaining_ratio"], 10) == 0.8
+    assert event2 is not None and round(event2["remaining_ratio"], 10) == 0.2
+    assert event3 is not None and round(event3["remaining_ratio"], 10) == 0.0
     assert state.side is None
     assert state.realized_pnl_krw > 0
 
