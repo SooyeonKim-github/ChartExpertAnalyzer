@@ -6,12 +6,15 @@ from pathlib import Path
 
 from ..scoring.models import MaterialScoreRecord
 from .database import Database
+from .disclosure_delta_repository import DISCLOSURE_DELTA_SCHEMA
 
 
 class MaterialScoreRepository:
     def __init__(self, database: Database):
         self.database = database
         self.database.initialize()
+        with self.database.connect() as conn:
+            conn.executescript(DISCLOSURE_DELTA_SCHEMA)
 
     def clear_all(self):
         with self.database.connect() as conn:
@@ -33,9 +36,13 @@ class MaterialScoreRepository:
     def get_pending_events(self, *, scoring_version: str, limit: int | None = None):
         sql = (
             "SELECT e.*, a.source_grade, a.source_type, n.novelty_status, n.novelty_score, "
+            "COALESCE(d.is_revision,0) AS is_revision, COALESCE(d.delta_type,'') AS delta_type, "
+            "COALESCE(d.effective_sentiment,e.positive_negative) AS effective_sentiment, "
+            "COALESCE(d.score_adjustment,0) AS score_adjustment, "
             "e.updated_at AS event_updated_at, n.updated_at AS novelty_updated_at "
             "FROM material_events e "
             "JOIN event_novelty n ON n.event_id = e.event_id "
+            "LEFT JOIN disclosure_deltas d ON d.event_id = e.event_id "
             "LEFT JOIN articles a ON a.article_id = e.representative_article_id "
             "LEFT JOIN material_scores s ON s.event_id = e.event_id "
             "WHERE e.material_candidate = 1 AND n.novelty_status <> 'MARKET_REACTION' "
@@ -125,16 +132,19 @@ class MaterialScoreRepository:
                 "SELECT s.*, e.market_date, e.event_type, e.event_stage, e.positive_negative, "
                 "e.event_title, e.event_summary, e.companies_json, e.stock_codes_json, e.numbers_json, "
                 "e.original_source_id, e.original_source_name, e.source_count, e.confirmation_count, "
-                "n.family_id, n.parent_event_id, n.novelty_status, n.novelty_score "
+                "n.family_id, n.parent_event_id, n.novelty_status, n.novelty_score, "
+                "d.is_revision,d.delta_type,d.delta_direction,d.effective_sentiment,d.score_adjustment,d.delta_reason "
                 "FROM material_scores s "
                 "JOIN material_events e ON e.event_id = s.event_id "
                 "JOIN event_novelty n ON n.event_id = s.event_id "
+                "LEFT JOIN disclosure_deltas d ON d.event_id=s.event_id "
                 "ORDER BY s.material_score DESC, e.market_date DESC, e.event_id ASC"
             ).fetchall()
 
         fieldnames = [
             "event_id", "family_id", "parent_event_id", "market_date", "material_status", "material_score",
-            "event_type", "event_stage", "positive_negative", "novelty_status", "novelty_score",
+            "event_type", "event_stage", "positive_negative", "effective_sentiment", "novelty_status", "novelty_score",
+            "is_revision", "delta_type", "delta_direction", "score_adjustment", "delta_reason",
             "direct_company_score", "event_certainty_score", "financial_impact_score",
             "quantification_score", "novelty_component_score", "source_reliability_score",
             "multi_source_score", "companies", "stock_codes", "numbers", "original_source_id",
@@ -155,8 +165,14 @@ class MaterialScoreRepository:
                     "event_type": row["event_type"],
                     "event_stage": row["event_stage"],
                     "positive_negative": row["positive_negative"],
+                    "effective_sentiment": row["effective_sentiment"],
                     "novelty_status": row["novelty_status"],
                     "novelty_score": row["novelty_score"],
+                    "is_revision": row["is_revision"],
+                    "delta_type": row["delta_type"],
+                    "delta_direction": row["delta_direction"],
+                    "score_adjustment": row["score_adjustment"],
+                    "delta_reason": row["delta_reason"],
                     "direct_company_score": row["direct_company_score"],
                     "event_certainty_score": row["event_certainty_score"],
                     "financial_impact_score": row["financial_impact_score"],
