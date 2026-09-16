@@ -4,6 +4,7 @@ import json
 import math
 import re
 from dataclasses import dataclass
+from typing import Any
 
 from ..clustering.feature_extractor import normalize_title
 from ..events.event_identity import GENERIC_DISCLOSURE_ANCHORS
@@ -47,6 +48,27 @@ def _json_tuple(value) -> tuple[str, ...]:
     return tuple(str(x) for x in parsed if str(x)) if isinstance(parsed, list) else ()
 
 
+def _json_dict(value) -> dict[str, Any]:
+    if not value:
+        return {}
+    if isinstance(value, dict):
+        return dict(value)
+    try:
+        parsed = json.loads(value)
+    except (TypeError, json.JSONDecodeError):
+        return {}
+    return parsed if isinstance(parsed, dict) else {}
+
+
+def _optional_float(value) -> float | None:
+    if value in (None, ""):
+        return None
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return None
+
+
 def input_from_row(row) -> DisclosureDeltaInput:
     def get(key, default=""):
         return row[key] if key in row.keys() and row[key] is not None else default
@@ -66,6 +88,18 @@ def input_from_row(row) -> DisclosureDeltaInput:
         first_seen_at=get("first_seen_at", None),
         market_date=get("market_date", None),
         event_updated_at=get("updated_at", None),
+        detail_event_key=get("detail_event_key"),
+        detail_contract_amount=_optional_float(get("detail_contract_amount", None)),
+        detail_recent_sales=_optional_float(get("detail_recent_sales", None)),
+        detail_sales_ratio=_optional_float(get("detail_sales_ratio", None)),
+        detail_counterparty=get("detail_counterparty"),
+        detail_contract_subject=get("detail_contract_subject"),
+        detail_contract_start_date=get("detail_contract_start_date", None),
+        detail_contract_end_date=get("detail_contract_end_date", None),
+        correction_before=_json_dict(get("correction_before_json", None)),
+        correction_after=_json_dict(get("correction_after_json", None)),
+        detail_parse_status=get("detail_parse_status"),
+        detail_updated_at=get("detail_updated_at", None),
     )
 
 
@@ -137,12 +171,128 @@ def _typed_delta(event_type: str, direction: str) -> str:
     return f"{prefix}_{direction}"
 
 
-class DisclosureDeltaDetector:
-    VERSION = "RULE_DISCLOSURE_DELTA_V1"
+def _direction(previous: float, current: float) -> tuple[str, float, float | None]:
+    change = current - previous
+    pct = None if math.isclose(previous, 0.0) else change / abs(previous) * 100.0
+    tolerance = max(abs(previous) * 0.01, 1e-12)
+    if change > tolerance:
+        return "INCREASE", change, pct
+    if change < -tolerance:
+        return "DECREASE", change, pct
+    return "UNCHANGED", change, pct
 
-    def detect(self, current: DisclosureDeltaInput, parent: DisclosureDeltaInput | None,
-               *, parent_match_method: str = "", parent_match_confidence: float = 0.0,
-               ambiguous_parent: bool = False) -> DisclosureDeltaRecord:
+
+class DisclosureDeltaDetector:
+    VERSION = "RULE_DISCLOSURE_DELTA_V1_1"
+
+    def _numeric_record(
+        self,
+        current: DisclosureDeltaInput,
+        parent: DisclosureDeltaInput | None,
+        *,
+        previous: float,
+        latest: float,
+        kind: str,
+        source: str,
+        parent_match_method: str,
+        parent_match_confidence: float,
+    ) -> DisclosureDeltaRecord:
+        direction, change, pct = _direction(previous, latest)
+        if direction in {"INCREASE", "DECREASE"}:
+            delta_type = _typed_delta(current.event_type, direction)
+            sentiment = _directional_sentiment(current.event_type, direction)
+            adjustment = 5.0
+            reason = f"{source} {kind} changed from {previous:g} to {latest:g}"
+        else:
+            delta_type = "MINOR_REVISION"
+            sentiment = "NEUTRAL"
+            adjustment = -20.0
+            reason = f"{source} {kind} is effectively unchanged"
+
+        return DisclosureDeltaRecord(
+            event_id=current.event_id,
+            parent_event_id=parent.event_id if parent else None,
+            is_revision=True,
+            parent_match_method=parent_match_method,
+            parent_match_confidence=parent_match_confidence,
+            delta_type=delta_type,
+            delta_direction=direction,
+            previous_numbers=parent.numbers if parent else (),
+            current_numbers=current.numbers,
+            numeric_kind=kind,
+            previous_numeric_value=previous,
+            current_numeric_value=latest,
+            numeric_change=change,
+            numeric_change_pct=round(pct, 4) if pct is not None else None,
+            effective_sentiment=sentiment,
+            score_adjustment=adjustment,
+            delta_reason=reason,
+            analysis_version=self.VERSION,
+            event_updated_at=current.event_updated_at,
+            detail_updated_at=current.detail_updated_at,
+        )
+
+    def _structured_delta(
+        self,
+        current: DisclosureDeltaInput,
+        parent: DisclosureDeltaInput | None,
+        *,
+        parent_match_method: str,
+        parent_match_confidence: float,
+    ) -> DisclosureDeltaRecord | None:
+        # Highest confidence: the correction filing itself explicitly states before/after.
+        for field, kind in (("contract_amount", "money"), ("sales_ratio", "percent")):
+            before = _optional_float(current.correction_before.get(field))
+            after = _optional_float(current.correction_after.get(field))
+            if before is not None and after is not None:
+                return self._numeric_record(
+                    current,
+                    parent,
+                    previous=before,
+                    latest=after,
+                    kind=kind,
+                    source="correction_table",
+                    parent_match_method=parent_match_method,
+                    parent_match_confidence=parent_match_confidence,
+                )
+
+        if parent is None:
+            return None
+
+        # Next best: compare structured values parsed from the original and revised filings.
+        if current.detail_contract_amount is not None and parent.detail_contract_amount is not None:
+            return self._numeric_record(
+                current,
+                parent,
+                previous=parent.detail_contract_amount,
+                latest=current.detail_contract_amount,
+                kind="money",
+                source="contract_detail",
+                parent_match_method=parent_match_method,
+                parent_match_confidence=parent_match_confidence,
+            )
+        if current.detail_sales_ratio is not None and parent.detail_sales_ratio is not None:
+            return self._numeric_record(
+                current,
+                parent,
+                previous=parent.detail_sales_ratio,
+                latest=current.detail_sales_ratio,
+                kind="percent",
+                source="contract_detail",
+                parent_match_method=parent_match_method,
+                parent_match_confidence=parent_match_confidence,
+            )
+        return None
+
+    def detect(
+        self,
+        current: DisclosureDeltaInput,
+        parent: DisclosureDeltaInput | None,
+        *,
+        parent_match_method: str = "",
+        parent_match_confidence: float = 0.0,
+        ambiguous_parent: bool = False,
+    ) -> DisclosureDeltaRecord:
         revision = is_revision_title(current.event_title)
         if not revision:
             return DisclosureDeltaRecord(
@@ -165,7 +315,17 @@ class DisclosureDeltaDetector:
                 delta_reason="original disclosure; no revision prefix",
                 analysis_version=self.VERSION,
                 event_updated_at=current.event_updated_at,
+                detail_updated_at=current.detail_updated_at,
             )
+
+        structured = self._structured_delta(
+            current,
+            parent,
+            parent_match_method=parent_match_method,
+            parent_match_confidence=parent_match_confidence,
+        )
+        if structured is not None:
+            return structured
 
         if parent is None:
             reason = "revision detected but parent disclosure is ambiguous" if ambiguous_parent else "revision detected but no reliable parent disclosure found"
@@ -189,6 +349,39 @@ class DisclosureDeltaDetector:
                 delta_reason=reason,
                 analysis_version=self.VERSION,
                 event_updated_at=current.event_updated_at,
+                detail_updated_at=current.detail_updated_at,
+            )
+
+        # Structured date comparison is more reliable than a keyword-only schedule guess.
+        if (
+            current.detail_contract_end_date
+            and parent.detail_contract_end_date
+            and current.detail_contract_end_date != parent.detail_contract_end_date
+        ):
+            return DisclosureDeltaRecord(
+                event_id=current.event_id,
+                parent_event_id=parent.event_id,
+                is_revision=True,
+                parent_match_method=parent_match_method,
+                parent_match_confidence=parent_match_confidence,
+                delta_type="SCHEDULE_CHANGE",
+                delta_direction="NEUTRAL",
+                previous_numbers=parent.numbers,
+                current_numbers=current.numbers,
+                numeric_kind="date",
+                previous_numeric_value=None,
+                current_numeric_value=None,
+                numeric_change=None,
+                numeric_change_pct=None,
+                effective_sentiment="NEUTRAL",
+                score_adjustment=-15.0,
+                delta_reason=(
+                    f"contract end date changed from {parent.detail_contract_end_date} "
+                    f"to {current.detail_contract_end_date}"
+                ),
+                analysis_version=self.VERSION,
+                event_updated_at=current.event_updated_at,
+                detail_updated_at=current.detail_updated_at,
             )
 
         text = f"{current.event_title} {current.event_summary}"
@@ -213,58 +406,21 @@ class DisclosureDeltaDetector:
                 delta_reason="revision is primarily a schedule/period change",
                 analysis_version=self.VERSION,
                 event_updated_at=current.event_updated_at,
+                detail_updated_at=current.detail_updated_at,
             )
 
         pair = comparable_pair(parent.numbers, current.numbers)
         if pair:
             previous_value, current_value = pair
-            change = current_value.value - previous_value.value
-            pct = None
-            if not math.isclose(previous_value.value, 0.0):
-                pct = change / abs(previous_value.value) * 100.0
-            tolerance = max(abs(previous_value.value) * 0.01, 1e-12)
-            if change > tolerance:
-                direction = "INCREASE"
-            elif change < -tolerance:
-                direction = "DECREASE"
-            else:
-                direction = "UNCHANGED"
-
-            if direction in {"INCREASE", "DECREASE"}:
-                delta_type = _typed_delta(current.event_type, direction)
-                sentiment = _directional_sentiment(current.event_type, direction)
-                # material_score means market importance, not bullishness. A large negative
-                # correction can be just as material as a positive one; direction belongs
-                # in effective_sentiment, while a verified numeric delta gets a small
-                # materiality bonus in either direction.
-                adjustment = 5.0
-                reason = f"comparable {previous_value.kind} changed from {previous_value.raw} to {current_value.raw}"
-            else:
-                delta_type = "MINOR_REVISION"
-                sentiment = "NEUTRAL"
-                adjustment = -20.0
-                reason = f"comparable {previous_value.kind} is effectively unchanged"
-
-            return DisclosureDeltaRecord(
-                event_id=current.event_id,
-                parent_event_id=parent.event_id,
-                is_revision=True,
+            return self._numeric_record(
+                current,
+                parent,
+                previous=previous_value.value,
+                latest=current_value.value,
+                kind=previous_value.kind,
+                source="event_numbers",
                 parent_match_method=parent_match_method,
                 parent_match_confidence=parent_match_confidence,
-                delta_type=delta_type,
-                delta_direction=direction,
-                previous_numbers=parent.numbers,
-                current_numbers=current.numbers,
-                numeric_kind=previous_value.kind,
-                previous_numeric_value=previous_value.value,
-                current_numeric_value=current_value.value,
-                numeric_change=change,
-                numeric_change_pct=round(pct, 4) if pct is not None else None,
-                effective_sentiment=sentiment,
-                score_adjustment=adjustment,
-                delta_reason=reason,
-                analysis_version=self.VERSION,
-                event_updated_at=current.event_updated_at,
             )
 
         if parent.numbers != current.numbers and (parent.numbers or current.numbers):
@@ -296,6 +452,7 @@ class DisclosureDeltaDetector:
             delta_reason=reason,
             analysis_version=self.VERSION,
             event_updated_at=current.event_updated_at,
+            detail_updated_at=current.detail_updated_at,
         )
 
 

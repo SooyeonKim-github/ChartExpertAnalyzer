@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Tuple
+from typing import Any, Tuple
 
 
 @dataclass(frozen=True)
@@ -20,6 +20,18 @@ class DisclosureDeltaInput:
     first_seen_at: str | None = None
     market_date: str | None = None
     event_updated_at: str | None = None
+    detail_event_key: str = ""
+    detail_contract_amount: float | None = None
+    detail_recent_sales: float | None = None
+    detail_sales_ratio: float | None = None
+    detail_counterparty: str = ""
+    detail_contract_subject: str = ""
+    detail_contract_start_date: str | None = None
+    detail_contract_end_date: str | None = None
+    correction_before: dict[str, Any] = field(default_factory=dict)
+    correction_after: dict[str, Any] = field(default_factory=dict)
+    detail_parse_status: str = ""
+    detail_updated_at: str | None = None
 
 
 @dataclass(frozen=True)
@@ -43,6 +55,7 @@ class DisclosureDeltaRecord:
     delta_reason: str
     analysis_version: str
     event_updated_at: str | None
+    detail_updated_at: str | None = None
 
 
 @dataclass

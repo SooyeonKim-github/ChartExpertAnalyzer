@@ -6,6 +6,7 @@ from pathlib import Path
 
 from ..disclosure_delta.models import DisclosureDeltaInput, DisclosureDeltaRecord
 from .database import Database
+from .disclosure_detail_repository import DISCLOSURE_DETAIL_SCHEMA
 
 
 DISCLOSURE_DELTA_SCHEMA = """
@@ -29,6 +30,7 @@ CREATE TABLE IF NOT EXISTS disclosure_deltas (
     delta_reason TEXT,
     analysis_version TEXT NOT NULL,
     event_updated_at TEXT,
+    detail_updated_at TEXT,
     created_at TEXT DEFAULT CURRENT_TIMESTAMP,
     updated_at TEXT DEFAULT CURRENT_TIMESTAMP
 );
@@ -37,13 +39,26 @@ CREATE INDEX IF NOT EXISTS idx_disclosure_deltas_type ON disclosure_deltas(delta
 CREATE INDEX IF NOT EXISTS idx_disclosure_deltas_revision ON disclosure_deltas(is_revision);
 """
 
+DETAIL_SELECT = (
+    "dd.detail_event_key AS detail_event_key,dd.contract_amount AS detail_contract_amount,"
+    "dd.recent_sales AS detail_recent_sales,dd.sales_ratio AS detail_sales_ratio,"
+    "dd.counterparty AS detail_counterparty,dd.contract_subject AS detail_contract_subject,"
+    "dd.contract_start_date AS detail_contract_start_date,dd.contract_end_date AS detail_contract_end_date,"
+    "dd.correction_before_json AS correction_before_json,dd.correction_after_json AS correction_after_json,"
+    "dd.parse_status AS detail_parse_status,dd.updated_at AS detail_updated_at "
+)
+
 
 class DisclosureDeltaRepository:
     def __init__(self, database: Database):
         self.database = database
         self.database.initialize()
         with self.database.connect() as conn:
+            conn.executescript(DISCLOSURE_DETAIL_SCHEMA)
             conn.executescript(DISCLOSURE_DELTA_SCHEMA)
+            cols = {row[1] for row in conn.execute("PRAGMA table_info(disclosure_deltas)")}
+            if "detail_updated_at" not in cols:
+                conn.execute("ALTER TABLE disclosure_deltas ADD COLUMN detail_updated_at TEXT")
 
     def clear_all(self):
         with self.database.connect() as conn:
@@ -57,12 +72,15 @@ class DisclosureDeltaRepository:
 
     def get_pending_events(self, *, analysis_version: str, limit: int | None = None):
         sql = (
-            "SELECT e.* FROM material_events e "
-            "LEFT JOIN disclosure_deltas d ON d.event_id = e.event_id "
-            "LEFT JOIN articles a ON a.article_id = e.representative_article_id "
-            "WHERE (e.original_source_id IN ('DART','KIND') OR COALESCE(a.article_class,'') = 'DISCLOSURE') "
-            "AND (d.event_id IS NULL OR d.analysis_version <> ? "
-            "OR COALESCE(d.event_updated_at,'') <> COALESCE(e.updated_at,'')) "
+            "SELECT e.*," + DETAIL_SELECT +
+            "FROM material_events e "
+            "LEFT JOIN disclosure_details dd ON dd.event_id=e.event_id "
+            "LEFT JOIN disclosure_deltas d ON d.event_id=e.event_id "
+            "LEFT JOIN articles a ON a.article_id=e.representative_article_id "
+            "WHERE (e.original_source_id IN ('DART','KIND') OR COALESCE(a.article_class,'')='DISCLOSURE') "
+            "AND (d.event_id IS NULL OR d.analysis_version<>? "
+            "OR COALESCE(d.event_updated_at,'')<>COALESCE(e.updated_at,'') "
+            "OR COALESCE(d.detail_updated_at,'')<>COALESCE(dd.updated_at,'')) "
             "ORDER BY COALESCE(e.first_seen_at,e.created_at) ASC,e.event_id ASC"
         )
         params: list[object] = [analysis_version]
@@ -72,20 +90,32 @@ class DisclosureDeltaRepository:
         with self.database.connect() as conn:
             return conn.execute(sql, tuple(params)).fetchall()
 
+    def find_detail_key_parent(self, event: DisclosureDeltaInput):
+        if not event.detail_event_key:
+            return None
+        sql = (
+            "SELECT e.*," + DETAIL_SELECT +
+            "FROM material_events e JOIN disclosure_details dd ON dd.event_id=e.event_id "
+            "WHERE e.event_id<>? AND dd.detail_event_key=? "
+            "AND COALESCE(e.first_seen_at,e.created_at)<=COALESCE(?,COALESCE(e.first_seen_at,e.created_at)) "
+            "ORDER BY COALESCE(e.first_seen_at,e.created_at) DESC,e.event_id DESC LIMIT 1"
+        )
+        with self.database.connect() as conn:
+            return conn.execute(sql, (event.event_id,event.detail_event_key,event.first_seen_at)).fetchone()
+
     def find_exact_canonical_parent(self, event: DisclosureDeltaInput):
         if not event.canonical_event_key:
             return None
         sql = (
-            "SELECT * FROM material_events WHERE event_id <> ? AND canonical_event_key = ? "
-            "AND COALESCE(first_seen_at,created_at) <= COALESCE(?,COALESCE(first_seen_at,created_at)) "
-            "ORDER BY COALESCE(first_seen_at,created_at) DESC,event_id DESC LIMIT 2"
+            "SELECT e.*," + DETAIL_SELECT +
+            "FROM material_events e LEFT JOIN disclosure_details dd ON dd.event_id=e.event_id "
+            "WHERE e.event_id<>? AND e.canonical_event_key=? "
+            "AND COALESCE(e.first_seen_at,e.created_at)<=COALESCE(?,COALESCE(e.first_seen_at,e.created_at)) "
+            "ORDER BY COALESCE(e.first_seen_at,e.created_at) DESC,e.event_id DESC LIMIT 2"
         )
         with self.database.connect() as conn:
-            rows = conn.execute(
-                sql,
-                (event.event_id, event.canonical_event_key, event.first_seen_at),
-            ).fetchall()
-        return rows[0] if len(rows) == 1 else None
+            rows = conn.execute(sql,(event.event_id,event.canonical_event_key,event.first_seen_at)).fetchall()
+        return rows[0] if len(rows)==1 else None
 
     def find_revision_candidates(
         self,
@@ -94,44 +124,39 @@ class DisclosureDeltaRepository:
         start_market_date: str | None = None,
         limit: int = 50,
     ):
-        companies_json = json.dumps(event.companies, ensure_ascii=False)
-        stock_codes_json = json.dumps(event.stock_codes, ensure_ascii=False)
+        companies_json = json.dumps(event.companies,ensure_ascii=False)
+        stock_codes_json = json.dumps(event.stock_codes,ensure_ascii=False)
         sql = (
-            "SELECT * FROM material_events WHERE event_id <> ? AND event_type = ? "
-            "AND original_source_id IN ('DART','KIND') "
-            "AND COALESCE(first_seen_at,created_at) <= COALESCE(?,COALESCE(first_seen_at,created_at)) "
-            "AND ((? <> '[]' AND stock_codes_json = ?) OR (? <> '[]' AND companies_json = ?)) "
+            "SELECT e.*," + DETAIL_SELECT +
+            "FROM material_events e LEFT JOIN disclosure_details dd ON dd.event_id=e.event_id "
+            "WHERE e.event_id<>? AND e.event_type=? AND e.original_source_id IN ('DART','KIND') "
+            "AND COALESCE(e.first_seen_at,e.created_at)<=COALESCE(?,COALESCE(e.first_seen_at,e.created_at)) "
+            "AND ((? <> '[]' AND e.stock_codes_json=?) OR (? <> '[]' AND e.companies_json=?)) "
         )
         params: list[object] = [
-            event.event_id,
-            event.event_type,
-            event.first_seen_at,
-            stock_codes_json,
-            stock_codes_json,
-            companies_json,
-            companies_json,
+            event.event_id,event.event_type,event.first_seen_at,
+            stock_codes_json,stock_codes_json,companies_json,companies_json,
         ]
         if start_market_date:
-            sql += "AND COALESCE(market_date,'') >= ? "
+            sql += "AND COALESCE(e.market_date,'')>=? "
             params.append(start_market_date)
-        sql += "ORDER BY COALESCE(first_seen_at,created_at) DESC,event_id DESC LIMIT ?"
+        sql += "ORDER BY COALESCE(e.first_seen_at,e.created_at) DESC,e.event_id DESC LIMIT ?"
         params.append(int(limit))
         with self.database.connect() as conn:
-            return conn.execute(sql, tuple(params)).fetchall()
+            return conn.execute(sql,tuple(params)).fetchall()
 
     def upsert(self, record: DisclosureDeltaRecord) -> str:
         with self.database.connect() as conn:
             existed = conn.execute(
-                "SELECT 1 FROM disclosure_deltas WHERE event_id=? LIMIT 1",
-                (record.event_id,),
+                "SELECT 1 FROM disclosure_deltas WHERE event_id=? LIMIT 1",(record.event_id,)
             ).fetchone() is not None
             conn.execute(
                 "INSERT INTO disclosure_deltas("
                 "event_id,parent_event_id,is_revision,parent_match_method,parent_match_confidence,"
                 "delta_type,delta_direction,previous_numbers_json,current_numbers_json,numeric_kind,"
                 "previous_numeric_value,current_numeric_value,numeric_change,numeric_change_pct,"
-                "effective_sentiment,score_adjustment,delta_reason,analysis_version,event_updated_at"
-                ") VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?) "
+                "effective_sentiment,score_adjustment,delta_reason,analysis_version,event_updated_at,detail_updated_at"
+                ") VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?) "
                 "ON CONFLICT(event_id) DO UPDATE SET "
                 "parent_event_id=excluded.parent_event_id,is_revision=excluded.is_revision,"
                 "parent_match_method=excluded.parent_match_method,parent_match_confidence=excluded.parent_match_confidence,"
@@ -142,27 +167,15 @@ class DisclosureDeltaRepository:
                 "numeric_change_pct=excluded.numeric_change_pct,effective_sentiment=excluded.effective_sentiment,"
                 "score_adjustment=excluded.score_adjustment,delta_reason=excluded.delta_reason,"
                 "analysis_version=excluded.analysis_version,event_updated_at=excluded.event_updated_at,"
-                "updated_at=CURRENT_TIMESTAMP",
+                "detail_updated_at=excluded.detail_updated_at,updated_at=CURRENT_TIMESTAMP",
                 (
-                    record.event_id,
-                    record.parent_event_id,
-                    int(record.is_revision),
-                    record.parent_match_method,
-                    record.parent_match_confidence,
-                    record.delta_type,
-                    record.delta_direction,
-                    json.dumps(record.previous_numbers, ensure_ascii=False),
-                    json.dumps(record.current_numbers, ensure_ascii=False),
-                    record.numeric_kind,
-                    record.previous_numeric_value,
-                    record.current_numeric_value,
-                    record.numeric_change,
-                    record.numeric_change_pct,
-                    record.effective_sentiment,
-                    record.score_adjustment,
-                    record.delta_reason,
-                    record.analysis_version,
-                    record.event_updated_at,
+                    record.event_id,record.parent_event_id,int(record.is_revision),record.parent_match_method,
+                    record.parent_match_confidence,record.delta_type,record.delta_direction,
+                    json.dumps(record.previous_numbers,ensure_ascii=False),
+                    json.dumps(record.current_numbers,ensure_ascii=False),record.numeric_kind,
+                    record.previous_numeric_value,record.current_numeric_value,record.numeric_change,
+                    record.numeric_change_pct,record.effective_sentiment,record.score_adjustment,
+                    record.delta_reason,record.analysis_version,record.event_updated_at,record.detail_updated_at,
                 ),
             )
         return "UPDATED" if existed else "INSERTED"
@@ -171,12 +184,10 @@ class DisclosureDeltaRepository:
         with self.database.connect() as conn:
             return int(conn.execute("SELECT COUNT(*) AS cnt FROM disclosure_deltas").fetchone()["cnt"])
 
-    def delta_type_counts(self) -> dict[str, int]:
+    def delta_type_counts(self) -> dict[str,int]:
         with self.database.connect() as conn:
-            rows = conn.execute(
-                "SELECT delta_type,COUNT(*) AS cnt FROM disclosure_deltas GROUP BY delta_type"
-            ).fetchall()
-        return {row["delta_type"]: int(row["cnt"]) for row in rows}
+            rows = conn.execute("SELECT delta_type,COUNT(*) AS cnt FROM disclosure_deltas GROUP BY delta_type").fetchall()
+        return {row["delta_type"]:int(row["cnt"]) for row in rows}
 
     @staticmethod
     def _json_pipe(value: str | None) -> str:
@@ -184,57 +195,54 @@ class DisclosureDeltaRepository:
             return ""
         try:
             parsed = json.loads(value)
-        except (TypeError, json.JSONDecodeError):
+        except (TypeError,json.JSONDecodeError):
             return str(value)
-        return "|".join(str(x) for x in parsed) if isinstance(parsed, list) else str(value)
+        return "|".join(str(x) for x in parsed) if isinstance(parsed,list) else str(value)
 
-    def export_report(self, path: str | Path) -> Path:
+    def export_report(self,path: str | Path) -> Path:
         output = Path(path)
-        output.parent.mkdir(parents=True, exist_ok=True)
+        output.parent.mkdir(parents=True,exist_ok=True)
         with self.database.connect() as conn:
             rows = conn.execute(
                 "SELECT d.*,e.market_date,e.canonical_event_key,e.document_signature,e.event_type,e.event_title,"
-                "e.positive_negative,e.companies_json,e.stock_codes_json "
+                "e.positive_negative,e.companies_json,e.stock_codes_json,dd.detail_event_key,dd.contract_amount,"
+                "dd.sales_ratio,dd.counterparty,dd.contract_subject,dd.contract_start_date,dd.contract_end_date,"
+                "dd.parse_status AS detail_parse_status,dd.parse_confidence AS detail_parse_confidence "
                 "FROM disclosure_deltas d JOIN material_events e ON e.event_id=d.event_id "
+                "LEFT JOIN disclosure_details dd ON dd.event_id=d.event_id "
                 "ORDER BY e.market_date DESC,d.is_revision DESC,e.event_id ASC"
             ).fetchall()
         fields = [
-            "event_id","parent_event_id","market_date","canonical_event_key","document_signature","event_type",
-            "is_revision","parent_match_method","parent_match_confidence","delta_type","delta_direction",
+            "event_id","parent_event_id","market_date","canonical_event_key","detail_event_key","document_signature",
+            "event_type","is_revision","parent_match_method","parent_match_confidence","delta_type","delta_direction",
             "original_sentiment","effective_sentiment","score_adjustment","numeric_kind","previous_numeric_value",
-            "current_numeric_value","numeric_change","numeric_change_pct","previous_numbers","current_numbers",
-            "companies","stock_codes","event_title","delta_reason","analysis_version",
+            "current_numeric_value","numeric_change","numeric_change_pct","contract_amount","sales_ratio","counterparty",
+            "contract_subject","contract_start_date","contract_end_date","detail_parse_status","detail_parse_confidence",
+            "previous_numbers","current_numbers","companies","stock_codes","event_title","delta_reason","analysis_version",
         ]
-        with output.open("w", encoding="utf-8-sig", newline="") as fp:
-            writer = csv.DictWriter(fp, fieldnames=fields)
+        with output.open("w",encoding="utf-8-sig",newline="") as fp:
+            writer = csv.DictWriter(fp,fieldnames=fields)
             writer.writeheader()
             for row in rows:
                 writer.writerow({
-                    "event_id": row["event_id"],
-                    "parent_event_id": row["parent_event_id"],
-                    "market_date": row["market_date"],
-                    "canonical_event_key": row["canonical_event_key"],
-                    "document_signature": row["document_signature"],
-                    "event_type": row["event_type"],
-                    "is_revision": row["is_revision"],
-                    "parent_match_method": row["parent_match_method"],
-                    "parent_match_confidence": row["parent_match_confidence"],
-                    "delta_type": row["delta_type"],
-                    "delta_direction": row["delta_direction"],
-                    "original_sentiment": row["positive_negative"],
-                    "effective_sentiment": row["effective_sentiment"],
-                    "score_adjustment": row["score_adjustment"],
-                    "numeric_kind": row["numeric_kind"],
-                    "previous_numeric_value": row["previous_numeric_value"],
-                    "current_numeric_value": row["current_numeric_value"],
-                    "numeric_change": row["numeric_change"],
-                    "numeric_change_pct": row["numeric_change_pct"],
-                    "previous_numbers": self._json_pipe(row["previous_numbers_json"]),
-                    "current_numbers": self._json_pipe(row["current_numbers_json"]),
-                    "companies": self._json_pipe(row["companies_json"]),
-                    "stock_codes": self._json_pipe(row["stock_codes_json"]),
-                    "event_title": row["event_title"],
-                    "delta_reason": row["delta_reason"],
-                    "analysis_version": row["analysis_version"],
+                    "event_id":row["event_id"],"parent_event_id":row["parent_event_id"],"market_date":row["market_date"],
+                    "canonical_event_key":row["canonical_event_key"],"detail_event_key":row["detail_event_key"],
+                    "document_signature":row["document_signature"],"event_type":row["event_type"],
+                    "is_revision":row["is_revision"],"parent_match_method":row["parent_match_method"],
+                    "parent_match_confidence":row["parent_match_confidence"],"delta_type":row["delta_type"],
+                    "delta_direction":row["delta_direction"],"original_sentiment":row["positive_negative"],
+                    "effective_sentiment":row["effective_sentiment"],"score_adjustment":row["score_adjustment"],
+                    "numeric_kind":row["numeric_kind"],"previous_numeric_value":row["previous_numeric_value"],
+                    "current_numeric_value":row["current_numeric_value"],"numeric_change":row["numeric_change"],
+                    "numeric_change_pct":row["numeric_change_pct"],"contract_amount":row["contract_amount"],
+                    "sales_ratio":row["sales_ratio"],"counterparty":row["counterparty"],
+                    "contract_subject":row["contract_subject"],"contract_start_date":row["contract_start_date"],
+                    "contract_end_date":row["contract_end_date"],"detail_parse_status":row["detail_parse_status"],
+                    "detail_parse_confidence":row["detail_parse_confidence"],
+                    "previous_numbers":self._json_pipe(row["previous_numbers_json"]),
+                    "current_numbers":self._json_pipe(row["current_numbers_json"]),
+                    "companies":self._json_pipe(row["companies_json"]),"stock_codes":self._json_pipe(row["stock_codes_json"]),
+                    "event_title":row["event_title"],"delta_reason":row["delta_reason"],
+                    "analysis_version":row["analysis_version"],
                 })
         return output

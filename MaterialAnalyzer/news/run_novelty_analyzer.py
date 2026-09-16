@@ -4,13 +4,20 @@ import argparse
 from pathlib import Path
 
 from .disclosure_delta import DisclosureDeltaAnalyzer
+from .disclosure_detail import DisclosureDetailAnalyzer
 from .novelty import NoveltyAnalyzer
-from .storage import Database, DisclosureDeltaRepository, NoveltyRepository
+from .storage import (
+    Database,
+    DisclosureDeltaRepository,
+    DisclosureDetailRepository,
+    NoveltyRepository,
+)
 
 
 ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_DB = ROOT / "data" / "news.db"
 DEFAULT_REPORT = ROOT / "data" / "novelty_report.csv"
+DEFAULT_DETAIL_REPORT = ROOT / "data" / "disclosure_detail_report.csv"
 DEFAULT_DELTA_REPORT = ROOT / "data" / "disclosure_delta_report.csv"
 
 
@@ -23,8 +30,15 @@ def run(
 ):
     database = Database(db_path)
 
-    # DisclosureDelta is a prerequisite of Novelty V1.2. Run it incrementally first so
-    # correction filings cannot fall through to fuzzy novelty matching as NEW_EVENT.
+    # Enrich DART ORDER_CONTRACT filings before delta analysis. If OPENDART_API_KEY is
+    # missing, the enricher reports skipped rows and the V1 delta fallback remains usable.
+    detail_repository = DisclosureDetailRepository(database)
+    detail_analyzer = DisclosureDetailAnalyzer(detail_repository)
+    detail_result = detail_analyzer.run(rebuild=False, limit=None)
+    detail_repository.export_report(DEFAULT_DETAIL_REPORT)
+
+    # DisclosureDelta is a prerequisite of Novelty V1.2. Structured detail is preferred,
+    # but the existing title/number fallbacks remain available for non-enriched filings.
     delta_repository = DisclosureDeltaRepository(database)
     delta_analyzer = DisclosureDeltaAnalyzer(delta_repository)
     delta_result = delta_analyzer.run(rebuild=False, limit=None)
@@ -34,12 +48,19 @@ def run(
     analyzer = NoveltyAnalyzer(repository)
 
     print("=" * 76)
-    print(" NoveltyAnalyzer V1.2 - Event Family + Disclosure Revision Guard")
+    print(" NoveltyAnalyzer V1.2 - Detail Enrichment + Disclosure Revision Guard")
     print("=" * 76)
     print(f"DB      : {db_path}")
     print(f"Report  : {output_path}")
     print(f"Mode    : {'REBUILD' if rebuild else 'INCREMENTAL'}")
-    print(f"Delta   : processed={delta_result.processed} revisions={delta_result.revisions} unresolved={delta_result.unresolved}")
+    print(
+        f"Detail  : processed={detail_result.processed} success={detail_result.success} "
+        f"partial={detail_result.partial} failed={detail_result.failed} skipped={detail_result.skipped}"
+    )
+    print(
+        f"Delta   : processed={delta_result.processed} revisions={delta_result.revisions} "
+        f"unresolved={delta_result.unresolved}"
+    )
     print("-" * 76)
 
     result = analyzer.run(rebuild=rebuild, limit=limit)
